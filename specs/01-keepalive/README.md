@@ -47,9 +47,19 @@ The message encodings (`[0, cookie]`, `[1, cookie]`, `[2]`) are in
 [`cardano-diffusion/protocols/cddl/specs/keep-alive.cddl`](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/cardano-diffusion/protocols/cddl/specs/keep-alive.cddl);
 the model does not need them.
 
-The rendered specification is published as a PDF at
-<https://ouroboros-network.cardano.intersectmbo.org/pdfs/network-spec/network-spec.pdf>,
-but that always shows the latest version; cite the pinned source above.
+### Rendered versions (easier to read)
+
+| Ref | Rendered |
+| --- | --- |
+| S1 | [Network specification PDF](https://ouroboros-network.cardano.intersectmbo.org/pdfs/network-spec/network-spec.pdf), section 3.2 "Protocols as State Machines", page 10 |
+| S2 | Same PDF, section 3.10 "Keep Alive Mini Protocol", page 33 |
+| S3 | [Haddock for `Ouroboros.Network.Protocol.KeepAlive.Type`](https://ouroboros-network.cardano.intersectmbo.org/ouroboros-network/protocols/Ouroboros-Network-Protocol-KeepAlive-Type.html) |
+
+The rendered site is rebuilt nightly from the `main` branch, so it always
+shows the latest version and the section and page numbers can move. Read it
+for convenience; cite the pinned source files above. When this was written
+(2026-11-23) the PDF matched the pinned commit: `miniprotocols.tex` last
+changed on 2026-11-05, before the PDF was built.
 
 ## What is new compared with the hello model
 
