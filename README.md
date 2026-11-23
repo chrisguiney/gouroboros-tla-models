@@ -24,7 +24,9 @@ Read these in order. Each one builds on the last.
 1. [Installing TLA+](docs/01-install.md): what `make install` does, editor setup, and troubleshooting.
 2. [Your first model](docs/02-first-model.md): `specs/00-hello/Hello.tla` line by line, and how to read TLC's output.
 3. [How this finds gouroboros bugs](docs/approach.md): the plan for turning models into Go tests.
-4. [Glossary](docs/glossary.md): keep it open while you read anything else.
+4. [Model 01: keep-alive](specs/01-keepalive/README.md): the first real
+   gouroboros model, the Go tests it drove, and what it found.
+5. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 ## What is in the repository
 

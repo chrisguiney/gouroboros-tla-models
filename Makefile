@@ -5,10 +5,12 @@ SHELL := bash
 # is an intentionally broken teaching example and is expected to FAIL.
 CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
-.PHONY: help install hello hello-bug check clean
+KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
+
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs check clean
 
 help: ## Show this list
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-10s %s\n", $$1, $$2}'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
 
 install: ## Download Java + TLA+ tools into .tools/ (no sudo)
 	@scripts/install-tla.sh
@@ -18,6 +20,17 @@ hello: ## Check the hello-world model (proves the install works)
 
 hello-bug: ## Watch TLC catch a bug and print the steps that cause it
 	cd specs/00-hello && ../../bin/tlc -config HelloBug.cfg Hello.tla || true
+
+keepalive: ## Check the keep-alive model, with honest and with rogue peers
+	$(KEEPALIVE) -config KeepAlive.cfg KeepAlive.tla
+	$(KEEPALIVE) -config KeepAliveRogue.cfg KeepAlive.tla
+
+keepalive-table: ## Print the keep-alive receive rule that the Go tests mirror
+	@$(KEEPALIVE) -config KeepAliveTable.cfg KeepAliveTable.tla | grep '^<<'
+
+keepalive-bugs: ## Show the two keep-alive counterexamples (expected to fail)
+	$(KEEPALIVE) -config KeepAliveRogueBug.cfg KeepAlive.tla || true
+	$(KEEPALIVE) -config KeepAliveNoTimeoutBug.cfg KeepAlive.tla || true
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \
