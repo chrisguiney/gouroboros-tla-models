@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Shared by the other bin/ wrappers: runs a class from tla2tools.jar using the
+# Java that `make install` downloaded, falling back to the java on PATH.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+JAR="$ROOT/.tools/tla2tools.jar"
+JAVA="$ROOT/.tools/jdk/bin/java"
+[[ -x "$JAVA" ]] || JAVA="$(command -v java || true)"
+if [[ ! -f "$JAR" || -z "$JAVA" ]]; then
+  echo "TLA+ is not installed yet. Run: make install" >&2
+  exit 1
+fi
+exec "$JAVA" -XX:+UseParallelGC -cp "$JAR" "$@"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# SANY, the parser: checks a spec for syntax and naming errors without running
+# it. The TLA+ equivalent of `go vet`.
+# Usage: bin/sany Spec.tla
+exec "$(dirname "${BASH_SOURCE[0]}")/_java" tla2sany.SANY "$@"

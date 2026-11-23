@@ -1,0 +1,7 @@
+# Downloaded Java and TLA+ tools. Recreate with `make install`.
+/.tools/
+
+# TLC scratch output: explored-state files and generated error-trace specs.
+states/
+*_TTrace_*.tla
+*_TTrace_*.bin

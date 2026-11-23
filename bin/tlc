@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# TLC, the model checker: explores every reachable state of a spec and reports
+# any state that breaks a rule you asked it to check.
+# Usage: bin/tlc -config Spec.cfg Spec.tla
+exec "$(dirname "${BASH_SOURCE[0]}")/_java" tlc2.TLC "$@"

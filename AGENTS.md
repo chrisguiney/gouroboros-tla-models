@@ -1,0 +1,18 @@
+# Agent instructions
+
+This repository holds TLA+ models of gouroboros mini-protocols. Its audience
+is engineers who are new to TLA+, so readability beats cleverness.
+
+- Install tools with `make install`; never install Java or TLA+ system-wide.
+- Run `make check` before committing a model. It checks every `.cfg` under
+  `specs/` except `*Bug.cfg`, which are intentionally failing teaching
+  examples.
+- One directory per model under `specs/`, numbered in learning order.
+- Comment every new TLA+ construct the first time a model uses it, and link
+  the doc that explains it. Add new terms to `docs/glossary.md`.
+- Name the gouroboros file a model is based on (for example
+  `protocol/keepalive/keepalive.go`) in the module header comment.
+- A counterexample that reflects a real gouroboros behavior becomes a Go test
+  in gouroboros, through that repository's normal issue and pull-request
+  process. This repository does not hold Go code.
+- Conventional Commits with DCO sign-off (`git commit -s`).
