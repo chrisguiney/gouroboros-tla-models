@@ -90,6 +90,11 @@ Plain-language definitions, with a Go comparison where one helps.
 : The value of `x` in the **next** state. `x' = x + 1` means "after this step,
   x is one bigger".
 
+**Record (`[a |-> x, b |-> y]`)**
+: A value with named fields, like a Go struct. `m.a` reads a field. The
+  keep-alive model's messages are records with `type`, `cookie`, and
+  `oversized` fields.
+
 **Safety**
 : A property that something bad **never** happens. Invariants are safety
   properties.

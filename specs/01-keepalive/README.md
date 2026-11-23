@@ -29,11 +29,11 @@ after another: when a run ends in `StDone`, a new one can start in `StClient`
 (sources S4 to S6 below).
 
 In gOuroboros the table is `StateMap` in `protocol/keepalive/keepalive.go`.
-The model's rules are checked against the sources below rather than taken from
-`StateMap`, so comparing the two means something. (The first draft was written
-from memory and checked against the sources afterwards. One rule was wrong,
-and checking it found a gOuroboros bug: see
-[Settled: messages after Done](#settled-messages-after-done).)
+The model follows the specification wherever it speaks, and the reference
+implementation where it is silent, rather than `StateMap`, so comparing the
+two means something. (The first draft was written from memory and checked
+against the sources afterwards. One rule was wrong, and checking it found a
+gOuroboros bug: see [The bug](#the-bug).)
 
 ## Sources
 
@@ -83,48 +83,78 @@ state each side *believes* the protocol is in. Messages travel through
 bugs live, and the invariant `ViewsAgreeWhenQuiet` checks that it always
 closes.
 
-**The receive rule.** Within a run, `Receive(r, s, m)` says what side `r` must
-do when message `m` arrives while it believes the state is `s`:
+**Messages are records.** A message is
+`[type |-> "MsgKeepAlive", cookie |-> 0, oversized |-> FALSE]`, like a Go
+struct. Two cookie values are enough to tell a matching cookie from a wrong
+one, and `oversized` stands for "bigger than the state's 65535-byte limit"
+without modelling sizes.
 
-1. If the peer had agency and `s` has a transition for `m`, accept it. (S1, S2)
-2. Otherwise it is a **violation**: hang up. (S1)
+**Reading only when it is the peer's turn.** A side reads its inbox only while
+its peer has agency (S8). A message that arrives early waits, and is judged
+when it is finally read, against the state at that moment (S9).
+
+**Judging a message** (`Judge`). When a side reads a message:
+
+1. Over the size limit: tear down (S2).
+2. Not legal in the reader's state: abort (S1).
+3. A response whose cookie does not match the ping: protocol error (S2).
+4. Otherwise follow the transition (S2).
 
 **Runs.** After `StDone` no run is reading. `ClientRestart` lets the client
 start another run (S5, up to `MaxRuns`). A server restarts when a message
-arrives, and the new run reads it starting from `StClient` (S6). Messages for
-a client with no new run stay in its inbox, unread (S4). `ReceiveTable` puts
-all of this in one table, printed by `make keepalive-table`.
+arrives, and the new run reads it starting from `StClient` (S7, S6). Messages
+for a client with no new run stay in its inbox, unread (S4).
 
-**A switch for gOuroboros's behavior.** `ServerRestarts = TRUE` is the reference
-behavior. `ServerRestarts = FALSE` is gOuroboros today, whose keep-alive server
-never restarts.
+**Switches.**
 
-**A misbehaving peer.** `Inject` lets a rogue peer push any message into any
-inbox at any time, up to `RogueMessages` times. This is how the model asks
-"what happens if the other side breaks the rules?"
+| Constant | `TRUE` | `FALSE` |
+| --- | --- | --- |
+| `ServerRestarts` | The specification (S7) | gOuroboros today: the bug |
+| `UseTimeouts` | The state timeouts of S2 are in force | No timeouts, to show why they exist |
+| `SlowPeers` | A peer may be slower than the timeout allows, so a timeout may fire whenever a side is waiting | Peers answer in time; a timeout fires only when nothing could ever arrive |
 
-**Timeouts.** `Timeout` fires only when a side is waiting for its peer and
-nothing else can ever happen. Turning timeouts off shows why they are needed.
+**A misbehaving peer.** `Inject` lets a rogue peer push any message (any type,
+either cookie, oversized or not) into any inbox at any time, up to
+`RogueMessages` times.
 
 New TLA+ syntax is explained in comments the first time it appears, and in the
 [glossary](../../docs/glossary.md).
 
+## The receive table
+
+`make keepalive-table` prints what happens to every kind of message, for each
+role and state: 2 roles x 3 states x 5 kinds = 30 cells. The kinds are
+`MsgKeepAlive`, `MsgKeepAliveResponse` (right cookie), `WrongCookieResponse`,
+`MsgDone`, and `Oversized`. Besides a new state or `Violation`, a cell can be:
+
+- **`Waits`**: the reader holds agency, so it does not read the message yet.
+  It is judged when the peer next holds agency. All 10 cells where the reader
+  holds agency are `Waits`.
+- **`Held`**: the client's run is over and nothing reads the message.
+
+After `MsgDone` a server judges the message as the first of a new run, in
+`StClient`.
+
 ## Run it
 
 ```sh
-make keepalive         # honest peers, and rogue peers: both pass
-make keepalive-table   # print the 18-cell receive table
+make keepalive         # honest, slow, and rogue peers: all pass
+make keepalive-table   # print the 30-cell receive table
 make keepalive-bugs    # the deliberately failing configs, with traces
 ```
 
 | Config | Checks | Result |
 | --- | --- | --- |
-| `KeepAlive.cfg` | Two honest peers, up to two runs: no failures, one message in flight per run, never both have agency, views agree, only legal moves, failures are final. | Passes: 61 distinct states. |
-| `KeepAliveRogue.cfg` | Up to two rogue messages: still only legal moves, failures final, and no deadlock. | Passes: 3,253 distinct states. |
-| `KeepAliveGouroborosBug.cfg` | Honest peers, but the server does not restart (gOuroboros today). | **Fails after 5 steps**: see below. |
-| `KeepAliveRogueBug.cfg` | Claims a rogue message never causes a hang-up. | Fails after 2 steps: a rogue `MsgKeepAlive` sent *to the client*. |
+| `KeepAlive.cfg` | Two honest peers that answer in time, up to two runs: no failures, one message in flight per run, responses echo cookies, never both have agency, views agree, only legal moves, failures are final. | Passes: 130 distinct states. |
+| `KeepAliveSlow.cfg` | Honest but possibly slow peers: a timeout may end the connection, but never a protocol violation; only legal moves. | Passes: 272 distinct states. |
+| `KeepAliveRogue.cfg` | Up to two rogue messages of any kind: still only legal moves, failures final, and no deadlock. | Passes: 83,394 distinct states. |
+| `KeepAliveGouroborosBug.cfg` | Honest peers, but the server does not restart (gOuroboros today). | **Fails after 5 steps**: see [The bug](#the-bug). |
+| `KeepAliveRogueBug.cfg` | Claims a rogue message never causes a hang-up. | Fails after 3 steps: a rogue `MsgKeepAlive` sent *to the client* waits until the client pings, is then read while waiting for a response, and is a violation. |
 | `KeepAliveNoTimeoutBug.cfg` | Rogue peer, timeouts off. | **Deadlock**: after the client has finished for good, a rogue `MsgKeepAlive` restarts the server, which then waits for a client that will never speak. |
-| `KeepAliveTable.cfg` | Prints the receive table. | 18 rows. |
+| `KeepAliveTable.cfg` | Prints the receive table. | 30 rows. |
+
+`make keepalive` runs the first three; `make check` runs every config not
+named `*Bug.cfg`. The rogue check takes a few seconds; it is the largest.
 
 A first attempt at `KeepAlive.cfg` broke the invariant "only one message is
 ever in flight": a client can send `MsgDone`, start a new run, and send
@@ -138,14 +168,14 @@ teaching you something.
 
 The property `OnlyLegalMoves` says a side's state only changes along a row of
 the transition table, to a failure, or from `StDone` to the start of a new run.
-TLC checks it in every step of every behavior, including those with rogue
-messages. So, for example:
+TLC checks it in every step of every behavior, including those with slow and
+rogue peers. So, for example:
 
 - `StServer` is entered only by `MsgKeepAlive` in `StClient`.
 - `StDone` is entered only by `MsgDone` in `StClient`. Within a run it is never
   left; the next message belongs to a new run.
-- A side never accepts a message from a peer that did not have agency: it
-  hangs up instead.
+- No message is ever accepted with the wrong cookie, oversized, or in a state
+  that does not allow it.
 - A side that hung up stays hung up (`FailuresAreFinal`).
 
 ## Settled: messages after Done
@@ -162,14 +192,35 @@ and neither was right:
   client wishes to use the protocol again later" (S7). The inbound governor
   does exactly that (S6), and the multiplexer keeps any bytes that arrived
   after `MsgDone` for the next run (S4). So a message after `MsgDone` is the
-  first message of a **new run**, read in `StClient`: `MsgKeepAlive` is
-  answered, and an out-of-turn `MsgKeepAliveResponse` is a violation.
+  first message of a **new run**, read in `StClient`.
 - **Client**: nothing restarts it unless its owner starts a new run (S5). The
   bytes wait, unread, on its queue (S4). That is `Held` in the table.
 
-S1's rule applies within a run, to the run that is reading. The lesson for
-modelling: a rule's source can be in a different chapter from the protocol's
-own section, so search the whole specification before calling it silent.
+The lesson for modelling: a rule's source can be in a different chapter from
+the protocol's own section, so search the whole specification before calling
+it silent.
+
+## The bug
+
+**gOuroboros's keep-alive server never restarts after `MsgDone`**, which the
+specification requires (S7). Every other gOuroboros server with a `MsgDone`
+(chain-sync, block-fetch, tx-submission, peer-sharing, and the Leios servers)
+does: their `handleDone` calls `StopForRestart`, builds a new protocol
+instance, and starts it. The keep-alive server's `handleDone` only calls the
+optional `DoneFunc`.
+
+`KeepAliveGouroborosBug.cfg` shows what that does, with two honest peers:
+
+1. The client sends `MsgDone` and starts a second run on the same connection.
+2. The server reads the `MsgDone` and ends its run.
+3. The client sends `MsgKeepAlive`. The server never reads it. The client
+   waits, and times out.
+
+On a real connection that timeout is 60 s (S2), after which "the connection
+SHOULD be torn down": a peer that restarts keep-alive loses its whole
+connection to a gOuroboros node. The specification and reference
+implementation both support a new run on the same connection; this model has
+not established how often a real peer does it.
 
 ## Do the specification, the reference, and the model agree?
 
@@ -180,99 +231,72 @@ Checked on 2026-11-23 against the sources above.
 | States, messages, transitions | S2 | Same (S3) | Same | Same |
 | Agency per state | S2, S1 for `StDone` | Same (S3) | Same | Same |
 | Wrong message for the reader's state | Abort (S1) | Abort: "unexpected key" (S9) | Violation | Violation |
-| Message from a peer without agency | Not stated when it is judged | Not read until the peer has agency, then judged against that state (S8) | Violation at once | Violation at once |
-| Cookie mismatch | Protocol error (S2) | `KeepAliveCookieMissmatch` thrown (client) | Not modelled | Error (`client_cookie_test.go`) |
+| When a message from a peer without agency is judged | Not stated | When the peer next has agency, against that state (S8) | Same as reference (`Waits`) | On arrival: violation |
+| Cookie mismatch | Protocol error (S2) | `KeepAliveCookieMissmatch` thrown (client) | Violation | Error |
+| Over the size limit | Tear down (S2) | `smallByteLimit` (S9; value not checked) | Violation | Error |
 | Server after `MsgDone` | Restart (S7) | Restart (S4, S6) | Restart | **Does not restart: the bug** |
 | Client after `MsgDone` | Not stated | Bytes held for a next run (S4) | Held | Discarded |
-| Timeout, `StClient` | 97 s (S2) | 97 s (S9) | Fires only when stuck | 97 s |
-| Timeout, `StServer` | 60 s (S2) | 60 s, marked "should be 10s" (S9) | Fires only when stuck | 10 s by default (`WithTimeout`) |
-| Size limit per state | 65535 bytes (S2) | `smallByteLimit` (S9; its value was not checked) | Not modelled | 65535 bytes |
+| Timeouts | 97 s `StClient`, 60 s `StServer` (S2) | Same, `StServer` marked "should be 10s" (S9) | A slow peer may trigger either; no clock | 97 s; `StServer` 10 s by default (`WithTimeout`) |
 
-### Where the model departs from the reference
+The model now follows the specification wherever it speaks, and the reference
+implementation where it is silent.
 
-**When a message from the wrong side is judged.** The model, like gOuroboros,
-judges every message the moment it arrives, so a message from a peer without
-agency is a violation at once. The reference only reads when the peer has
-agency (S8); an early message waits and is judged against the state at that
-later read. Usually that is still a violation, just later: a `MsgDone` from
-the server is read in `StServer` and fails as an "unexpected key". But not
-always: a client that sends a second `MsgKeepAlive` before the first is
-answered gets both answered by the reference, while gOuroboros and this model
-hang up. That only happens with a misbehaving peer, and the specification does
-not say which is right, so it is recorded here rather than changed. Making the
-model match the reference would change the six "peer without agency" rows of
-the receive table.
+### Where gOuroboros differs without being wrong
 
-### Where the specification and the reference differ
-
-**The `StServer` timeout.** Both say 60 s, but the reference marks it
-`TODO: ... should be 10s`. gOuroboros's client already defaults to 10 s, so it
-gives up on a slow server sooner than the specification allows for. That is
-stricter, not broken.
-
-### The bug
-
-**gOuroboros's keep-alive server never restarts after `MsgDone`.** Every other
-gOuroboros server with a `MsgDone` (chain-sync, block-fetch, tx-submission,
-peer-sharing, and the Leios servers) does: their `handleDone` calls
-`StopForRestart`, builds a new protocol instance, and starts it. The
-keep-alive server's `handleDone` only calls the optional `DoneFunc`.
-
-`KeepAliveGouroborosBug.cfg` shows what that does, with two honest peers:
-
-1. The client sends `MsgDone`; the server reads it and ends its run.
-2. The client starts a second run on the same connection and sends
-   `MsgKeepAlive`.
-3. The server never reads it. The client waits, and times out.
-
-On a real connection that timeout is 60 s (S2), after which "the connection
-SHOULD be torn down": a peer that restarts keep-alive loses its whole
-connection to a gOuroboros node. S5 and S6 show that the reference
-implementation supports a new run on the same connection; this model has not
-yet established how often a real peer does it.
-
-The gOuroboros tests `TestServerReceiveMatchesModel/server/inDone/*` reproduce
-it: they fail against gOuroboros today and pass once the server restarts (a
-prototype restart following chain-sync's `handleDone` made them pass, and was
-then reverted).
+- **Early messages.** gOuroboros judges a message the moment it arrives, so a
+  message from a peer without agency is a violation at once; the reference
+  waits and judges it later. Usually both end in a violation, the reference
+  just later. But a client that sends a second `MsgKeepAlive` before the first
+  is answered gets both answered by the reference, while gOuroboros hangs up.
+  Only a misbehaving peer does this, and the specification does not say which
+  is right. These are the 10 `Waits` cells; the Go tests check gOuroboros's
+  stricter behavior there and say so.
+- **Client after `MsgDone`.** gOuroboros discards later messages; the
+  reference keeps them for a next run, and tears the connection down if too
+  many pile up. No visible effect while the gOuroboros client never restarts.
+- **The `StServer` timeout.** gOuroboros's client defaults to 10 s, the
+  value the reference's `TODO` asks for, where the specification says 60 s.
+  It gives up on a slow server sooner; stricter, not broken.
 
 ## The Go tests this model drove
 
-`protocol/keepalive/statemap_model_test.go` in gOuroboros:
+`protocol/keepalive/statemap_model_test.go` in gOuroboros holds the same 30
+cells as `make keepalive-table`.
 
 | Test | What it checks |
 | --- | --- |
-| `TestStateMapMatchesModel` | The 12 within-run receive cells against `StateMap`, including cells no running program can reach. |
-| `TestServerReceiveMatchesModel` | A running server in `StClient`, and after `MsgDone`, sent every message. The after-`MsgDone` cases fail today: that is the bug. |
-| `TestClientReceiveMatchesModel` | A running client in `StClient`, `StServer`, and `StDone`, sent every message. |
+| `TestStateMapMatchesModel` | The within-run cells against `StateMap`, including cells no running program can reach. Cookie cells are left to the running tests, since the client checks cookies, not `StateMap`. |
+| `TestReceiveMatchesModel` | Every cell a running client or server can rest in (25 of 30; a server never rests in `StServer`): drive it there, send the message, check the outcome. |
 | `TestDoneCannotBeLeft` | No transition leaves `StDone` within a run; only `MsgDone` in `StClient` enters it. |
 | `TestClientTimesOutWhenServerFallsSilent` | S2's `StServer` timeout: a client whose ping is never answered gives up. |
+| `TestStateMapTimeoutsMatchSpec` | The per-state timeouts are 97 s and 60 s. |
 
-The tests were shown to fail when gOuroboros was deliberately broken: adding a
-`MsgDone` transition to `StServer`, and letting a message through without
-agency.
+Against gOuroboros today, exactly six cells fail, all from the bug: the server
+after `MsgDone` (five kinds), and `MsgDone` followed by a new run. A prototype
+server restart, following chain-sync's `handleDone`, made all six pass and was
+then reverted. Every other cell was shown to fail when gOuroboros was
+deliberately broken: a `MsgDone` transition added to `StServer`, a message let
+through without agency, a client that ignores cookies, and a missing size
+limit.
 
 ## What the model found
 
 - **A bug**: the keep-alive server does not restart after `MsgDone`. See
   [The bug](#the-bug).
-- **gOuroboros matches the specification on all 12 within-run cells**, and the
-  client side after `MsgDone` matches the reference implementation (the
-  message is not processed and raises no error).
+- **gOuroboros follows the specification** on every within-run cell,
+  including cookies and size limits.
 - **The gOuroboros client never sends `MsgDone`.** The reference client sends
   it when told to terminate (`Ouroboros.Network.KeepAlive`, `Terminate ->
   SendMsgDone`), but nothing in the gOuroboros client API does, so a
   gOuroboros client never reaches `StDone`. The tests reach it by sending
   `MsgDone` directly.
-- A small difference with no visible effect yet: after `MsgDone` a gOuroboros
-  client discards later messages, while the reference implementation keeps
-  them for a next run (S4) and tears the connection down if too many pile up.
-- The model shows why the state timeouts exist: without them, one stray
-  message can hang a connection forever.
+- **Timeouts are needed**: without them one stray message can hang a
+  connection forever (`KeepAliveNoTimeoutBug.cfg`), and a slow but honest peer
+  never causes a protocol violation, only a timeout (`KeepAliveSlow.cfg`).
 
 ## Not modelled yet
 
-Cookies (S2: "It is a protocol error if the cookie received back with
-MsgKeepAliveResponse does not match"; gOuroboros already tests this in
-`client_cookie_test.go`), real time, message sizes, ingress queue limits, and
-the goroutines inside gOuroboros. Those come later, one at a time.
+Real time (the model has no clock, so it cannot check that the client's ping
+interval is shorter than the server's 97 s timeout), exact message sizes,
+ingress queue limits, and the goroutines inside gOuroboros. Those come later,
+one at a time.

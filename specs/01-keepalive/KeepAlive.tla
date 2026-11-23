@@ -1,40 +1,36 @@
 ----------------------------- MODULE KeepAlive -----------------------------
 (***************************************************************************)
-(* The keep-alive mini-protocol, at the state-machine level, including     *)
-(* what happens when a run ends and a new one starts on the same           *)
-(* connection.                                                             *)
+(* The keep-alive mini-protocol: states, agency, cookies, size limits,     *)
+(* timeouts, and runs that end and restart on the same connection.         *)
 (*                                                                         *)
-(* Sources, all at IntersectMBO/ouroboros-network commit 5f356486ab3e.     *)
-(* specs/01-keepalive/README.md has links and quotes.                      *)
-(*   [S1] docs/network-spec/miniprotocols.tex 27-36, 96-98: one side has   *)
-(*        agency at a time; an unexpected message aborts the connection.   *)
-(*   [S2] docs/network-spec/miniprotocols.tex 1560-1650: keep-alive states,*)
-(*        transitions, agency, cookie rule, timeouts.                      *)
-(*   [S3] .../Protocol/KeepAlive/Type.hs 89-106: message types, and        *)
-(*        StateAgency StDone = NobodyAgency.                               *)
-(*   [S4] network-mux/src/Network/Mux.hs 362-378, 512: a run that ends     *)
-(*        puts its unread bytes back in the queue for the next run; the    *)
-(*        mux does not restart it.                                         *)
+(* Every rule follows the specification. Where the specification is       *)
+(* silent, the model follows the reference implementation and says so.    *)
+(*                                                                         *)
+(* Sources. IntersectMBO/ouroboros-network commit 5f356486ab3e unless      *)
+(* noted; specs/01-keepalive/README.md has links and quotes.               *)
+(*   Specification (docs/network-spec/):                                   *)
+(*   [S1] miniprotocols.tex 27-36, 96-98: one side has agency at a time;   *)
+(*        an unexpected message aborts the connection.                     *)
+(*   [S2] miniprotocols.tex 1560-1650: keep-alive states, transitions,     *)
+(*        agency, cookie rule, size limits, timeouts.                      *)
+(*   [S7] connection-manager.tex 489-503: a server-side mini-protocol that *)
+(*        terminates cleanly is restarted in its initial state.            *)
+(*   Reference implementation, used only where the specification is silent:*)
+(*   [S3] .../Protocol/KeepAlive/Type.hs 89-106: StDone = NobodyAgency.    *)
+(*   [S4] network-mux/src/Network/Mux.hs 362-378, 512: a finished run's    *)
+(*        unread bytes are kept for the next run.                          *)
 (*   [S5] network-mux/src/Network/Mux.hs 846-852: a finished mini-protocol *)
 (*        may be started again on the same connection.                     *)
-(*   [S6] ouroboros-network/framework/lib/Ouroboros/Network/               *)
-(*        InboundGovernor.hs 433-475: a responder (server) that ends       *)
-(*        cleanly is restarted.                                            *)
-(*   [S7] docs/network-spec/connection-manager.tex 489-503 (spec section   *)
-(*        5.7): the specification's own statement of [S6].                *)
+(*   [S6] .../InboundGovernor.hs 433-475: the server restart of [S7].      *)
 (*   [S8] IntersectMBO/typed-protocols 8fa4ed2f (1.2.2.0),                 *)
 (*        typed-protocols/src/Network/TypedProtocol/Driver.hs 145-176: a   *)
-(*        peer reads only at Await; trailing data is never an error.       *)
-(*   [S9] .../Protocol/KeepAlive/Codec.hs 58-116: decoding depends on the  *)
-(*        reader's state ("unexpected key" otherwise); 97s and 60s limits. *)
+(*        side reads only when its peer has agency.                        *)
+(*   [S9] .../Protocol/KeepAlive/Codec.hs 58-116: a message is decoded     *)
+(*        against the reader's state when it is read.                      *)
 (*                                                                         *)
 (* The gOuroboros code it is compared with is protocol/keepalive/          *)
-(* keepalive.go (StateMap), protocol/keepalive/server.go, and the receive  *)
-(* checks in protocol/protocol.go.                                         *)
-(*                                                                         *)
-(* Unlike the hello model, each side keeps ITS OWN copy of the protocol    *)
-(* state, and messages travel through an inbox. That is what lets the      *)
-(* model show the two sides agreeing, or disagreeing.                      *)
+(* keepalive.go (StateMap), client.go, server.go, and the receive checks   *)
+(* in protocol/protocol.go.                                                *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
 
@@ -42,87 +38,116 @@ CONSTANTS
     MaxPings,       \* how many pings the client may send (keeps the model finite)
     MaxRuns,        \* how many runs the client may start on one connection
     RogueMessages,  \* how many arbitrary messages a misbehaving peer may inject
-    UseTimeouts,    \* TRUE: a side stuck waiting for its peer gives up
-    ServerRestarts  \* TRUE: reference behavior [S6]. FALSE: gOuroboros today
+    UseTimeouts,    \* TRUE: the state timeouts of [S2] are in force
+    SlowPeers,      \* TRUE: a peer may be slower than the timeout allows
+    ServerRestarts  \* TRUE: the server restarts after MsgDone [S7]. FALSE: gOuroboros today
 
-Roles    == {"Client", "Server"}
-States   == {"StClient", "StServer", "StDone"}
-Messages == {"MsgKeepAlive", "MsgKeepAliveResponse", "MsgDone"}
+Roles     == {"Client", "Server"}
+States    == {"StClient", "StServer", "StDone"}
+MsgTypes  == {"MsgKeepAlive", "MsgKeepAliveResponse", "MsgDone"}
+
+\* Cookies are 16-bit numbers [S2]. Two values are enough to tell a matching
+\* cookie from a wrong one, and keep the model small.
+Cookies   == {0, 1}
+
+\* A message is a record: like a Go struct. `oversized` marks one larger than
+\* the state's size limit (65535 bytes [S2]); the model does not need sizes.
+\* [a |-> x, b |-> y] builds a record; m.a reads a field.
+Msg(t, c, big) == [type |-> t, cookie |-> c, oversized |-> big]
+Messages == {Msg(t, c, big) : t \in MsgTypes, c \in Cookies, big \in BOOLEAN}
 
 \* Where a side can end up besides a protocol state: it detected a protocol
 \* violation and closed the connection, or it waited too long and gave up.
+\* Either way the connection is torn down [S1][S2].
 Failures == {"Violation", "TimedOut"}
 
-\* Who may send in each state. This is "agency". [S2] agency table, and
-\* [S3] StateAgency for StDone. CASE is like a Go switch statement.
+\* Who may send in each state. This is "agency". [S2] agency table; [S1]
+\* and [S3] for StDone, where nobody has it. CASE is like a Go switch.
 Agency(s) == CASE s = "StClient" -> "Client"
              []   s = "StServer" -> "Server"
              []   s = "StDone"   -> "Nobody"
 
 \* The whole protocol, as a set of <<from-state, message, to-state>> tuples.
-\* <<a, b, c>> is a tuple; t[1] is its first element.
-\* [S2] state-machine figure; [S3] the three Message constructors.
+\* [S2] state-machine figure.
 Transitions ==
     { <<"StClient", "MsgKeepAlive",         "StServer">>,
       <<"StClient", "MsgDone",              "StDone">>,
       <<"StServer", "MsgKeepAliveResponse", "StClient">> }
 
-IsLegal(s, m) == \E t \in Transitions : t[1] = s /\ t[2] = m
-
-\* CHOOSE picks the (only) matching tuple; [3] takes its to-state.
-After(s, m) == (CHOOSE t \in Transitions : t[1] = s /\ t[2] = m)[3]
+IsLegal(s, t) == \E tr \in Transitions : tr[1] = s /\ tr[2] = t
+After(s, t)   == (CHOOSE tr \in Transitions : tr[1] = s /\ tr[2] = t)[3]
 
 Peer(r) == IF r = "Client" THEN "Server" ELSE "Client"
 
-\* WITHIN A RUN: what side r must do when message m arrives from its peer
-\* while r believes the state is s. [S1]: "If either side receives a message
-\* that is not expected according to the mini-protocol the communication is
-\* aborted (the connection is closed)."
-\*
-\* DEPARTS FROM THE REFERENCE on timing: this model, like gOuroboros, judges a
-\* message the moment it arrives, so one sent by a peer without agency is a
-\* Violation at once. The reference implementation only reads when the peer
-\* has agency [S8]; an early message waits and is judged against the state at
-\* that later read [S9]. Usually that is a later Violation, but not always: a
-\* second ping sent before the first is answered is read and answered by the
-\* reference. See "Where the model departs" in the README.
-Receive(r, s, m) ==
-    IF Agency(s) = Peer(r) /\ IsLegal(s, m)
-        THEN After(s, m)      \* the peer was allowed to say that: accept it
-        ELSE "Violation"      \* wrong speaker or wrong message: hang up
+\* Side r is waiting for its peer in state s: the peer has agency.
+Awaiting(r, s) == s \in {"StClient", "StServer"} /\ Agency(s) = Peer(r)
+
+(***************************************************************************)
+(* JUDGING A MESSAGE. What side r does when it reads message m in state s, *)
+(* while waiting for its peer. `expected` is the cookie of the client's    *)
+(* last ping.                                                              *)
+(*   - Too big for the state: tear down [S2 size limits].                  *)
+(*   - Not a legal message in s: abort [S1].                               *)
+(*   - A response with the wrong cookie: "a protocol error" [S2].          *)
+(*   - Otherwise follow the transition [S2].                               *)
+(* Every message in r's inbox was sent by r's peer, so "who sent it" needs *)
+(* no check; WHEN it is read matters, and Recv below decides that.         *)
+(***************************************************************************)
+Judge(r, s, m, expected) ==
+    IF m.oversized                     THEN "Violation"
+    ELSE IF ~IsLegal(s, m.type)        THEN "Violation"
+    ELSE IF m.type = "MsgKeepAliveResponse" /\ m.cookie /= expected
+                                       THEN "Violation"
+    ELSE After(s, m.type)
 
 \* A new run starts in the initial state, StClient [S2].
 RunState(s) == IF s = "StDone" THEN "StClient" ELSE s
 
 (***************************************************************************)
-(* THE RECEIVE TABLE. What happens to message m arriving at side r in      *)
-(* state s, including after a run ended (StDone). The gOuroboros tests     *)
-(* check against this, cell by cell (run `make keepalive-table`).          *)
-(*                                                                         *)
-(* After StDone no run is reading. The server restarts and the new run     *)
-(* reads the message [S6][S7]; the client's bytes wait for a next run     *)
-(* that may never come [S4], shown as "Held".                              *)
+(* THE RECEIVE TABLE: the outcome for every role, state, and kind of       *)
+(* message, printed by `make keepalive-table`. The gOuroboros tests check  *)
+(* against it. Kinds stand for concrete messages; the client's last ping   *)
+(* used cookie 0.                                                          *)
+(*   "Waits": r holds agency, so it does not read yet [S8]. The message is *)
+(*            judged when r next waits for its peer, against that state.   *)
+(*   "Held":  the client's run is over and no new run reads it [S4].       *)
+(* After MsgDone the server restarts and judges in StClient [S7].          *)
 (***************************************************************************)
-ReceiveTable(r, s, m) ==
-    IF s /= "StDone"                 THEN Receive(r, s, m)
-    ELSE IF r = "Server" /\ ServerRestarts THEN Receive(r, "StClient", m)
-    ELSE "Held"
+Kinds == {"MsgKeepAlive", "MsgKeepAliveResponse", "WrongCookieResponse",
+          "MsgDone", "Oversized"}
+
+KindMsg(k) ==
+    CASE k = "WrongCookieResponse" -> Msg("MsgKeepAliveResponse", 1, FALSE)
+    []   k = "Oversized"           -> Msg("MsgKeepAlive", 0, TRUE)
+    []   OTHER                     -> Msg(k, 0, FALSE)
+
+ReceiveTable(r, s, k) ==
+    IF s = "StDone"
+        THEN IF r = "Server" /\ ServerRestarts
+                 THEN Judge(r, "StClient", KindMsg(k), 0)
+                 ELSE "Held"
+    ELSE IF Agency(s) = r THEN "Waits"
+    ELSE Judge(r, s, KindMsg(k), 0)
 
 -----------------------------------------------------------------------------
 
 VARIABLES
-    view,       \* view[r]: the state side r believes the protocol is in
-    inbox,      \* inbox[r]: messages sent to r that r has not read yet
-    pings,      \* pings sent so far
-    runs,       \* client runs started so far on this connection
-    rogueLeft   \* rogue messages the misbehaving peer may still inject
+    view,        \* view[r]: the state side r believes the protocol is in
+    inbox,       \* inbox[r]: messages sent to r that r has not read yet
+    pings,       \* pings sent so far
+    sentCookie,  \* the cookie of the client's last ping
+    pingCookie,  \* the cookie of the last ping the server read
+    runs,        \* client runs started so far on this connection
+    rogueLeft    \* rogue messages the misbehaving peer may still inject
 
-vars == <<view, inbox, pings, runs, rogueLeft>>
+vars == <<view, inbox, pings, sentCookie, pingCookie, runs, rogueLeft>>
 
 Init ==
-    /\ view = [r \in Roles |-> "StClient"]  \* a function: like a Go map
-    /\ inbox = [r \in Roles |-> <<>>]       \* <<>> is the empty sequence
+    /\ view = [r \in Roles |-> "StClient"]
+    /\ inbox = [r \in Roles |-> <<>>]
     /\ pings = 0
+    /\ sentCookie = 0
+    /\ pingCookie = 0
     /\ runs = 1
     /\ rogueLeft = RogueMessages
 
@@ -131,32 +156,51 @@ Ended ==
     \/ \E r \in Roles : view[r] \in Failures
     \/ \A r \in Roles : view[r] = "StDone"
 
-\* An honest side sends a message it is allowed to send.
+\* Honest sends. Each needs the sender to hold agency [S1][S2].
 \* [f EXCEPT ![k] = v] is "f with key k set to v"; @ means "the old value".
-Send(r, m) ==
-    /\ view[r] \in {"StClient", "StServer"}
-    /\ Agency(view[r]) = r
-    /\ IsLegal(view[r], m)
-    /\ m = "MsgKeepAlive" => pings < MaxPings
-    /\ view' = [view EXCEPT ![r] = After(view[r], m)]
-    /\ inbox' = [inbox EXCEPT ![Peer(r)] = Append(@, m)]
-    /\ pings' = IF m = "MsgKeepAlive" THEN pings + 1 ELSE pings
-    /\ UNCHANGED <<runs, rogueLeft>>
+ClientPing(c) ==
+    /\ view["Client"] = "StClient"
+    /\ pings < MaxPings
+    /\ view' = [view EXCEPT !["Client"] = "StServer"]
+    /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgKeepAlive", c, FALSE))]
+    /\ pings' = pings + 1
+    /\ sentCookie' = c
+    /\ UNCHANGED <<pingCookie, runs, rogueLeft>>
 
-\* Some run of side r is reading: an active run, or a server that restarts
-\* because a message arrived after its last run ended [S6].
-Reading(r) ==
-    \/ view[r] \in {"StClient", "StServer"}
-    \/ r = "Server" /\ view[r] = "StDone" /\ ServerRestarts
+\* "The cookie value ... allows to match requests with responses" [S2]: the
+\* server echoes the cookie of the ping it is answering.
+ServerRespond ==
+    /\ view["Server"] = "StServer"
+    /\ view' = [view EXCEPT !["Server"] = "StClient"]
+    /\ inbox' = [inbox EXCEPT !["Client"] =
+                     Append(@, Msg("MsgKeepAliveResponse", pingCookie, FALSE))]
+    /\ UNCHANGED <<pings, sentCookie, pingCookie, runs, rogueLeft>>
 
-\* Side r reads the oldest message in its inbox. With no run reading, the
-\* message just stays in the inbox [S4].
+ClientDone ==
+    /\ view["Client"] = "StClient"
+    /\ view' = [view EXCEPT !["Client"] = "StDone"]
+    /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgDone", 0, FALSE))]
+    /\ UNCHANGED <<pings, sentCookie, pingCookie, runs, rogueLeft>>
+
+Send == \/ \E c \in Cookies : ClientPing(c)
+        \/ ServerRespond
+        \/ ClientDone
+
+\* Side r reads the oldest message in its inbox. It reads only while waiting
+\* for its peer [S8]; a message that arrived earlier waits until then and is
+\* judged against the state at that moment [S9]. A server whose run ended
+\* restarts and reads in StClient [S7]. A client whose run ended reads
+\* nothing until a new run starts [S4][S5].
 Recv(r) ==
-    /\ Reading(r)
     /\ inbox[r] /= <<>>
-    /\ view' = [view EXCEPT ![r] = Receive(r, RunState(view[r]), Head(inbox[r]))]
+    /\ \/ Awaiting(r, view[r])
+       \/ r = "Server" /\ view[r] = "StDone" /\ ServerRestarts
+    /\ LET m == Head(inbox[r]) IN
+         /\ view' = [view EXCEPT ![r] = Judge(r, RunState(view[r]), m, sentCookie)]
+         /\ pingCookie' = IF r = "Server" /\ m.type = "MsgKeepAlive"
+                              THEN m.cookie ELSE pingCookie
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]
-    /\ UNCHANGED <<pings, runs, rogueLeft>>
+    /\ UNCHANGED <<pings, sentCookie, runs, rogueLeft>>
 
 \* The client starts a new run on the same connection [S5].
 ClientRestart ==
@@ -164,38 +208,38 @@ ClientRestart ==
     /\ runs < MaxRuns
     /\ view' = [view EXCEPT !["Client"] = "StClient"]
     /\ runs' = runs + 1
-    /\ UNCHANGED <<inbox, pings, rogueLeft>>
+    /\ UNCHANGED <<inbox, pings, sentCookie, pingCookie, rogueLeft>>
 
 \* A misbehaving peer slips any message into r's inbox, at any time.
 Inject(r, m) ==
     /\ rogueLeft > 0
     /\ inbox' = [inbox EXCEPT ![r] = Append(@, m)]
     /\ rogueLeft' = rogueLeft - 1
-    /\ UNCHANGED <<view, pings, runs>>
+    /\ UNCHANGED <<view, pings, sentCookie, pingCookie, runs>>
 
 \* Anything other than a timeout or an injection that could happen now.
-Progress ==
-    \/ ClientRestart
-    \/ \E r \in Roles : Recv(r) \/ \E m \in Messages : Send(r, m)
+Progress == Send \/ ClientRestart \/ \E r \in Roles : Recv(r)
 
-\* Side r is waiting for its peer, and nothing can ever arrive: it gives up.
-\* [S2] "Timeouts per state": 97s in StClient, 60s in StServer, after which
-\* "the connection SHOULD be torn down". The model has no clock, so it only
-\* lets a timeout fire when waiting longer could never help.
+\* [S2] "Timeouts per state" bound how long a side waits for its peer: 97s
+\* in StClient (the server waiting), 60s in StServer (the client waiting),
+\* after which "the connection SHOULD be torn down". The model has no clock:
+\* with SlowPeers a timeout may fire whenever a side is waiting, because the
+\* peer may be too slow; without it, a timeout fires only when nothing could
+\* ever arrive, because a peer that is not stuck answers in time.
 \* ENABLED A is true when action A could happen in the current state.
 Timeout(r) ==
     /\ UseTimeouts
     /\ ~Ended
-    /\ ~ENABLED Progress
-    /\ view[r] \in {"StClient", "StServer"}
-    /\ Agency(view[r]) = Peer(r)
+    /\ Awaiting(r, view[r])
+    /\ SlowPeers \/ ~ENABLED Progress
     /\ view' = [view EXCEPT ![r] = "TimedOut"]
-    /\ UNCHANGED <<inbox, pings, runs, rogueLeft>>
+    /\ UNCHANGED <<inbox, pings, sentCookie, pingCookie, runs, rogueLeft>>
 
 Next ==
-    \/ \E r \in Roles, m \in Messages : Send(r, m) \/ Inject(r, m)
-    \/ \E r \in Roles : Recv(r) \/ Timeout(r)
+    \/ Send
     \/ ClientRestart
+    \/ \E r \in Roles : Recv(r) \/ Timeout(r)
+    \/ \E r \in Roles, m \in Messages : Inject(r, m)
     \/ Ended /\ UNCHANGED vars
 
 Spec == Init /\ [][Next]_vars
@@ -207,26 +251,40 @@ TypeOK ==
     /\ view \in [Roles -> States \cup Failures]
     /\ inbox \in [Roles -> Seq(Messages)]
     /\ pings \in 0..MaxPings
+    /\ sentCookie \in Cookies
+    /\ pingCookie \in Cookies
     /\ runs \in 1..MaxRuns
     /\ rogueLeft \in 0..RogueMessages
 
-\* With honest peers, nobody ever hangs up or times out.
+\* With honest peers that answer in time, nobody ever hangs up.
 NoFailures == \A r \in Roles : view[r] \notin Failures
 
-\* Agency means only one message per run is on the wire at a time. [S1] "At
-\* any time, only one side has the agency". Across runs there can be more: a
-\* client may send MsgDone, start a new run, and send MsgKeepAlive before the
-\* server reads the MsgDone; that is why [S4] keeps a run's trailing bytes.
-\* So every queued message except the newest must be an earlier run's
-\* MsgDone, and only one message overall can be something else.
+\* With honest peers, a slow peer can cause a timeout but never a
+\* protocol violation.
+NoViolations == \A r \in Roles : view[r] /= "Violation"
+
+\* Every response on its way to the client echoes the cookie the client is
+\* waiting for [S2].
+ResponsesEchoCookies ==
+    \A i \in 1..Len(inbox["Client"]) :
+        inbox["Client"][i].type = "MsgKeepAliveResponse" =>
+            inbox["Client"][i].cookie = sentCookie
+
+\* Agency means only one message per run is on the wire at a time [S1]
+\* "At any time, only one side has the agency". Across runs there can be
+\* more: a client may send MsgDone, start a new run, and send MsgKeepAlive
+\* before the server reads the MsgDone; that is why [S4] keeps a run's
+\* trailing bytes. So every queued message except the newest is an earlier
+\* run's MsgDone, and only one message overall is something else.
 \* \A i \in 1..n : P(i) checks P for each position i from 1 to n.
+IsDoneMsg(m) == m.type = "MsgDone"
 OneMessageInFlightPerRun ==
     /\ \A r \in Roles :
-           \A i \in 1..(Len(inbox[r]) - 1) : inbox[r][i] = "MsgDone"
+           \A i \in 1..(Len(inbox[r]) - 1) : IsDoneMsg(inbox[r][i])
     /\ \A r1, r2 \in Roles :
            (/\ inbox[r1] /= <<>> /\ inbox[r2] /= <<>>
-            /\ inbox[r1][Len(inbox[r1])] /= "MsgDone"
-            /\ inbox[r2][Len(inbox[r2])] /= "MsgDone") => r1 = r2
+            /\ ~IsDoneMsg(inbox[r1][Len(inbox[r1])])
+            /\ ~IsDoneMsg(inbox[r2][Len(inbox[r2])])) => r1 = r2
 
 \* The two sides never both believe it is their own turn to talk.
 NeverBothHaveAgency ==
@@ -255,8 +313,8 @@ OnlyLegalMoves ==
          view'[r] /= view[r] =>
              \/ view'[r] \in Failures
              \/ view[r] = "StDone" /\ view'[r] = "StClient"
-             \/ \E t \in Transitions :
-                    t[1] = RunState(view[r]) /\ t[3] = view'[r]]_vars
+             \/ \E tr \in Transitions :
+                    tr[1] = RunState(view[r]) /\ tr[3] = view'[r]]_vars
 
 \* A side that hung up stays hung up.
 FailuresAreFinal ==

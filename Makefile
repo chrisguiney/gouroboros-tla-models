@@ -21,8 +21,9 @@ hello: ## Check the hello-world model (proves the install works)
 hello-bug: ## Watch TLC catch a bug and print the steps that cause it
 	cd specs/00-hello && ../../bin/tlc -config HelloBug.cfg Hello.tla || true
 
-keepalive: ## Check the keep-alive model, with honest and with rogue peers
+keepalive: ## Check the keep-alive model with honest, slow, and rogue peers
 	$(KEEPALIVE) -config KeepAlive.cfg KeepAlive.tla
+	$(KEEPALIVE) -config KeepAliveSlow.cfg KeepAlive.tla
 	$(KEEPALIVE) -config KeepAliveRogue.cfg KeepAlive.tla
 
 keepalive-table: ## Print the keep-alive receive rule that the Go tests mirror

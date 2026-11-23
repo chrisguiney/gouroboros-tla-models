@@ -10,6 +10,6 @@
 (***************************************************************************)
 EXTENDS KeepAlive, TLC
 
-ASSUME \A r \in Roles, s \in States, m \in Messages :
-         PrintT(<<r, s, m, ReceiveTable(r, s, m)>>)
+ASSUME \A r \in Roles, s \in States, k \in Kinds :
+         PrintT(<<r, s, k, ReceiveTable(r, s, k)>>)
 =============================================================================
