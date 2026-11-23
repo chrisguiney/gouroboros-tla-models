@@ -2,10 +2,19 @@
 (***************************************************************************)
 (* The keep-alive mini-protocol, at the state-machine level.               *)
 (*                                                                         *)
-(* Source of truth: the Ouroboros network specification, keep-alive        *)
-(* section. The gOuroboros code it is compared with is                     *)
-(* protocol/keepalive/keepalive.go (StateMap) and the receive checks in    *)
-(* protocol/protocol.go. Read specs/01-keepalive/README.md first.          *)
+(* Sources, all at IntersectMBO/ouroboros-network commit 5f356486ab3e:     *)
+(*   [S1] docs/network-spec/miniprotocols.tex, section "Protocols as State *)
+(*        Machines" (lines 27-36, 96-98): one side has agency at a time;   *)
+(*        an unexpected message aborts the connection.                     *)
+(*   [S2] docs/network-spec/miniprotocols.tex, section "Keep Alive Mini    *)
+(*        Protocol" (lines 1560-1650): states, transitions, agency,        *)
+(*        cookie rule, timeouts.                                           *)
+(*   [S3] ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/      *)
+(*        KeepAlive/Type.hs (lines 89-106): the reference implementation's *)
+(*        message types and StateAgency, including StDone = NobodyAgency.  *)
+(* specs/01-keepalive/README.md has full links. The gOuroboros code it is  *)
+(* compared with is protocol/keepalive/keepalive.go (StateMap) and the     *)
+(* receive checks in protocol/protocol.go.                                 *)
 (*                                                                         *)
 (* Unlike the hello model, each side keeps ITS OWN copy of the protocol    *)
 (* state, and messages travel through an inbox. That is what lets the      *)
@@ -26,13 +35,14 @@ Messages == {"MsgKeepAlive", "MsgKeepAliveResponse", "MsgDone"}
 \* violation and closed the connection, or it waited too long and gave up.
 Failures == {"Violation", "TimedOut"}
 
-\* Who may send in each state. This is "agency".
-\* CASE is like a Go switch statement.
+\* Who may send in each state. This is "agency". [S2] agency table, and
+\* [S3] StateAgency for StDone. CASE is like a Go switch statement.
 Agency(s) == CASE s = "StClient" -> "Client"
              []   s = "StServer" -> "Server"
              []   s = "StDone"   -> "Nobody"
 
 \* The whole protocol, as a set of <<from-state, message, to-state>> tuples.
+\* [S2] state-machine figure; [S3] the three Message constructors.
 \* <<a, b, c>> is a tuple; t[1] is its first element.
 Transitions ==
     { <<"StClient", "MsgKeepAlive",         "StServer">>,
@@ -50,6 +60,14 @@ Peer(r) == IF r = "Client" THEN "Server" ELSE "Client"
 (* THE RECEIVE RULE. What side r must do when message m arrives from its   *)
 (* peer while r believes the state is s. The Go tests check gOuroboros     *)
 (* against this operator, cell by cell (run `make keepalive-table`).       *)
+(*                                                                         *)
+(* The accept and Violation branches are [S1]: "If either side receives a  *)
+(* message that is not expected according to the mini-protocol the         *)
+(* communication is aborted (the connection is closed)."                   *)
+(*                                                                         *)
+(* UNSOURCED: the StDone branch. No source says a message after MsgDone is *)
+(* ignored; it copies what gOuroboros does. Read literally, [S1] makes it  *)
+(* a Violation. See "Open question" in specs/01-keepalive/README.md.       *)
 (***************************************************************************)
 Receive(r, s, m) ==
     IF s = "StDone"
@@ -111,6 +129,9 @@ Inject(r, m) ==
 Progress == \E r \in Roles : Recv(r) \/ \E m \in Messages : Send(r, m)
 
 \* Side r is waiting for its peer, and nothing can ever arrive: it gives up.
+\* [S2] "Timeouts per state": 97s in StClient, 60s in StServer, after which
+\* "the connection SHOULD be torn down". The model has no clock, so it only
+\* lets a timeout fire when waiting longer could never help.
 \* ENABLED A is true when action A could happen in the current state.
 Timeout(r) ==
     /\ UseTimeouts
@@ -140,7 +161,8 @@ TypeOK ==
 \* With honest peers, nobody ever hangs up or times out.
 NoFailures == \A r \in Roles : view[r] \notin Failures
 
-\* Agency means only one message is ever on the wire at a time.
+\* Agency means only one message is ever on the wire at a time. [S1] "At any
+\* time, only one side has the agency".
 OneMessageInFlight == Len(inbox["Client"]) + Len(inbox["Server"]) <= 1
 
 \* The two sides never both believe it is their own turn to talk.

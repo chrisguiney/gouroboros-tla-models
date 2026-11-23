@@ -25,8 +25,31 @@ still there.
 | `StDone` | nobody | none |
 
 In gOuroboros this table is `StateMap` in `protocol/keepalive/keepalive.go`.
-The model is written from the Ouroboros network specification instead,
-so comparing the two means something.
+The model's states, transitions, agency, and timeouts are checked against the
+sources below rather than taken from `StateMap`, so comparing the two means
+something. (The first draft was written from memory and checked against these
+sources afterwards; every rule except one matched. See
+[Open question](#open-question-messages-after-done).)
+
+## Sources
+
+All pinned to [IntersectMBO/ouroboros-network commit `5f356486ab3e`](https://github.com/IntersectMBO/ouroboros-network/tree/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c),
+the reference Haskell implementation and the home of the network
+specification. The `.tla` file cites them as `[S1]` to `[S3]`.
+
+| Ref | Source | What the model takes from it |
+| --- | --- | --- |
+| S1 | [`docs/network-spec/miniprotocols.tex`, "Protocols as State Machines", lines 27-36 and 96-98](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/miniprotocols.tex#L27-L36) | Only one side has agency at a time. "If either side receives a message that is not expected according to the mini-protocol the communication is aborted (the connection is closed)." Every mini-protocol ends in a single `StDone` where nobody has agency. |
+| S2 | [`docs/network-spec/miniprotocols.tex`, "Keep Alive Mini Protocol", lines 1560-1650](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/miniprotocols.tex#L1560-L1650) | The state machine, the agency table, the cookie rule, size limits (65535 bytes per state), and timeouts (97 s in `StClient`, 60 s in `StServer`). |
+| S3 | [`ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/KeepAlive/Type.hs`, lines 89-106](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/KeepAlive/Type.hs#L89-L106) | The three message types with their from- and to-states, and `StateAgency StDone = NobodyAgency` (S2's agency table leaves `StDone` out). |
+
+The message encodings (`[0, cookie]`, `[1, cookie]`, `[2]`) are in
+[`cardano-diffusion/protocols/cddl/specs/keep-alive.cddl`](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/cardano-diffusion/protocols/cddl/specs/keep-alive.cddl);
+the model does not need them.
+
+The rendered specification is published as a PDF at
+<https://ouroboros-network.cardano.intersectmbo.org/pdfs/network-spec/network-spec.pdf>,
+but that always shows the latest version; cite the pinned source above.
 
 ## What is new compared with the hello model
 
@@ -39,9 +62,10 @@ closes.
 **The receive rule.** `Receive(r, s, m)` says what side `r` must do when message
 `m` arrives while it believes the state is `s`:
 
-1. If `s` is `StDone`, ignore the message.
-2. If the peer had agency and `s` has a transition for `m`, accept it.
-3. Otherwise it is a **violation**: hang up.
+1. If `s` is `StDone`, ignore the message. **Unsourced**; see
+   [Open question](#open-question-messages-after-done).
+2. If the peer had agency and `s` has a transition for `m`, accept it. (S1, S2)
+3. Otherwise it is a **violation**: hang up. (S1)
 
 **A misbehaving peer.** `Inject` lets a rogue peer push any message into any
 inbox at any time, up to `RogueMessages` times. This is how the model asks
@@ -99,8 +123,9 @@ agency.
 
 ## What the model found
 
-- **gOuroboros agrees with the model on all 18 cells.** No bug in the
-  keep-alive state machine.
+- **gOuroboros agrees with the model on all 18 cells.** On the 12 sourced
+  cells that means gOuroboros follows the specification. The 6 `StDone` cells
+  are unsourced and may disagree with it; see the open question above.
 - **The gOuroboros client never sends `MsgDone`.** The specification allows it
   and the server handles it, but nothing in the client API sends it, so a real
   gOuroboros client never reaches `StDone`; the test reaches it by sending
@@ -109,8 +134,28 @@ agency.
 - The model says why `ClientTimeout` and `ServerTimeout` exist: without them,
   one stray message can hang a connection forever.
 
+## Open question: messages after Done
+
+The model ignores any message that arrives after `StDone`. That rule came from
+gOuroboros's behavior, not from a source: a gOuroboros client drains such
+messages silently, and a gOuroboros server leaves them unread for a restarted
+instance (the keep-alive server is never restarted, so they are never read).
+
+S1 says the opposite, read literally: after `MsgDone` "both sides agree that
+the mini-protocol has terminated", so any later message "is not expected
+according to the mini-protocol" and "the communication is aborted". Under that
+reading the six `StDone` rows of the receive table should be `Violation`, and
+the gOuroboros tests that check those rows (`.../inDone/...`) are pinning
+behavior the specification does not allow.
+
+S1 does not say what the reference implementation does with a responder that
+receives a new conversation after `MsgDone`, which is the case a server
+restart exists for. That needs reading the reference implementation's
+multiplexer and inbound governor before deciding.
+
 ## Not modelled yet
 
-Cookies (a response must echo the ping's cookie; gOuroboros already tests this
-in `client_cookie_test.go`), real time, message sizes, and the goroutines
-inside gOuroboros. Those come later, one at a time.
+Cookies (S2: "It is a protocol error if the cookie received back with
+MsgKeepAliveResponse does not match"; gOuroboros already tests this in
+`client_cookie_test.go`), real time, message sizes, and the goroutines inside
+gOuroboros. Those come later, one at a time.

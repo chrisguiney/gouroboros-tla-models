@@ -10,6 +10,11 @@ is engineers who are new to TLA+, so readability beats cleverness.
 - One directory per model under `specs/`, numbered in learning order.
 - Comment every new TLA+ construct the first time a model uses it, and link
   the doc that explains it. Add new terms to `docs/glossary.md`.
+- Cite a source for every rule in a model, before writing it: the network
+  specification or reference implementation in IntersectMBO/ouroboros-network,
+  pinned to a commit, with file, section, and line numbers. List sources in
+  the model's README and tag rules in the `.tla` (`[S1]`). A rule with no
+  source is marked UNSOURCED with the reason. Never model from memory alone.
 - Name the gouroboros file a model is based on (for example
   `protocol/keepalive/keepalive.go`) in the module header comment.
 - A counterexample that reflects a real gouroboros behavior becomes a Go test
