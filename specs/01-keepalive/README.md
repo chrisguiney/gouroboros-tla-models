@@ -39,7 +39,7 @@ and checking it found a gOuroboros bug: see
 
 All pinned to [IntersectMBO/ouroboros-network commit `5f356486ab3e`](https://github.com/IntersectMBO/ouroboros-network/tree/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c),
 the reference Haskell implementation and the home of the network
-specification. The `.tla` file cites them as `[S1]` to `[S6]`.
+specification, except S8. The `.tla` file cites them as `[S1]` to `[S9]`.
 
 | Ref | Source | What the model takes from it |
 | --- | --- | --- |
@@ -49,6 +49,9 @@ specification. The `.tla` file cites them as `[S1]` to `[S6]`.
 | S4 | [`network-mux/src/Network/Mux.hs`, lines 362-378 and 512](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/network-mux/src/Network/Mux.hs#L362-L378) | When a run ends, the bytes it did not read are put back on the mini-protocol's queue for the next run. "Protocols that runs to completion are not automatically restarted" by the multiplexer itself. |
 | S5 | [`network-mux/src/Network/Mux.hs`, lines 846-852](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/network-mux/src/Network/Mux.hs#L846-L852) | A mini-protocol may be started again on the same connection; only one that is still running is refused (`ProtocolAlreadyRunning`). |
 | S6 | [`ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs`, lines 433-475](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs#L433-L475) | A responder (server) mini-protocol that ends cleanly is restarted (`TrResponderRestarted`) while the connection stays registered. |
+| S7 | [`docs/network-spec/connection-manager.tex`, "Inbound side: the inbound governor", lines 489-503](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/connection-manager.tex#L489-L503) | The specification's statement of S6: "when a server-side mini-protocol terminates cleanly (usually because the client chose to terminate it), then the server side of the mini-protocol should be restarted in its initial state in case the client wishes to use the protocol again later." |
+| S8 | [IntersectMBO/typed-protocols `8fa4ed2f` (version 1.2.2.0), `typed-protocols/src/Network/TypedProtocol/Driver.hs`, lines 145-176](https://github.com/IntersectMBO/typed-protocols/blob/8fa4ed2f5bfece84b323f6d80e0b61f4153b6975/typed-protocols/src/Network/TypedProtocol/Driver.hs#L145-L176) | The driver every reference mini-protocol runs on. It reads a message only at `Await`, when the peer has agency, and never complains about trailing data: "we want to allow for one protocols to be run after another on the same channel". ouroboros-network requires `typed-protocols ^>=1.2`; that this exact commit is the version it builds with was not checked. |
+| S9 | [`ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/KeepAlive/Codec.hs`, lines 58-116](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/KeepAlive/Codec.hs#L58-L116) | Decoding depends on the reader's current state; any other message fails with "unexpected key", which aborts the connection. Time limits 97 s and 60 s, the latter marked `TODO: ... should be 10s`. |
 
 The message encodings (`[0, cookie]`, `[1, cookie]`, `[2]`) are in
 [`cardano-diffusion/protocols/cddl/specs/keep-alive.cddl`](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/cardano-diffusion/protocols/cddl/specs/keep-alive.cddl);
@@ -61,8 +64,10 @@ the model does not need them.
 | S1 | [Network specification PDF](https://ouroboros-network.cardano.intersectmbo.org/pdfs/network-spec/network-spec.pdf), section 3.2 "Protocols as State Machines", page 10 |
 | S2 | Same PDF, section 3.10 "Keep Alive Mini Protocol", page 33 |
 | S3 | [Haddock for `Ouroboros.Network.Protocol.KeepAlive.Type`](https://ouroboros-network.cardano.intersectmbo.org/ouroboros-network/protocols/Ouroboros-Network-Protocol-KeepAlive-Type.html) |
+| S7 | Same PDF, section 5.7 "Inbound side: the inbound governor", page 53 |
 
-S4 to S6 are implementation code with no rendered prose; read the source.
+S4, S5, S6, S8, and S9 are implementation code with no rendered prose; read
+the source.
 
 The rendered site is rebuilt nightly from the `main` branch, so it always
 shows the latest version and the section and page numbers can move. Read it
@@ -146,21 +151,64 @@ messages. So, for example:
 ## Settled: messages after Done
 
 The first draft of the model said a message after `StDone` is ignored. That
-rule had no source; it copied what gOuroboros does. Read literally, S1 said the
-opposite: a message after the protocol has terminated is unexpected, so the
-connection is closed. Reading the reference implementation settled it, and
-neither was right:
+rule had no source; it copied what gOuroboros does. Reading only the
+mini-protocol chapter (S1), the opposite looked right: a message after the
+protocol has terminated is unexpected, so the connection is closed. The
+reference implementation and a later chapter of the specification settled it,
+and neither was right:
 
-- **Server**: the inbound governor restarts a responder that ended cleanly
-  (S6), and the multiplexer keeps any bytes that arrived after `MsgDone` for
-  the next run (S4). So a message after `MsgDone` is the first message of a
-  **new run**, read in `StClient`: `MsgKeepAlive` is answered, and an
-  out-of-turn `MsgKeepAliveResponse` is a violation.
+- **Server**: the specification says a server-side mini-protocol that
+  terminates cleanly "should be restarted in its initial state in case the
+  client wishes to use the protocol again later" (S7). The inbound governor
+  does exactly that (S6), and the multiplexer keeps any bytes that arrived
+  after `MsgDone` for the next run (S4). So a message after `MsgDone` is the
+  first message of a **new run**, read in `StClient`: `MsgKeepAlive` is
+  answered, and an out-of-turn `MsgKeepAliveResponse` is a violation.
 - **Client**: nothing restarts it unless its owner starts a new run (S5). The
   bytes wait, unread, on its queue (S4). That is `Held` in the table.
 
-S1's rule applies within a run. The reference implementation applies it to
-the run that is reading.
+S1's rule applies within a run, to the run that is reading. The lesson for
+modelling: a rule's source can be in a different chapter from the protocol's
+own section, so search the whole specification before calling it silent.
+
+## Do the specification, the reference, and the model agree?
+
+Checked on 2026-11-23 against the sources above.
+
+| Topic | Specification | Reference implementation | This model | gOuroboros |
+| --- | --- | --- | --- | --- |
+| States, messages, transitions | S2 | Same (S3) | Same | Same |
+| Agency per state | S2, S1 for `StDone` | Same (S3) | Same | Same |
+| Wrong message for the reader's state | Abort (S1) | Abort: "unexpected key" (S9) | Violation | Violation |
+| Message from a peer without agency | Not stated when it is judged | Not read until the peer has agency, then judged against that state (S8) | Violation at once | Violation at once |
+| Cookie mismatch | Protocol error (S2) | `KeepAliveCookieMissmatch` thrown (client) | Not modelled | Error (`client_cookie_test.go`) |
+| Server after `MsgDone` | Restart (S7) | Restart (S4, S6) | Restart | **Does not restart: the bug** |
+| Client after `MsgDone` | Not stated | Bytes held for a next run (S4) | Held | Discarded |
+| Timeout, `StClient` | 97 s (S2) | 97 s (S9) | Fires only when stuck | 97 s |
+| Timeout, `StServer` | 60 s (S2) | 60 s, marked "should be 10s" (S9) | Fires only when stuck | 10 s by default (`WithTimeout`) |
+| Size limit per state | 65535 bytes (S2) | `smallByteLimit` (S9; its value was not checked) | Not modelled | 65535 bytes |
+
+### Where the model departs from the reference
+
+**When a message from the wrong side is judged.** The model, like gOuroboros,
+judges every message the moment it arrives, so a message from a peer without
+agency is a violation at once. The reference only reads when the peer has
+agency (S8); an early message waits and is judged against the state at that
+later read. Usually that is still a violation, just later: a `MsgDone` from
+the server is read in `StServer` and fails as an "unexpected key". But not
+always: a client that sends a second `MsgKeepAlive` before the first is
+answered gets both answered by the reference, while gOuroboros and this model
+hang up. That only happens with a misbehaving peer, and the specification does
+not say which is right, so it is recorded here rather than changed. Making the
+model match the reference would change the six "peer without agency" rows of
+the receive table.
+
+### Where the specification and the reference differ
+
+**The `StServer` timeout.** Both say 60 s, but the reference marks it
+`TODO: ... should be 10s`. gOuroboros's client already defaults to 10 s, so it
+gives up on a slow server sooner than the specification allows for. That is
+stricter, not broken.
 
 ### The bug
 

@@ -20,6 +20,13 @@
 (*   [S6] ouroboros-network/framework/lib/Ouroboros/Network/               *)
 (*        InboundGovernor.hs 433-475: a responder (server) that ends       *)
 (*        cleanly is restarted.                                            *)
+(*   [S7] docs/network-spec/connection-manager.tex 489-503 (spec section   *)
+(*        5.7): the specification's own statement of [S6].                *)
+(*   [S8] IntersectMBO/typed-protocols 8fa4ed2f (1.2.2.0),                 *)
+(*        typed-protocols/src/Network/TypedProtocol/Driver.hs 145-176: a   *)
+(*        peer reads only at Await; trailing data is never an error.       *)
+(*   [S9] .../Protocol/KeepAlive/Codec.hs 58-116: decoding depends on the  *)
+(*        reader's state ("unexpected key" otherwise); 97s and 60s limits. *)
 (*                                                                         *)
 (* The gOuroboros code it is compared with is protocol/keepalive/          *)
 (* keepalive.go (StateMap), protocol/keepalive/server.go, and the receive  *)
@@ -71,6 +78,14 @@ Peer(r) == IF r = "Client" THEN "Server" ELSE "Client"
 \* while r believes the state is s. [S1]: "If either side receives a message
 \* that is not expected according to the mini-protocol the communication is
 \* aborted (the connection is closed)."
+\*
+\* DEPARTS FROM THE REFERENCE on timing: this model, like gOuroboros, judges a
+\* message the moment it arrives, so one sent by a peer without agency is a
+\* Violation at once. The reference implementation only reads when the peer
+\* has agency [S8]; an early message waits and is judged against the state at
+\* that later read [S9]. Usually that is a later Violation, but not always: a
+\* second ping sent before the first is answered is read and answered by the
+\* reference. See "Where the model departs" in the README.
 Receive(r, s, m) ==
     IF Agency(s) = Peer(r) /\ IsLegal(s, m)
         THEN After(s, m)      \* the peer was allowed to say that: accept it
@@ -85,8 +100,8 @@ RunState(s) == IF s = "StDone" THEN "StClient" ELSE s
 (* check against this, cell by cell (run `make keepalive-table`).          *)
 (*                                                                         *)
 (* After StDone no run is reading. The server restarts and the new run     *)
-(* reads the message [S6]; the client's bytes wait for a next run that may *)
-(* never come [S4], shown as "Held".                                       *)
+(* reads the message [S6][S7]; the client's bytes wait for a next run     *)
+(* that may never come [S4], shown as "Held".                              *)
 (***************************************************************************)
 ReceiveTable(r, s, m) ==
     IF s /= "StDone"                 THEN Receive(r, s, m)
