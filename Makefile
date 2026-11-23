@@ -28,7 +28,8 @@ keepalive: ## Check the keep-alive model, with honest and with rogue peers
 keepalive-table: ## Print the keep-alive receive rule that the Go tests mirror
 	@$(KEEPALIVE) -config KeepAliveTable.cfg KeepAliveTable.tla | grep '^<<'
 
-keepalive-bugs: ## Show the two keep-alive counterexamples (expected to fail)
+keepalive-bugs: ## Show the keep-alive counterexamples, including the gOuroboros bug (expected to fail)
+	$(KEEPALIVE) -config KeepAliveGouroborosBug.cfg KeepAlive.tla || true
 	$(KEEPALIVE) -config KeepAliveRogueBug.cfg KeepAlive.tla || true
 	$(KEEPALIVE) -config KeepAliveNoTimeoutBug.cfg KeepAlive.tla || true
 

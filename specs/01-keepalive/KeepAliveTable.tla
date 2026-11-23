@@ -11,5 +11,5 @@
 EXTENDS KeepAlive, TLC
 
 ASSUME \A r \in Roles, s \in States, m \in Messages :
-         PrintT(<<r, s, m, Receive(r, s, m)>>)
+         PrintT(<<r, s, m, ReceiveTable(r, s, m)>>)
 =============================================================================
