@@ -65,18 +65,24 @@ CONSTANTS
     RestartOn,         \* "terminal": a server restarts from the MsgDone
                        \* handler (gOuroboros); "anyMessage": a mutation
                        \* that also restarts from an ordinary message
-    StopJoins,         \* "none": Stop waits for no loop (gOuroboros);
-                       \* "loops": a candidate fix where a Stop called from
-                       \* outside the engine waits for every loop to exit
+    StopJoins,         \* "none": nothing waits for the loops (gOuroboros
+                       \* 5c4f31c1); "loops": a rejected candidate where a
+                       \* Stop called from outside the engine waits for
+                       \* every loop; "close": the fix, as the reference
+                       \* does it: Stop still waits for nothing, and the
+                       \* connection's teardown, after Stop returned,
+                       \* waits for every loop before Close returns
     Mutation           \* "none", or one deliberate break of the code:
                        \* "watcherRecvOnly", "startIgnoresStopped",
-                       \* "noOnces", "noWaitRead", "waitReadUnderLock"
+                       \* "noOnces", "noWaitRead", "waitReadUnderLock",
+                       \* "closeSkipsJoin"
 
 ASSUME Role \in {"client", "server"}
 ASSUME RestartOn \in {"terminal", "anyMessage"}
-ASSUME StopJoins \in {"none", "loops"}
+ASSUME StopJoins \in {"none", "loops", "close"}
 ASSUME Mutation \in {"none", "watcherRecvOnly", "startIgnoresStopped",
-                     "noOnces", "noWaitRead", "waitReadUnderLock"}
+                     "noOnces", "noWaitRead", "waitReadUnderLock",
+                     "closeSkipsJoin"}
 
 (* The peer's message sequences the configs choose from (a .cfg file cannot
    write a sequence, so it names one of these with Msgs <- Name). *)
@@ -283,13 +289,29 @@ OwnerUnlock ==
 -----------------------------------------------------------------------------
 (* The user. *)
 
-\* In English: "The user calls Stop once, and is "returned" after it."
+\* In English: "The user calls Stop once, and is "returned" after it. Under
+\* the "close" fix the connection's teardown then joins the loops."
 \* Literally: "UserStop is defined as: pc of "user" equals "idle", and
-\*   CallStop of "user", FALSE and "returned", and everything else is
-\*   unchanged."
+\*   CallStop of "user", FALSE and (if StopJoins equals "close" then
+\*   "closeJoin" else "returned"), and everything else is unchanged."
 UserStop ==
     /\ pc["user"] = "idle"
-    /\ CallStop("user", FALSE, "returned")
+    /\ CallStop("user", FALSE, IF StopJoins = "close" THEN "closeJoin" ELSE "returned")
+    /\ UNCHANGED <<life, chans, data>>
+
+\* In English: "The connection's teardown waits until every loop has
+\* exited, then Close returns. By then Stop has returned, so the Stop
+\* caller holds nothing a callback might be waiting for (as the
+\* local-tx clients hold busyMutex across Protocol.Stop)."
+\* Literally: "UserCloseJoin is defined as: pc of "user" equals
+\*   "closeJoin", and (Mutation equals "closeSkipsJoin", or for all l in
+\*   Loops, pc of l is a member of the set containing "notStarted" and
+\*   "exited"), and Goto of "user" and "closed", and everything else is
+\*   unchanged."
+UserCloseJoin ==
+    /\ pc["user"] = "closeJoin"
+    /\ Mutation = "closeSkipsJoin" \/ \A l \in Loops : pc[l] \in {"notStarted", "exited"}
+    /\ Goto("user", "closed")
     /\ UNCHANGED <<life, chans, data>>
 
 -----------------------------------------------------------------------------
@@ -595,13 +617,15 @@ RvHWait ==
     /\ Goto("rv", "wait")
     /\ UNCHANGED <<life, chans, data>>
 
-\* In English: "A handler waiting for the user's Stop call returns once it
+\* In English: "A handler waiting for the user's Stop call (say, on the
+\* busyMutex its caller holds across Protocol.Stop) returns once that call
 \* has returned."
 \* Literally: "RvHWaitCaller is defined as: pc of "rv" equals "hWaitCaller",
-\*   and pc of "user" equals "returned", and Goto of "rv" and "wait", and
-\*   everything else is unchanged."
+\*   and pc of "user" is a member of the set containing "returned",
+\*   "closeJoin" and "closed", and Goto of "rv" and "wait", and everything
+\*   else is unchanged."
 RvHWaitCaller ==
-    /\ pc["rv"] = "hWaitCaller" /\ pc["user"] = "returned"
+    /\ pc["rv"] = "hWaitCaller" /\ pc["user"] \in {"returned", "closeJoin", "closed"}
     /\ Goto("rv", "wait")
     /\ UNCHANGED <<life, chans, data>>
 
@@ -701,17 +725,18 @@ Watcher ==
 \* In English: "Everything is over: Start and Stop have returned and every
 \* loop has exited or never started."
 \* Literally: "Finished is defined as: pc of "owner" equals "done", and pc
-\*   of "user" equals "returned", and for all l in Loops, pc of l is a
-\*   member of the set containing "notStarted" and "exited"."
+\*   of "user" is a member of the set containing "returned" and "closed",
+\*   and for all l in Loops, pc of l is a member of the set containing
+\*   "notStarted" and "exited"."
 Finished ==
-    /\ pc["owner"] = "done" /\ pc["user"] = "returned"
+    /\ pc["owner"] = "done" /\ pc["user"] \in {"returned", "closed"}
     /\ \A l \in Loops : pc[l] \in {"notStarted", "exited"}
 
 \* In English: "A step is one step of one goroutine, the peer or the muxer;
 \* once everything is over, nothing changes. A state with no step that is
 \* not Finished is a deadlock, which TLC reports."
 \* Literally: "Next is defined as: PeerSend, or MuxerStop, or OwnerLock, or
-\*   OwnerCheck, or OwnerUnlock, or UserStop, or there exists a p in Procs
+\*   OwnerCheck, or OwnerUnlock, or UserStop, or UserCloseJoin, or there exists a p in Procs
 \*   such that StopStep of p, or RdWait, or RdDecode, or RdCbWait, or
 \*   RdQueueCheck, or RdQueue, or RdExit, or RvWait, or RvReq, or RvReply,
 \*   or RvHandler, or RvHWait, or RvHWaitCaller, or RvRestart, or RvExit,
@@ -719,7 +744,7 @@ Finished ==
 \*   (Finished and vars is unchanged)."
 Next ==
     \/ PeerSend \/ MuxerStop
-    \/ OwnerLock \/ OwnerCheck \/ OwnerUnlock \/ UserStop
+    \/ OwnerLock \/ OwnerCheck \/ OwnerUnlock \/ UserStop \/ UserCloseJoin
     \/ \E p \in Procs : StopStep(p)
     \/ RdWait \/ RdDecode \/ RdCbWait \/ RdQueueCheck \/ RdQueue \/ RdExit
     \/ RvWait \/ RvReq \/ RvReply \/ RvHandler \/ RvHWait \/ RvHWaitCaller
@@ -786,6 +811,14 @@ RestartNeverWaitsOnCallback ==
 \*   containing "notStarted" and "exited"."
 JoinedAfterStop ==
     pc["user"] = "returned" => \A l \in Loops : pc[l] \in {"notStarted", "exited"}
+
+\* In English: "Once Close has returned, every loop has exited, so no
+\* callback runs or can start (the join, where the reference does it)."
+\* Literally: "JoinedAfterClose is defined as: if pc of "user" equals
+\*   "closed", then for all l in Loops, pc of l is a member of the set
+\*   containing "notStarted" and "exited"."
+JoinedAfterClose ==
+    pc["user"] = "closed" => \A l \in Loops : pc[l] \in {"notStarted", "exited"}
 
 (* Reachability probes: each is expected to be violated. *)
 
