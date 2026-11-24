@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -149,6 +149,9 @@ ledger-byron: ## Check the Byron ledger model (UTxO, heavyweight delegation)
 
 ledger-leios: ## Check the Leios ledger model (certification, EB application, committee)
 	@scripts/run-model.sh specs/20-ledger-leios
+
+consensus-nonce: ## Check the epoch nonce model (evolving, candidate, tick)
+	@scripts/run-model.sh specs/21-consensus-nonce
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done
