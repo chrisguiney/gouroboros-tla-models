@@ -69,6 +69,7 @@ client table (288) against every server table (24), 6,912 starting pairs
 | `HandshakeStrictQuery.cfg` (gOuroboros after the fix: strict client) | 27,648 | passes |
 | `HandshakeGouroborosBug.cfg` (gOuroboros today: query checked first) | | **fails** `QueryOnlyWhenNegotiable` |
 | `HandshakeAcceptOwnDataBug.cfg` (gOuroboros today: accept carries the server's own data) | | **fails** `AcceptCarriesNegotiatedData` |
+| `HandshakeServerRawPeerDataBug.cfg` (PR #3194 at `77deeda7`: the server ends with the client's raw data) | | **fails** `AgreedDataBothSides` |
 | `HandshakeKeyOrder.cfg` (reference; client tables in any wire order, with or without an unrecognised key, and one injected table; one magic) | 758,780 | passes |
 | `HandshakeKeyOrderUnknown.cfg` (reference; recognised keys ascending, an unrecognised key anywhere) | 47,616 | passes, no failures |
 | `HandshakeKeyOrderBug.cfg` (gOuroboros today: key order not checked) | | **fails** `UnorderedMapsRejected` |
@@ -102,7 +103,7 @@ for a reference client: it recomputes `acceptableVersion` with its own data
 sharing `<>`, query `||`, Peras `min`) is idempotent and commutative, so
 `agree(c, agree(s, c)) = agree(c, s)`. The fix
 (`fix/handshake-accept-negotiated-data`) sends the agreed data; the
-`FinishedFunc` callback still receives the peer's data. PR #3194 at
+`FinishedFunc` callback received the peer's data until `8ab16c0f`. PR #3194 at
 `77deeda7` only moves `agreedVersionData` into
 `protocol/handshake/version_data.go`, the same file the simultaneous-open
 fix uses, so the two PRs share one agreement: no model change, as the
@@ -236,13 +237,16 @@ Branch `fix/handshake-simultaneous-open` follows the reference:
   passes `agreedVersionData(own, peer)` to `FinishedFunc`; the new mixed
   diffusion-mode cases in `TestSimultaneousOpen` and
   `TestSimultaneousOpenConnectionsMixedModes` fail without it.
-- Same class, not fixed here: on a normal open the gOuroboros server's
-  `FinishedFunc` still gets the client's raw data, while the reference
-  server ends with the agreed data (Server.hs 42-44). An initiator-only
-  server facing a full-duplex client sets its muxer to
-  initiator-and-responder instead of responder; its mini-protocols still
-  follow its own `fullDuplex`. Not modelled: `Handshake.tla` records no
-  per-side data on a normal open.
+- Same class, on a normal open: the gOuroboros server's `FinishedFunc`
+  got the client's raw data, while the reference server ends with the
+  agreed data (Server.hs 42-44). An initiator-only server facing a
+  full-duplex client set its muxer to initiator-and-responder instead of
+  responder. The model shared the gap: nothing compared the data each side
+  ends with. `AgreedDataBothSides` now does (switch `ServerRawPeerData`;
+  `HandshakeServerRawPeerDataBug.cfg` reproduces PR #3194 at `77deeda7`).
+  Fixed on PR #3194 at `8ab16c0f`: the callback gets the agreed data;
+  `TestServerEndsWithAgreedDiffusionMode` fails without it, both on the
+  callback data and, alone, on the muxer refusing a responder's segment.
 
 Tests: `protocol/handshake/simultaneous_open_test.go` (highest common
 version, a version only one side speaks, no common version, magic

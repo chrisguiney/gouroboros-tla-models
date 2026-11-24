@@ -298,6 +298,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/server.go` 161, 228
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/handshake-accept-negotiated-data`; model `handshake` `HandshakeAcceptOwnDataBug.cfg` reproduces main. No wrong outcome found: the reference client recomputes the agreement, and every combining rule is idempotent and commutative
+- **Review follow-up.** PR #3194 at `8ab16c0f`: the server's `FinishedFunc` also gets the agreed data (reference `Server.hs` 42-44); model `handshake` `AgreedDataBothSides`, `HandshakeServerRawPeerDataBug.cfg`
 
 ### N14
 
