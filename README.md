@@ -103,6 +103,9 @@ protocol.
 - [Model 24: Conway and Dijkstra](specs/24-ledger-conway-dijkstra/README.md):
   treasury values, reference-script fees, deposits, delegated
   withdrawals, and Dijkstra's sub-transactions and direct deposits.
+- [Model 26: parameter updates and MIR](specs/26-ledger-ppup-mir/README.md):
+  Shelley-to-Babbage update proposals and their adoption, and move
+  instantaneous rewards from the reserves and the treasury.
 - [Model 15: Conway governance](specs/15-ledger-governance/README.md):
   proposals, voting, ratification, enactment and refunds.
 - [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
