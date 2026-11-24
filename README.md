@@ -89,6 +89,9 @@ protocol.
   to Babbage.
 - [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
   UTxO rule, fees and heavyweight delegation.
+- [Model 23: the block-body rule](specs/23-ledger-bbody/README.md): body
+  size and hash, transactions applied in order, execution-unit and
+  reference-script totals, and the header's protocol version.
 - [Model 15: Conway governance](specs/15-ledger-governance/README.md):
   proposals, voting, ratification, enactment and refunds.
 - [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
