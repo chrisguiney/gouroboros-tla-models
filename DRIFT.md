@@ -434,9 +434,9 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **What differs.** Reference: the node holds the answer until the mempool changes. gOuroboros: main: the client times it at 5 s, so it dies against a real node; PR: not timed (acquire from `Idle` still is).
 - **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, local tx-monitor, lines 2112-2113 and 2172-2174: "[MsgAwaitAcquire] Like 'MsgAcquire' but await a new snapshot different from the one currently acquired." / "No timeouts."
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/MiniProtocol/LocalTxMonitor/Server.hs` 85 (`recvMsgAwaitAcquire`)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/localtxmonitor.go` 205; PR #3154 head `e9996adee` same file 69-73, 147-149
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/localtxmonitor.go` 205; PR #3154 head `615e2a84` same file 69-73, 147-149, and `client.go` `Stop`, which ends a call waiting for the server rather than waiting for its answer under `busyMutex` (at `e9996ade` a `Stop` during an await waited forever)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3154
+- **Status.** Open PR #3154 (head `615e2a84`). Model: `specs/09-localtx/LocalTxMonitorStopWaitBug.cfg` (`StopNeverWaitsOnPeer`)
 
 ### N27
 
