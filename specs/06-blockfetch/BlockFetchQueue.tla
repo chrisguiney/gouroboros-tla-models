@@ -84,6 +84,8 @@ CONSTANTS
     \* token back as soon as the send returns, before the removal.
     TokenCoversRemoval
 
+\* In English: "Each caller's request id."
+\* Literally: "Ids is defined as 1 through Callers."
 Ids == 1..Callers
 
 VARIABLES
@@ -108,10 +110,18 @@ VARIABLES
     misrouted, \* TRUE once an answer was applied to another request
     clientErr  \* TRUE once the handler refused an honest answer
 
+\* Literally: "vars is defined as the tuple of all eleven variables."
 vars == <<caller, handedOver, token, queue, up, toServer, sv, toClient, done,
           misrouted, clientErr>>
 
 \* In English: "Nobody has called yet; the protocol runs; nothing in flight."
+\* Literally: "Init is defined as: caller equals the function that maps every i
+\*   in Ids to "new", and handedOver equals the empty set, and token equals 0,
+\*   and queue equals the empty sequence, and up equals TRUE, and toServer
+\*   equals the empty sequence, and sv equals the record whose field id is 0 and
+\*   field phase is "idle", and toClient equals the empty sequence, and done
+\*   equals the function that maps every i in Ids to 0, and misrouted equals
+\*   FALSE, and clientErr equals FALSE."
 Init ==
     /\ caller = [i \in Ids |-> "new"]
     /\ handedOver = {}
@@ -129,9 +139,13 @@ Init ==
 \* SelectSeq(s, Test) keeps the items of list s for which Test is true, in
 \* order; LAMBDA r : P is an unnamed test, like a Go func literal. Both are
 \* in "Specifying Systems" section 18.1 (the Sequences module).
+\* Literally: "Without of q and i is defined as SelectSeq of q and the unnamed
+\*   test that, given r, is r's id does not equal i."
 Without(q, i) == SelectSeq(q, LAMBDA r : r.id /= i)
 
 \* In English: "Request i is somewhere in the queue."
+\* Literally: "Queued of q and i is defined as: there exists a k in 1 through
+\*   the length of q such that element k of q's id equals i."
 Queued(q, i) == \E k \in 1..Len(q) : q[k].id = i
 
 -----------------------------------------------------------------------------
@@ -140,6 +154,13 @@ Queued(q, i) == \E k \in 1..Len(q) : q[k].id = i
 \* In English: "Caller i takes the send token (if the code uses one) and
 \* appends its request to the queue." The code may take the token even
 \* after the protocol stopped: its select has both cases ready.
+\* Literally: "Admit of i is defined as: caller of i equals "new", and if
+\*   UseSendToken is true, then token equals 0, and token in the next state
+\*   equals: if UseSendToken then i, else token; and queue in the next state
+\*   equals queue with the record whose field id is i and field started is FALSE
+\*   appended, and caller in the next state equals caller except that its i
+\*   entry is "appended", and handedOver, up, toServer, sv, toClient, done,
+\*   misrouted and clientErr are unchanged."
 Admit(i) ==
     /\ caller[i] = "new"
     /\ UseSendToken => token = 0               \* the token is free
@@ -152,6 +173,12 @@ Admit(i) ==
 \* In English: "Caller i queues its MsgRequestRange and returns the id, and
 \* hands the token back. With DrainDefersSending, a successful send only
 \* moves the caller to "sendOk"; SendFinish then returns the id."
+\* Literally: "Send of i is defined as: caller of i equals "appended", and up is
+\*   true, and toServer in the next state equals toServer with i appended, and
+\*   caller in the next state equals caller except that its i entry is: if
+\*   DrainDefersSending then "sendOk", else "sent"; and token in the next state
+\*   equals: if token equals i then 0, else token; and handedOver, queue, up,
+\*   sv, toClient, done, misrouted and clientErr are unchanged."
 Send(i) ==
     /\ caller[i] = "appended"
     /\ up
@@ -166,6 +193,12 @@ Send(i) ==
 \* stopped, and with SendCanFail also while it runs. Nothing reaches the
 \* wire. Without TokenCoversRemoval the token is handed back here, while
 \* the request is still queued."
+\* Literally: "SendFail of i is defined as: caller of i equals "appended", and
+\*   (up is not true, or SendCanFail is true), and caller in the next state
+\*   equals caller except that its i entry is "sendFailed", and token in the
+\*   next state equals: if TokenCoversRemoval is not true and token equals i
+\*   then 0, else token; and handedOver, queue, up, toServer, sv, toClient,
+\*   done, misrouted and clientErr are unchanged."
 SendFail(i) ==
     /\ caller[i] = "appended"
     /\ ~up \/ SendCanFail
@@ -177,6 +210,12 @@ SendFail(i) ==
 \* In English: "Caller i, whose send failed, takes its request out of the
 \* queue if it is still there (removeLocked), hands the token back if it
 \* still holds it, and returns an error."
+\* Literally: "SendRefused of i is defined as: caller of i equals "sendFailed",
+\*   and queue in the next state equals Without of queue and i, and caller in
+\*   the next state equals caller except that its i entry is "refused", and
+\*   token in the next state equals: if token equals i then 0, else token; and
+\*   handedOver, up, toServer, sv, toClient, done, misrouted and clientErr are
+\*   unchanged."
 SendRefused(i) ==
     /\ caller[i] = "sendFailed"
     /\ queue' = Without(queue, i)
@@ -188,6 +227,12 @@ SendRefused(i) ==
 \* In English: "Caller i, whose send succeeded, clears its sending mark and
 \* returns the id. If a drain took the request while it was still sending,
 \* the caller resolves it now with the drain's error." (DrainDefersSending)
+\* Literally: "SendFinish of i is defined as: caller of i equals "sendOk", and
+\*   caller in the next state equals caller except that its i entry is "sent",
+\*   and done in the next state equals: if SenderResolvesDrained is true and i
+\*   is a member of handedOver, then done except that its i entry is the old
+\*   entry plus 1, else done; and handedOver, token, queue, up, toServer, sv,
+\*   toClient, misrouted and clientErr are unchanged."
 SendFinish(i) ==
     /\ caller[i] = "sendOk"
     /\ caller' = [caller EXCEPT ![i] = "sent"]
@@ -203,6 +248,12 @@ SendFinish(i) ==
 (* It keeps going whether or not the client's protocol still runs.         *)
 
 \* In English: "Idle, the server takes the next request."
+\* Literally: "ServerTake is defined as: sv's phase equals "idle", and toServer
+\*   does not equal the empty sequence, and sv in the next state equals the
+\*   record whose field id is the head of toServer and field phase is "busy",
+\*   and toServer in the next state equals the tail of toServer, and caller,
+\*   handedOver, token, queue, up, toClient, done, misrouted and clientErr are
+\*   unchanged."
 ServerTake ==
     /\ sv.phase = "idle" /\ toServer /= <<>>
     /\ sv' = [id |-> Head(toServer), phase |-> "busy"]
@@ -212,6 +263,20 @@ ServerTake ==
 
 \* In English: "Busy, the server answers MsgNoBlocks or MsgStartBatch;
 \* streaming, it sends the block, then MsgBatchDone."
+\* Literally: "ServerAnswer is defined as: either (sv's phase equals "busy", and
+\*   either (toClient in the next state equals toClient with the record whose
+\*   field id is sv's id and field m is "NB" appended, and sv in the next state
+\*   equals sv except that its phase field is "idle") or (toClient in the next
+\*   state equals toClient with the record whose field id is sv's id and field m
+\*   is "SB" appended, and sv in the next state equals sv except that its phase
+\*   field is "block")), or (sv's phase equals "block", and toClient in the next
+\*   state equals toClient with the record whose field id is sv's id and field m
+\*   is "B" appended, and sv in the next state equals sv except that its phase
+\*   field is "end"), or (sv's phase equals "end", and toClient in the next
+\*   state equals toClient with the record whose field id is sv's id and field m
+\*   is "BD" appended, and sv in the next state equals sv except that its phase
+\*   field is "idle"); and caller, handedOver, token, queue, up, toServer, done,
+\*   misrouted and clientErr are unchanged."
 ServerAnswer ==
     /\ \/ /\ sv.phase = "busy"
           /\ \/ /\ toClient' = Append(toClient, [id |-> sv.id, m |-> "NB"])
@@ -235,6 +300,25 @@ ServerAnswer ==
 \* not started for MsgStartBatch and MsgNoBlocks, started for MsgBlock and
 \* MsgBatchDone. Otherwise it refuses the answer and the protocol stops.
 \* MsgNoBlocks and MsgBatchDone remove the head and resolve it."
+\* Literally: "ClientRecv is defined as: up is true, and toClient does not equal
+\*   the empty sequence, and, letting a be the head of toClient and wantStarted
+\*   be (a's m is a member of the set containing "B" and "BD"): if queue equals
+\*   the empty sequence or the head of queue's started does not equal
+\*   wantStarted, then clientErr in the next state equals TRUE, and up in the
+\*   next state equals FALSE, and queue, done and misrouted are unchanged; else,
+\*   letting h be the head of queue: misrouted in the next state equals
+\*   (misrouted or h's id does not equal a's id), and, in the case a's m equals
+\*   "SB", queue in the next state equals (if StartMarksStarted then queue
+\*   except that its element 1's started field is TRUE, else queue) and done is
+\*   unchanged; in the case a's m equals "B", queue and done are unchanged; in
+\*   the case a's m equals "NB", queue in the next state equals (if
+\*   NoBlocksRemovesHead then the tail of queue, else queue) and done in the
+\*   next state equals done except that its h's id entry is the old entry plus
+\*   1; in the case a's m equals "BD", queue in the next state equals the tail
+\*   of queue and done in the next state equals done except that its h's id
+\*   entry is the old entry plus 1; and up and clientErr are unchanged; and
+\*   toClient in the next state equals the tail of toClient, and caller,
+\*   handedOver, token, toServer and sv are unchanged."
 ClientRecv ==
     /\ up /\ toClient /= <<>>
     /\ LET a == Head(toClient)
@@ -266,6 +350,9 @@ ClientRecv ==
 \* In English: "The protocol stops: the peer sent something wrong, a range
 \* outlived its deadline, the connection closed, or the application
 \* called Stop. This model does not care which."
+\* Literally: "Shutdown is defined as: up is true, and up in the next state
+\*   equals FALSE, and caller, handedOver, token, queue, toServer, sv, toClient,
+\*   done, misrouted and clientErr are unchanged."
 Shutdown ==
     /\ up
     /\ up' = FALSE
@@ -273,6 +360,10 @@ Shutdown ==
                    done, misrouted, clientErr>>
 
 \* In English: "Once stopped, answers still arriving are dropped."
+\* Literally: "ClientDrop is defined as: up is not true, and toClient does not
+\*   equal the empty sequence, and toClient in the next state equals the tail of
+\*   toClient, and caller, handedOver, token, queue, up, toServer, sv, done,
+\*   misrouted and clientErr are unchanged."
 ClientDrop ==
     /\ ~up /\ toClient /= <<>>
     /\ toClient' = Tail(toClient)
@@ -284,6 +375,23 @@ ClientDrop ==
 \* a request whose caller has not yet sent it is left to that caller, still
 \* queued. With DrainDefersSending, every request leaves the queue, but one
 \* whose caller is still sending is handed over to that caller unresolved."
+\* Literally: "Drain is defined as: DrainOnShutdown is true, and up is not true,
+\*   and, letting sending of r be (caller of r's id is a member of the set
+\*   containing "appended", "sendOk" and "sendFailed"), resolveNow of r be (if
+\*   DrainDefersSending then sending of r is not true, else DrainSkipsUnsent is
+\*   not true or caller of r's id equals "sent"), leave of r be
+\*   (DrainDefersSending is not true and resolveNow of r is not true), taken be
+\*   SelectSeq of queue and resolveNow, given be SelectSeq of queue and the
+\*   unnamed test that, given r, is DrainDefersSending and sending of r, and ids
+\*   be the set of element k of taken's id, for every k that is a member of 1
+\*   through the length of taken: (taken does not equal the empty sequence or
+\*   given does not equal the empty sequence), and queue in the next state
+\*   equals SelectSeq of queue and leave, and handedOver in the next state
+\*   equals the union of handedOver and the set of element k of given's id, for
+\*   every k that is a member of 1 through the length of given, and done in the
+\*   next state equals the function that maps every i in Ids to: if i is a
+\*   member of ids then done of i plus 1, else done of i; and caller, token, up,
+\*   toServer, sv, toClient, misrouted and clientErr are unchanged."
 Drain ==
     /\ DrainOnShutdown
     /\ ~up
@@ -307,6 +415,11 @@ Drain ==
 -----------------------------------------------------------------------------
 
 \* In English: "Every caller has its answer, and nothing is left to do."
+\* Literally: "Finished is defined as: for all i in Ids, caller of i is a member
+\*   of the set containing "sent" and "refused"; and toServer equals the empty
+\*   sequence, and toClient equals the empty sequence, and sv's phase equals
+\*   "idle"; and queue equals the empty sequence or DrainOnShutdown is not
+\*   true."
 Finished ==
     /\ \A i \in Ids : caller[i] \in {"sent", "refused"}
     /\ toServer = <<>> /\ toClient = <<>> /\ sv.phase = "idle"
@@ -314,10 +427,17 @@ Finished ==
 
 \* In English: "Once finished, nothing changes (an explicit end, so TLC
 \* does not report the end as a deadlock)."
+\* Literally: "Quiet is defined as: Finished, and vars is unchanged."
 Quiet ==
     /\ Finished
     /\ UNCHANGED vars
 
+\* In English: "A step is any one caller, server, handler or shutdown step, or
+\* nothing left to do."
+\* Literally: "Next is defined as: there exists an i in Ids such that Admit of i
+\*   or Send of i or SendFinish of i or SendFail of i or SendRefused of i; or
+\*   ServerTake or ServerAnswer; or ClientRecv or Shutdown or ClientDrop or
+\*   Drain; or Quiet."
 Next ==
     \/ \E i \in Ids : Admit(i) \/ Send(i) \/ SendFinish(i)
                       \/ SendFail(i) \/ SendRefused(i)
@@ -325,47 +445,69 @@ Next ==
     \/ ClientRecv \/ Shutdown \/ ClientDrop \/ Drain
     \/ Quiet
 
+\* In English: "Start in Init, and take only Next steps."
+\* Literally: "Spec is defined as: Init, and always, every step is a Next step
+\*   or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 (* Invariants. *)
 
 \* In English: "Every answer is applied to the request that asked for it."
+\* Literally: "AnswersReachTheirRequest is defined as: misrouted is not true."
 AnswersReachTheirRequest == ~misrouted
 
 \* In English: "An honest server's answer is never refused."
+\* Literally: "HonestAnswersAccepted is defined as: clientErr is not true."
 HonestAnswersAccepted == ~clientErr
 
 \* In English: "RangeDoneFunc runs at most once per request."
+\* Literally: "ResolvedAtMostOnce is defined as: for all i in Ids, done of i is
+\*   less than or equal to 1."
 ResolvedAtMostOnce == \A i \in Ids : done[i] <= 1
 
 \* In English: "Once everything is over, every request RequestRange
 \* returned an id for was resolved exactly once."
+\* Literally: "EveryReturnedIdResolved is defined as: if Finished, then for all
+\*   i in Ids, if caller of i equals "sent", then done of i equals 1."
 EveryReturnedIdResolved ==
     Finished => \A i \in Ids : caller[i] = "sent" => done[i] = 1
 
 \* In English: "RangeDoneFunc never runs for a request whose RequestRange
 \* returned an error: the caller never got that id."
+\* Literally: "NoCallbackForRefused is defined as: for all i in Ids, if caller
+\*   of i equals "refused", then done of i equals 0."
 NoCallbackForRefused ==
     \A i \in Ids : caller[i] = "refused" => done[i] = 0
 
 \* Reachability probes, each EXPECTED to be violated.
 \* In English: "There is never more than one request queued." Violated = the
 \* client does pipeline.
+\* Literally: "ProbeNeverPipelined is defined as: the length of queue is less
+\*   than or equal to 1."
 ProbeNeverPipelined == Len(queue) <= 1
 \* In English: "No caller is ever refused." Violated = the shutdown path
 \* that refuses a caller is reachable.
+\* Literally: "ProbeNeverRefused is defined as: for all i in Ids, caller of i
+\*   does not equal "refused"."
 ProbeNeverRefused == \A i \in Ids : caller[i] /= "refused"
 \* In English: "A MsgNoBlocks never resolves a request while another is
 \* queued behind it." Violated = MsgNoBlocks happens mid-pipeline.
+\* Literally: "ProbeNoBlocksMidPipeline is defined as: (the length of queue is
+\*   greater than or equal to 2, and toClient does not equal the empty sequence,
+\*   and the head of toClient's m equals "NB") is not true."
 ProbeNoBlocksMidPipeline ==
     ~(Len(queue) >= 2 /\ toClient /= <<>> /\ Head(toClient).m = "NB")
 \* In English: "No send fails while the protocol runs." Violated = the
 \* SendCanFail path is reachable.
+\* Literally: "ProbeNeverFailsWhileUp is defined as: for all i in Ids, (caller
+\*   of i equals "sendFailed" and up is true) is not true."
 ProbeNeverFailsWhileUp == \A i \in Ids : ~(caller[i] = "sendFailed" /\ up)
 \* In English: "A drain never hands a request whose send succeeded over to
 \* its caller." Violated = with DrainDefersSending, the path where the
 \* caller resolves the request itself is reachable.
+\* Literally: "ProbeNeverHandedOverAndSent is defined as: for all i in Ids, (i
+\*   is a member of handedOver and caller of i equals "sent") is not true."
 ProbeNeverHandedOverAndSent ==
     \A i \in Ids : ~(i \in handedOver /\ caller[i] = "sent")
 =============================================================================
