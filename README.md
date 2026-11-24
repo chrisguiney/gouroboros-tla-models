@@ -30,9 +30,19 @@ Read these in order. Each one builds on the last.
    multiplexer, and messages surviving a restart.
 6. [Model 03: the protocol engine](specs/03-engine/README.md): the code every
    mini-protocol runs on, starting with how it admits incoming messages.
-7. [Model 04: the chain-sync client](specs/04-chainsync/README.md): the
-   sync window, and changing course with `Reintersect`.
-8. [Glossary](docs/glossary.md): keep it open while you read anything else.
+7. [Model 04: chain-sync](specs/04-chainsync/README.md): the client's sync
+   window, stopping and restarting, its queries, and the protocol with its
+   limits and timeouts.
+8. [Model 05: the handshake](specs/05-handshake/README.md): version
+   negotiation, queries, and simultaneous open.
+9. [Model 06: block-fetch](specs/06-blockfetch/README.md): matching each
+   batch to its request, and stopping with ranges outstanding.
+10. [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
+    rules, size limits and timeouts.
+11. [Glossary](docs/glossary.md): keep it open while you read anything else.
+
+`make models` checks every configuration of every model; a configuration
+named `*Bug.cfg` is expected to fail, and the script says so if it does not.
 
 ## What is in the repository
 
