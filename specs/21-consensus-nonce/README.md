@@ -43,10 +43,10 @@ with extra entropy, the caller (`Contract`, `Dingo`, `Direct`), what the
 caller passes `CalculateRollingNonce` (`Nonce`: 32 bytes; `Raw`: the 64-byte
 VRF output), and the gOuroboros fixes in force (`GoFix`).
 
-| Rule | Specification | Reference | gOuroboros (main) |
+| Rule | Specification | Reference | gOuroboros (main at `756a9a89`) |
 | --- | --- | --- | --- |
-| ⭒ | `seedOp`, abstract | `Nonce a ⭒ Nonce b = Nonce (blake2b (a‖b))`, `NeutralNonce` identity on both sides (BaseTypes 607-612) | rolling: 32 zero bytes is neutral, but the result is `blake2b(x)`, not `x`; epoch: no neutral at all, zero bytes are hashed |
-| Block nonce | `bnonce` | TPraos `blake2b(output)` (BaseTypes 615-619); Praos `blake2b(blake2b("N"‖output))` (Praos/VRF.hs 121-134) | 32-byte operand used as given; **64-byte operand concatenated raw** |
+| ⭒ | `seedOp`, abstract | `Nonce a ⭒ Nonce b = Nonce (blake2b (a‖b))`, `NeutralNonce` identity on both sides (BaseTypes 607-612) | rolling: `CombineNonces` has `NonceTypeNeutral` as identity on both sides, and 32 zero bytes are an ordinary nonce (before `756a9a89`: zero bytes were neutral but the result was `blake2b(x)`); epoch: no neutral at all, zero bytes are hashed |
+| Block nonce | `bnonce` | TPraos `blake2b(output)` (BaseTypes 615-619); Praos `blake2b(blake2b("N"‖output))` (Praos/VRF.hs 121-134) | `NonceFromTPraosVRF` and `NonceFromPraosVRF` derive it as the reference does; `CalculateRollingNonce` rejects a 64-byte operand (before `756a9a89`: concatenated raw) |
 | Freeze | `s < firstSlot(e+1) − StabilityWindow` (chain.tex 600-640), meant 4k/f (errata 17.3) | strict `<`; 3k/f for TPraos and Babbage, 4k/f from Conway (Node.hs 590-597, 692-702) | caller's |
 | Tick | `η0 := ηc ⭒ ηh ⭒ ηe`, `ηh := ηph` (chain.tex 514-533) | same (Tickn.hs 71-81); Praos without ηe (PolyPraos 606-640); once per block, however many epochs passed (Util.hs 22-42) | `blake2b(ηc‖ηh)`, then `‖ ηe` unless empty |
 | ηph | hash of the last applied block itself (chain.tex 1748, 1809) | **its predecessor's hash** (`prevHashToNonce (bheaderPrev …)`, API.hs 563, 599; PolyPraos 713) | caller's; the parameter is named `prevEpochFirstBlockHash` |
@@ -79,8 +79,8 @@ Invariants:
 | `EpochNonceNeutralInitFixed.cfg` (neutral initial nonce, direct, neutral fix) | 8,930 | passes |
 | `EpochNonceNeutralInitContract.cfg` (neutral initial nonce, main's contract) | 8,930 | passes |
 | `EpochNonceDirectLabBug.cfg` | main: zero ηh is hashed in | `EpochNonceAgrees` |
-| `EpochNonceRawOperandBug.cfg` | main: 64-byte output concatenated raw | `StateAgrees` |
-| `EpochNonceNeutralInitBug.cfg` | main: neutral ηv hashes the block nonce again | `StateAgrees` |
+| `EpochNonceRawOperandBug.cfg` | main before `756a9a89`: 64-byte output concatenated raw | `StateAgrees` |
+| `EpochNonceNeutralInitBug.cfg` | main before `756a9a89`: neutral ηv hashes the block nonce again | `StateAgrees` |
 | `EpochNonceVrfInputBug.cfg` | main: neutral η0 appended as zero bytes | `VrfInputAgrees` |
 | `EpochNonceFreezeLEBug.cfg` | mutation: `<=` | `StateAgrees` |
 | `EpochNonceNoFreezeBug.cfg` | mutation: never freeze | `StateAgrees` |

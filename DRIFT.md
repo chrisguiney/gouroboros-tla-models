@@ -113,8 +113,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [C9](#c9) | consensus | Genesis window size in Byron | 2k | 3k/f, which is 3k with f = 1 | s = 3k/f | conforms | Recorded; nothing calls it for Byron |
 | [C10](#c10) | consensus | Byron re-delegation to the delegate already active | No change | Rewrites the activation slot; the delegation map is the same | A delegate already in the map leaves the state unchanged | conforms | Benign (model 19, `ProbeSlotsDiffer`): the slot is read only by a check every later schedule passes |
 | [C11](#c11) | consensus | Tachys leader schedule | None | Optional public leader schedule that replaces the private VRF lottery for issuer authorization (`NewTachysLeaderSelector`, `NewTachysHeaderValidator`) | CIP-0177 (Proposed) | conforms (implementation choice) | Opt-in, for partner chains. Not Praos: a Tachys header is not valid on a Praos network, and nothing selects it by default |
-| [C12](#c12) | consensus | Rolling nonce from a raw 64-byte VRF output | The VRF output is hashed to a 32-byte nonce first (`mkNonceFromOutputVRF`), then combined | `CalculateRollingNonce` accepts the 64-byte output and hashes `prev ‖ output` (96 bytes) | Combine two seeds; the block's seed is the nonce from its header | does not conform | Fixed on local branch `fix/ledger-nonce-raw-vrf-operand` (`182fa3fd`), no PR yet. Dingo passes the 32-byte nonce, so it is unaffected |
-| [C13](#c13) | consensus | The neutral nonce as an identity | `x ⭒ NeutralNonce = x` and `NeutralNonce ⭒ x = x` | From a zero evolving nonce `CalculateRollingNonce` returns `blake2b(x)`; `CalculateEpochNonce` hashes a zero (or rejects an empty) candidate or lab nonce | `0_seed` is the neutral element of ⭒ | does not conform | Fixed on local branch `fix/ledger-nonce-neutral-identity` (`3284a9cb`), no PR yet. Reached at the second tick after a chain's start; Dingo applies the identity by hand on the public networks |
+| [C12](#c12) | consensus | Rolling nonce from a raw 64-byte VRF output | The VRF output is hashed to a 32-byte nonce first (`mkNonceFromOutputVRF`), then combined | main before `756a9a89`: `CalculateRollingNonce` accepted the 64-byte output and hashed `prev ‖ output` (96 bytes). Now `NonceFromTPraosVRF`/`NonceFromPraosVRF` derive the contribution and a 64-byte operand is rejected | Combine two seeds; the block's seed is the nonce from its header | does not conform → conforms | Fixed by #3053 (merged, `756a9a89`) |
+| [C13](#c13) | consensus | The neutral nonce as an identity | `x ⭒ NeutralNonce = x` and `NeutralNonce ⭒ x = x` | Rolling: `CombineNonces` has `NonceTypeNeutral` as identity on both sides since `756a9a89`. Epoch: `CalculateEpochNonce` still hashes a zero (or rejects an empty) candidate or lab nonce | `0_seed` is the neutral element of ⭒ | does not conform (epoch nonce only) | Rolling part fixed by #3053 (`756a9a89`). Epoch part open; local branch `fix/ledger-nonce-neutral-identity` (`3284a9cb`) predates #3053 and needs rework onto `CombineNonces`. Dingo applies the identity by hand |
 | [C14](#c14) | consensus | A neutral epoch nonce in the VRF input | Appends nothing for a neutral η0 | `MkInputVrf` and `MkSeedTPraos` need 32 bytes, so a neutral η0 is passed as 32 zero bytes | `slotToSeed slot ⭒ η0`, with `0_seed` neutral | does not conform | Open, no branch; fixing it changes the API. Only a chain with a neutral initial nonce reaches it, in its first epoch |
 | [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129. Dingo's view already satisfies the contract |
 | [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: a pure function, covered by Go tests |
@@ -806,9 +806,9 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **What differs.** Reference: the VRF output is hashed to a 32-byte nonce first (`mkNonceFromOutputVRF`), then combined. gOuroboros: `CalculateRollingNonce` accepts the 64-byte output and hashes `prev ‖ output` (96 bytes).
 - **Spec.** cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/crypto-details.tex` lines 71-72; `chain.tex` 615 (`η_v ⭒ η`): "The seed operation x ⭒ y ... is implemented as the BLAKE2b-256 hash of the concatenation of x and y."
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/BaseTypes.hs` 615-619 (`mkNonceFromOutputVRF` hashes the output), 607-610 (`⭒`)
-- **gOuroboros.** gOuroboros `d0b95845` `ledger/common/nonce.go` 115
-- **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/ledger-nonce-raw-vrf-operand` (`182fa3fd`), no PR yet. Dingo passes the 32-byte nonce, so it is unaffected
+- **gOuroboros.** gOuroboros `d0b95845` `ledger/common/nonce.go` 115 (before); `756a9a89` `ledger/common/nonce.go` 96-156 (`NonceFromTPraosVRF`, `NonceFromPraosVRF`, `CombineNonces`, `CalculateRollingNonce` rejecting 64 bytes)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed by #3053 (merged, `756a9a89`). It reproduces the 15 chained mainnet Shelley vectors the model's Go test uses. The local branch `fix/ledger-nonce-raw-vrf-operand` is superseded. Dingo passes the 32-byte nonce, so it is unaffected
 
 ### C13
 
@@ -817,9 +817,9 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **What differs.** Reference: `x ⭒ NeutralNonce = x` and `NeutralNonce ⭒ x = x`. gOuroboros: from a zero evolving nonce `CalculateRollingNonce` returns `blake2b(x)`; `CalculateEpochNonce` hashes a zero (or rejects an empty) candidate or lab nonce.
 - **Spec.** cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/crypto-primitives.tex`, "VRF definitions", line 258: "0_seed ∈ Seed   neutral seed element"
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/BaseTypes.hs` 611-612
-- **gOuroboros.** gOuroboros `d0b95845` `ledger/common/nonce.go` 115, 159
-- **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/ledger-nonce-neutral-identity` (`3284a9cb`), no PR yet. Reached at the second tick after a chain's start; Dingo applies the identity by hand on the public networks
+- **gOuroboros.** gOuroboros `756a9a89` `ledger/common/nonce.go` 128 (`CombineNonces`: neutral identity on both sides), 188 (`CalculateEpochNonce`: no neutral input)
+- **Verdict.** does not conform (epoch nonce only)
+- **Status.** Rolling part fixed by #3053 (merged, `756a9a89`). `CalculateEpochNonce` still cannot take a neutral candidate or lab nonce; reached at the second tick after a chain's start. The local branch `fix/ledger-nonce-neutral-identity` predates #3053 and needs rework onto `CombineNonces`. Dingo applies the identity by hand on the public networks
 
 ### C14
 
@@ -1083,8 +1083,7 @@ No pull request yet (decide whether and how to fix):
 - **N32** Other servers that do not restart after `MsgDone`. Not fixed. Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.
 - **C6** Genesis window anchor. Not fixed; correct only if the caller anchors every fragment at one point (model 18, `OwnAnchorBug`).
 - **C8** Genesis window count from `SimpleChainFragment`. The float rounding is fixed on local branch `fix/genesis-window-estimate-rounding` (`74699bf6`, no PR); the estimate itself remains. Callers with real headers should implement `ChainFragment` with a count.
-- **C12** Rolling nonce from a raw 64-byte VRF output. Fixed on local branch `fix/ledger-nonce-raw-vrf-operand` (`182fa3fd`), no PR yet. Dingo passes the 32-byte nonce, so it is unaffected.
-- **C13** The neutral nonce as an identity. Fixed on local branch `fix/ledger-nonce-neutral-identity` (`3284a9cb`), no PR yet. Reached at the second tick after a chain's start; Dingo applies the identity by hand on the public networks.
+- **C13** The neutral nonce as an identity in `CalculateEpochNonce` (the rolling part is fixed by #3053). Open.
 - **C14** A neutral epoch nonce in the VRF input. Open, no branch; fixing it changes the API. Only a chain with a neutral initial nonce reaches it, in its first epoch.
 - **L5** Byron transaction with no inputs or no outputs. Fixed on a local branch, no PR yet.
 - **L6** Byron `maxTxSize`. Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`).
