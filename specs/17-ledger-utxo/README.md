@@ -82,8 +82,8 @@ Two specifications:
 
 | Config | Result | Distinct states |
 |---|---|---|
-| `UtxoShelleyTable` .. `UtxoBabbageTable` | `GoAgrees`, `GoBadInputsComplete` hold in every era | 253 per era with tokens (91 Shelley, Allegra) |
-| `UtxoAlonzoNoCollLookup`, `UtxoBabbageNoCollLookup`, `UtxoBabbageNoRefLookup` | both hold with a witness lookup removed | 253 |
+| `UtxoShelleyTable` .. `UtxoBabbageTable` | `GoAgrees`, `GoBadInputsComplete`, `GoMissingInputIsBadInputs` hold in every era | 253 per era with tokens (91 Shelley, Allegra) |
+| `UtxoAlonzoNoCollLookup`, `UtxoBabbageNoCollLookup`, `UtxoBabbageNoRefLookup` | all three hold with a witness lookup removed | 253 |
 | `UtxoShelleyLedger` .. `UtxoMaryLedger` | all hold | see "Running it" |
 | `UtxoAlonzoLedger` | all hold | 1,322 |
 | `UtxoBabbageLedger` (2 transactions) | all hold | 2,328 |
@@ -126,6 +126,31 @@ naming missing collateral (or any missing reference input) is accepted.
 Conway and Dijkstra use Babbage's set, so the model stops at Babbage;
 sub-transactions are covered by the Go tests only.
 
+**Review finding, fixed on PR #3193 at `efd0b081`: which rule reports the
+missing input.** The set alone was not enough. gOuroboros' rule lists stop
+at the first failure, and in Alonzo, Babbage, Conway and Dijkstra the
+collateral-vkey-witnesses rule, the script-witness rules, the cost-model
+rule and the collateral balance rules ran ahead of BadInputs. Each looks
+collateral or reference inputs up and reported a missing one in its own
+terms ("UTxO not found for collateral input",
+`ReferenceInputResolutionError`), so `VerifyTransaction` never reached the
+widened BadInputs. The reference accumulates every UTXO and UTXOW failure
+(the `Validation` applicative), so its list always holds `BadInputsUTxO`.
+BadInputs now runs first in those rule lists ([G10]).
+
+The model shared the gap: `GoAgrees` and `GoBadInputsComplete` ask only
+whether a transaction is rejected, not by which rule. `GoOrder` now lists
+the rules that look an input up in the order the rule list runs them,
+`GoFirstLookupFailure` is the one that reports a missing input, and
+`GoMissingInputIsBadInputs` requires it to be BadInputs whenever the
+reference rejects for a missing input. `UtxoGoBadInputsLate{Alonzo,Babbage}Bug`
+put the old order back and fail it.
+
+The same review found that the Dijkstra BadInputs rule panicked on a nil
+ledger state with a reference input; `ValidateBadInputs` now lists every
+input when there is no state. The model has no "no ledger state", so this
+is covered by `TestDijkstraBadInputsNilLedgerState` only.
+
 ## Checking the checks
 
 | Config | Mutation | Fails |
@@ -137,6 +162,8 @@ sub-transactions are covered by the Go tests only.
 | `UtxoGoSpentOnlyRefsUnresolvedBug` | old BadInputs, and reference inputs never resolved | `GoAgrees` |
 | `UtxoGoBadInputsSpentOnlyAlonzoBug` | old BadInputs (spent inputs only), Alonzo | `GoBadInputsComplete` |
 | `UtxoGoBadInputsSpentOnlyBabbageBug` | old BadInputs (spent inputs only), Babbage | `GoBadInputsComplete` |
+| `UtxoGoBadInputsLateAlonzoBug` | old rule order (witness and collateral rules ahead of BadInputs), Alonzo | `GoMissingInputIsBadInputs` |
+| `UtxoGoBadInputsLateBabbageBug` | old rule order, Babbage | `GoMissingInputIsBadInputs` |
 | `UtxoGoCollIgnoresReturnBug` | collateral percentage ignores the return | `GoAgrees` |
 | `UtxoGoDisjointAlwaysBug` | Babbage pv 7-8 rejects overlapping reference inputs | `GoAgrees` |
 | `UtxoSpecNoRefundBug` | consumed leaves out the refund | `ValuePreserved` |
@@ -160,10 +187,16 @@ Branch `test/ledger-utxo-model`, `ledger/utxo_rule_model_test.go`:
   as a real transaction of each era (its own body, output and witness-set
   types), against mock ledger states, runs the era's rule list, and checks
   acceptance: 367,720 cells across the five eras. Rules outside the model
-  (signatures, witnesses, script data hash, network) run too, and count
-  only when they fail to resolve an input, which is how gOuroboros rejects
-  missing collateral and reference inputs. Plutus evaluation is replaced by
+  (signatures, witnesses, script data hash, network) run too, and none of
+  their failures counts: since PR #3193 at `efd0b081` BadInputs must reject
+  a missing input itself, first. Plutus evaluation is replaced by
   `ValidatePlutusScriptResult` fed the model's result.
+- `TestBadInputsReportsMissingInputsFirst` (`ledger/bad_inputs_rule_order_test.go`)
+  runs `VerifyTransaction` with the Alonzo, Babbage, Conway and Dijkstra rule
+  lists on a transaction with a missing collateral or reference input and
+  requires `BadInputsUtxoError`; it fails with the old order in all seven
+  cases. It is `GoMissingInputIsBadInputs` for the eras the model stops
+  short of.
 - `TestUtxoRuleModelApply` checks `Consumed`/`Produced` for valid and
   invalid Alonzo and Babbage transactions, with and without a return.
 
@@ -196,6 +229,7 @@ Mutations, each killed:
 | Alonzo+ output minimum | coins >= size-based minimum | `not pointwise (>=)` | coins compared | agree |
 | Babbage outputs | all outputs incl. return | `allSizedOutputsTxBodyF` | `TransactionOutputsAndCollateralReturn` | agree |
 | Inputs that must exist | Alonzo `txins ∪ collateral`; Babbage `∪ refInputs` | same; Conway same; Dijkstra adds sub-transaction inputs and reference inputs | was spent only (the rest by witness rules); fixed branch: same set as the reference | agree after the fix; see finding |
+| Failure a missing input reports | — | every failure accumulates; `BadInputsUTxO` always among them | first failing rule; PR #3193 at `20b79823` a witness or collateral rule ahead of BadInputs; at `efd0b081` BadInputs, which runs first | agree at `efd0b081`; see review finding |
 | Collateral rules gate | `txrdmrs ≠ ∅` | same | redeemers present | agree |
 | Collateral balance | Babbage: coins less return | `collAdaBalance` | same, cross-multiplied | agree |
 | Collateral tokens | Babbage: all returned | `isAdaOnly (coll - ret)` | `MultiAsset.Compare` | agree |
