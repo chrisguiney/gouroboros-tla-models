@@ -50,6 +50,20 @@
 (*        ObjectIDsBlockingMustReply, client.go (Sync asks again after     *)
 (*        MsgServerIdle), server.go (awaitObjectIDs).                      *)
 (*                                                                         *)
+(* After MsgDone the client may start a new run on the same connection    *)
+(* (MaxRuns). The reference runs the outbound side (this server) as a      *)
+(* responder [R3], and the inbound governor restarts a responder that      *)
+(* ended cleanly [S5][R4]. gOuroboros main d8f5bc2a ignores MsgDone and    *)
+(* stays in Done; branch fix/perasvotes-server-restart restarts it.        *)
+(*   [S5] ouroboros-network 5f356486ab3e, docs/network-spec/               *)
+(*        connection-manager.tex 492-496: "should be restarted in its      *)
+(*        initial state".                                                  *)
+(*   [R3] ouroboros-consensus ec239d57f618, ouroboros-consensus-diffusion/ *)
+(*        .../Network/NodeToNode.hs 522-536: the vote diffusion client is  *)
+(*        the inbound (initiator), the server the outbound (responder).    *)
+(*   [R4] ouroboros-network 5f356486ab3e, .../InboundGovernor.hs 455-470:  *)
+(*        TrResponderRestarted.                                            *)
+(*                                                                         *)
 (* Not modelled: non-blocking requests (the Sync loop sends none), vote    *)
 (* content, timeouts.                                                      *)
 (*                                                                         *)
@@ -63,8 +77,11 @@ CONSTANTS
     ReferenceServer,   \* TRUE: the server may send MsgAwaitReply and MsgServerIdle [R1]:
                        \* the reference server, or gOuroboros' with the fix [G2]
     ServerMayBeEmpty,  \* TRUE: at some request the server has no new vote yet
-    ClientKnowsAwait   \* FALSE today; TRUE: a client with the reference's MustReply
+    ClientKnowsAwait,  \* FALSE today; TRUE: a client with the reference's MustReply
                        \* state, as gOuroboros' is with the fix [G2]
+    MaxRuns,           \* how many runs the client may start on one connection
+    ServerRestarts     \* TRUE: the server restarts after MsgDone [S5][R4]
+                       \* FALSE: gOuroboros main d8f5bc2a, which stays in Done
 
 VARIABLES
     pc,         \* the client: "init", "ids", "waitIds", "objs", "waitObjs", "done"
@@ -76,9 +93,10 @@ VARIABLES
     lastIds,    \* identifiers the last reply carried
     rounds,     \* Sync rounds started
     cviol,      \* the client refused a server message
-    sfail       \* the server failed the connection
+    sfail,      \* the server failed the connection
+    runs        \* client runs started so far on this connection
 
-vars == <<pc, cst, sst, c2s, s2c, unacked, lastIds, rounds, cviol, sfail>>
+vars == <<pc, cst, sst, c2s, s2c, unacked, lastIds, rounds, cviol, sfail, runs>>
 
 \* In English: "A message: its kind and a number (identifiers acknowledged,
 \* requested, or carried)."
@@ -87,7 +105,7 @@ M(k, n) == [k |-> k, n |-> n]
 Init ==
     /\ pc = "init" /\ cst = "Init" /\ sst = "Init"
     /\ c2s = <<>> /\ s2c = <<>> /\ unacked = 0 /\ lastIds = 0 /\ rounds = 0
-    /\ cviol = FALSE /\ sfail = FALSE
+    /\ cviol = FALSE /\ sfail = FALSE /\ runs = 1
 
 \* In English: "The client sends one message and moves its own state."
 ClientSend(m, next, newPc) ==
@@ -98,7 +116,7 @@ ClientSend(m, next, newPc) ==
 SendInit ==
     /\ pc = "init"
     /\ ClientSend(M("Init", 0), "Idle", "ids")
-    /\ UNCHANGED <<sst, s2c, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, sst, s2c, unacked, lastIds, rounds, cviol, sfail>>
 
 \* In English: "Acknowledge the last round's identifiers, which leaves
 \* none, so the request is blocking [R1], for up to the window."
@@ -107,18 +125,18 @@ SendBlocking ==
     /\ ClientSend(M("ReqIdsBlocking", lastIds), "Blocking", "waitIds")
     /\ unacked' = unacked - lastIds
     /\ rounds' = rounds + 1
-    /\ UNCHANGED <<sst, s2c, lastIds, cviol, sfail>>
+    /\ UNCHANGED <<runs, sst, s2c, lastIds, cviol, sfail>>
 
 SendObjects ==
     /\ pc = "objs"
     /\ ClientSend(M("ReqObjects", lastIds), "Objects", "waitObjs")
-    /\ UNCHANGED <<sst, s2c, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, sst, s2c, unacked, lastIds, rounds, cviol, sfail>>
 
 \* In English: "Done, from Idle, once the loop has stopped."
 SendDone ==
     /\ pc = "ids" /\ rounds = MaxRounds
     /\ ClientSend(M("Done", 0), "Done", "done")
-    /\ UNCHANGED <<sst, s2c, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, sst, s2c, unacked, lastIds, rounds, cviol, sfail>>
 
 \* In English: "The client judges the oldest server message against its
 \* state map [G1]. A client that knows MsgAwaitReply moves to MustReply and
@@ -132,39 +150,42 @@ ClientRecv ==
               /\ UNCHANGED cviol
          [] m.k = "AwaitReply" /\ cst = "Blocking" /\ ClientKnowsAwait ->
               /\ cst' = "MustReply"
-              /\ UNCHANGED <<pc, unacked, lastIds, cviol>>
+              /\ UNCHANGED <<runs, pc, unacked, lastIds, cviol>>
          [] m.k = "ServerIdle" /\ cst = "MustReply" /\ ClientKnowsAwait ->
               /\ cst' = "Idle" /\ pc' = "ids" /\ lastIds' = 0
-              /\ UNCHANGED <<unacked, cviol>>
+              /\ UNCHANGED <<runs, unacked, cviol>>
          [] m.k = "ReplyObjects" /\ cst = "Objects" ->
               /\ cst' = "Idle" /\ pc' = "ids"
-              /\ UNCHANGED <<unacked, lastIds, cviol>>
+              /\ UNCHANGED <<runs, unacked, lastIds, cviol>>
          [] OTHER ->
               /\ cviol' = TRUE
-              /\ UNCHANGED <<cst, pc, unacked, lastIds>>
+              /\ UNCHANGED <<runs, cst, pc, unacked, lastIds>>
     /\ s2c' = Tail(s2c)
-    /\ UNCHANGED <<sst, c2s, rounds, sfail>>
+    /\ UNCHANGED <<runs, sst, c2s, rounds, sfail>>
 
 \* --- The server. ---------------------------------------------------------
 
 \* In English: "The server reads the oldest client message and moves to
-\* the state it names [R1]."
+\* the state it names [R1]. A server that restarts also reads once its run
+\* is over, as the first message of a new run [S5][R4]."
 ServerRead ==
-    /\ c2s /= <<>> /\ sst \in {"Init", "Idle"} /\ ~sfail
+    /\ c2s /= <<>> /\ ~sfail
+    /\ \/ sst \in {"Init", "Idle"}
+       \/ sst = "Done" /\ ServerRestarts
     /\ LET m == Head(c2s) IN
        sst' = CASE m.k = "Init"           -> "Idle"
                 [] m.k = "ReqIdsBlocking" -> "Blocking"
                 [] m.k = "ReqObjects"     -> "Objects"
                 [] m.k = "Done"           -> "Done"
     /\ c2s' = Tail(c2s)
-    /\ UNCHANGED <<pc, cst, s2c, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, pc, cst, s2c, unacked, lastIds, rounds, cviol, sfail>>
 
 \* In English: "In a blocking request's state the server answers one to
 \* the window's worth of identifiers, if it has any."
 ServerReplyIds(n) ==
     /\ sst \in {"Blocking", "MustReply"} /\ n \in 1..Window
     /\ s2c' = Append(s2c, M("ReplyIds", n)) /\ sst' = "Idle"
-    /\ UNCHANGED <<pc, cst, c2s, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, pc, cst, c2s, unacked, lastIds, rounds, cviol, sfail>>
 
 \* In English: "A server with no vote yet: the reference sends MsgAwaitReply
 \* and later MsgServerIdle [R1]; gOuroboros' server fails the connection
@@ -174,26 +195,36 @@ ServerNothing ==
     /\ IF ReferenceServer
        THEN s2c' = Append(s2c, M("AwaitReply", 0)) /\ sst' = "MustReply"
             /\ UNCHANGED sfail
-       ELSE sfail' = TRUE /\ UNCHANGED <<s2c, sst>>
-    /\ UNCHANGED <<pc, cst, c2s, unacked, lastIds, rounds, cviol>>
+       ELSE sfail' = TRUE /\ UNCHANGED <<runs, s2c, sst>>
+    /\ UNCHANGED <<runs, pc, cst, c2s, unacked, lastIds, rounds, cviol>>
 
 ServerIdle ==
     /\ ReferenceServer /\ ServerMayBeEmpty /\ sst = "MustReply"
     /\ s2c' = Append(s2c, M("ServerIdle", 0)) /\ sst' = "Idle"
-    /\ UNCHANGED <<pc, cst, c2s, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, pc, cst, c2s, unacked, lastIds, rounds, cviol, sfail>>
 
 ServerObjects ==
     /\ sst = "Objects"
     /\ s2c' = Append(s2c, M("ReplyObjects", 0)) /\ sst' = "Idle"
-    /\ UNCHANGED <<pc, cst, c2s, unacked, lastIds, rounds, cviol, sfail>>
+    /\ UNCHANGED <<runs, pc, cst, c2s, unacked, lastIds, rounds, cviol, sfail>>
 
-\* In English: "Over: both sides done, or one hung up."
-Ended == (pc = "done" /\ sst = "Done") \/ cviol \/ sfail
+\* In English: "Once its run is over, the client may start another on the
+\* same connection, with a fresh window, up to MaxRuns."
+ClientRestart ==
+    /\ pc = "done" /\ runs < MaxRuns
+    /\ pc' = "init" /\ cst' = "Init"
+    /\ unacked' = 0 /\ lastIds' = 0 /\ rounds' = 0
+    /\ runs' = runs + 1
+    /\ UNCHANGED <<sst, c2s, s2c, cviol, sfail>>
+
+\* In English: "Over: every run done on both sides, or one hung up."
+Ended == (pc = "done" /\ runs = MaxRuns /\ sst = "Done" /\ c2s = <<>>)
+         \/ cviol \/ sfail
 
 Next ==
     \/ SendInit \/ SendBlocking \/ SendObjects \/ SendDone \/ ClientRecv
     \/ ServerRead \/ \E n \in 1..Window : ServerReplyIds(n)
-    \/ ServerNothing \/ ServerIdle \/ ServerObjects
+    \/ ServerNothing \/ ServerIdle \/ ServerObjects \/ ClientRestart
     \/ Ended /\ UNCHANGED vars
 
 Spec == Init /\ [][Next]_vars
@@ -208,6 +239,14 @@ NoServerFailure == ~sfail
 
 \* In English: "Unacknowledged identifiers stay within the window [R1]."
 WindowBound == unacked <= Window
+
+\* In English: "A message waiting for the server can be read: the server
+\* is never left holding a client message it will not read." It fails when
+\* a client starts a second run and the server stayed in Done.
+NewRunServed == (c2s /= <<>> /\ ~cviol /\ ~sfail) => ENABLED ServerRead
+
+\* Probe, EXPECTED to be violated: "The client never starts a second run."
+ProbeNoSecondRun == runs = 1
 
 \* Probe, EXPECTED to be violated: "No Sync round ever completes."
 ProbeNoRound == ~(rounds >= 1 /\ pc = "ids")

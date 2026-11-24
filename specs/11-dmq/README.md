@@ -9,6 +9,7 @@ to local clients:
 | Message submission (node-to-node) | 11 | `protocol/messagesubmission` | `MessageSubmission.tla` |
 | Local message submission (node-to-client) | 14 | `protocol/localmessagesubmission` | `LocalMessageSubmission.tla` |
 | Local message notification (node-to-client) | 15 | `protocol/localmessagenotification` | `LocalMessageNotification.tla` |
+| All three, after `MsgDone` | | the three `server.go` files | `DmqRestart.tla` |
 
 Read [Model 04](../04-chainsync/README.md) first; the "does each answer reach
 the call that asked" and "does Stop abandon a request" questions come from
@@ -221,6 +222,49 @@ split then failed the first broadcast design: a waiter that takes the
 broadcast channel *after* releasing the lock misses an add in the gap. The
 fix that passes takes the channel under the lock, which the Go fix does.
 
+## Part 4: the servers after `MsgDone` (`DmqRestart.tla`)
+
+### What the code does
+
+When the client ends a run (`MsgDone`; `MsgClientDone` in local message
+notification), the connection stays open and the client may start the same
+protocol again. The specification says the server side "should be restarted
+in its initial state in case the client wishes to use the protocol again
+later" [S5], and the reference does: dmq-node runs
+`Ouroboros.Network.Diffusion.run` [R12], whose inbound governor runs a
+responder that ended cleanly again (`TrResponderRestarted`) [R11], for the
+node-to-node and the node-to-client servers alike. In V1 message submission
+the responder is the inbound side, which receives `MsgDone` [R6].
+
+On gOuroboros `main` (`d8f5bc2a`) none of the three servers restarts. Local
+message submission and message submission only log `MsgDone` and stay in
+`StDone`; local message notification also shuts its queue and expiry cleaner
+down. The new run's first message is then refused or never read.
+
+One module covers all three. `Proto` picks the protocol's state table
+([C2][C4][C5], the same as the gOuroboros state maps); both peers send any
+message their table allows while they hold agency, and read the other's in
+order. `ServerRestarts` lets the server read in `StDone` as the first state of
+a new run. `MaxRuns = 2`; `MaxMsgs` bounds the messages.
+
+### The questions
+
+- **NewRunServed**: a message waiting for the server can be read
+  (`inbox nonempty => ENABLED Recv("Server")`).
+- **NoViolation**: no side receives a message its state forbids.
+
+### The answer
+
+| Config | States | Result |
+| --- | --- | --- |
+| `DmqRestartLocalSubmission.cfg`: reference, two runs | 56 | passes |
+| `DmqRestartLocalNotification.cfg` | 73 | passes |
+| `DmqRestartSubmissionV1.cfg` | 68 | passes |
+| `DmqRestart*NoRestartBug.cfg` (three): gOuroboros `main` | 38-52 | **fails** `NewRunServed` |
+| `DmqRestart*ProbeNoSecondRunBug.cfg` (three): probe, a second run starts | 28-45 | violated, as expected |
+
+The deviation is real for all three. The fixes are below.
+
 ## Go tests and fixes
 
 All on gOuroboros `61046085`, local branches only.
@@ -255,6 +299,9 @@ tests do not repeat them.
 | `fix/messagesubmission-repeat-request` | The Client serves a body again for an id already asked for; the Server's `RequestMessages` sends such a request | `TestClientRefusesRepeatedMessageRequest` (V1 and V2) and `TestServerRefusesToRepeatMessageRequest` fail on `main`. Guards: `TestServerMayRequestReannouncedID` fails if acknowledgement does not release the record; `TestServerUnsentRequestReleasesItsIDs` fails if the record is updated in place |
 | `fix/localmessagenotification-empty-blocking-reply` | The client accepts an empty blocking reply | `TestClientRefusesEmptyBlockingReply` fails on `main`. `TestClientPreservesGenuineEmptyReplyCallback` asserted the old behaviour for the blocking case; it now covers only the non-blocking case |
 | `fix/messagesubmission-reference-wire` | V1 used the CIP's tags, not tx-submission's; V2 lacked `MsgReplyNoSigIds` and used the CIP's tags; V2 put the outbound on the initiator; collections were definite-length lists, which the reference decoders refuse | `TestV1OutboundMatchesReferenceInbound`, `TestV1InboundMatchesReferenceOutbound`, `TestV2InboundIsInitiatorAndMatchesReferenceOutbound`, `TestV2OutboundIsResponderAndMatchesReferenceInbound` play dmq-node's side byte for byte and fail on `main` (wrong tag, no reply, wrong side, no request reaching the Client). `TestV2OutboundAnswersBlockingRequestWithNoIds`, `TestReplyNoMessageIdsRefusals` and `TestConnectionRolesFollowReference` cover the new method and the role mapping |
+| `fix/localmessagesubmission-server-restart` (from `d8f5bc2a`) | The server stays in `StDone` after `MsgDone` | `TestServerAnswersSubmitSentDuringRestart` and `TestServerAnswersBackToBackRestarts` time out on `main` ("no reply from restarted server"). The server is added to the connection's restarting servers and to `TestServerStopDuringRestartStopsServer` |
+| `fix/localmessagenotification-server-restart` (from `d8f5bc2a`) | `MsgClientDone` shuts the server down for good | `TestServerAnswersRequestSentDuringRestart` and `TestServerAnswersBackToBackRestarts` time out on `main`. The queue, acknowledged ids and expiry cleaner now outlast a run (the cleaner no longer watches the run's channels) and only `Stop` ends them; `TestServerStopDuringRestartStopsServer` covers Stop during a restart |
+| `fix/messagesubmission-server-restart` (from `d8f5bc2a`) | The server stays in `StDone` after the client's `MsgDone`, with the run's request still recorded | `TestServerRequestsAfterRestart` and `TestServerHandlesInitSentDuringRestart` fail on `main` ("the server never accepted a request for the next run"). The run's outstanding ids and requests are dropped once the new instance has started; the queue and delivered ids are kept. V1 only: in V2 `MsgDone` comes from the server |
 | `fix/localmessagenotification-lost-wakeup` | An application `WaitForMessage` takes the wakeup meant for a blocking request | `TestAddMessageWakesBlockingRequestAndWaiter` (deterministic, `synctest`) fails 6 runs of 6 on `main`, either way round |
 
 The repeat fix records the ids asked for, per side, until they are
@@ -280,7 +327,7 @@ well, because the tx-submission specification forbids the repeat in both
 | Empty blocking notification reply | forbidden: `[+ message]` [C5] | the codec refuses it [R9] | accepted | **defect**, fixed |
 | Notification `hasMore` | in the non-blocking reply | per reply, from a `maxMsgs` cap [R10] | always `false`; the server sends its whole queue | deviation, harmless at the default sizes |
 | Blocking vs non-blocking notification request | "blocking only after the server said it has no more" (`Type.hs`) | the server's check is commented out [R10] | not checked | agree with the reference |
-| Server restart after `MsgDone` | silent | responders are restarted by the inbound governor | none of the three servers restarts | not modelled; as for other protocols |
+| Server restart after `MsgDone` | silent; the network specification: "should be restarted in its initial state" [S5] | responders are restarted by the inbound governor [R11][R12] | none of the three servers restarts on `main` | **does not conform** (`DmqRestart*NoRestartBug.cfg`); fixed on the three `*-server-restart` branches |
 
 ## Sources
 
@@ -308,6 +355,9 @@ gOuroboros `61046085`.
 | R7 | [`dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` lines 68-78](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs#L68-L78) | V1 time limits |
 | R8 | [`dmq-node/src/DMQ/NodeToClient.hs` lines 155-185](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/NodeToClient.hs#L155-L185); `DMQ/Protocol/LocalMsgSubmission/Type.hs` 20-22 | local servers run with `runAnnotatedPeer`, no limits; local submission is `LocalTxSubmission` |
 | R9 | [`dmq-node/src/DMQ/Protocol/LocalMsgNotification/Codec.hs` lines 119-166](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/LocalMsgNotification/Codec.hs#L119-L166); `Type.hs` 45-77 | notification tags; an empty blocking reply fails to decode |
+| R11 | [`ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs` lines 455-470](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs#L455-L470); [`ouroboros-network/lib/Ouroboros/Network/Diffusion.hs` lines 402-418](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/lib/Ouroboros/Network/Diffusion.hs#L402-L418) | a responder that ended cleanly is run again; the node-to-client server runs under an inbound governor too |
+| R12 | [`dmq-node/app/Main.hs` line 270](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/app/Main.hs#L270) | dmq-node runs `Ouroboros.Network.Diffusion.run` |
+| S5 | [`docs/network-spec/connection-manager.tex` lines 492-496](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/connection-manager.tex#L492-L496) | the server side "should be restarted in its initial state" |
 | R10 | [`dmq-node/src/DMQ/NodeToClient/LocalMsgNotification.hs` lines 45-95](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/NodeToClient/LocalMsgNotification.hs#L45-L95) | the notification server: STM wait, `maxMsgs`, `hasMore`, the blocking-rule check commented out |
 | G1 | gOuroboros `protocol/messagesubmission/` | `messagesubmission.go` (state maps, timeouts), `validation.go`, `client.go`, `server.go`, `messages.go` (tags) |
 | G2 | gOuroboros `protocol/localmessagesubmission/` | `localmessagesubmission.go` (state map, 300 s / 30 s), `client.go`, `server.go` |
@@ -320,7 +370,8 @@ Message bodies, sizes, authentication, TTLs and the replay caches; the
 pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
 time limits as durations (the 20 s V2 limit appears only as "an unanswered
 blocking request is a deadlock"); wire tags and list encodings, which the Go
-tests check byte for byte; restarting a server after `MsgDone`.
+tests check byte for byte. Restarts are modelled only in `DmqRestart.tla`,
+and not for V2, whose `MsgDone` comes from the server.
 
 ## Running it
 
