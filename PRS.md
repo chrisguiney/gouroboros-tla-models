@@ -45,21 +45,14 @@ closes. A PR can draw on more than one model.
 | `ledger-byron` | #3174 (empty transactions, heavyweight delegation activation) | #3171, #3172 | open |
 | `ledger-leios` | #3192 (committee smaller than the parameter) | #3177, #3178 | open |
 | `consensus-nonce` | reviewed and approved jtranq's #3053 (rolling nonce derivation; it reproduced the model's 15 mainnet vectors) | #3052 | merged |
-
-## Being published
-
-Fill in the numbers when the PRs exist.
-
-| Model | Branch | Contents |
-| --- | --- | --- |
-| `consensus-eras` | `fix/consensus-header-validation-reference` | header check order, KES before the opcert start, TPraos overlay and envelope inputs |
-| `consensus-eras` | `fix/era-history-reference` | empty era history, Byron slot-to-epoch, era table tests |
-| `ledger-bbody` | `fix/ledger-bbody-reference` | Conway header protocol-version check, block body table tests |
-| `ledger-witnesses` | `fix/ledger-witnesses-reference` | bootstrap witnesses in the genesis-delegate quorum, witness table tests |
-| `ledger-ppup-mir` | `fix/ledger-ppup-mir-reference` | empty update, phase-2-invalid update and MIR quorum, table tests |
-| `ledger-conway-dijkstra` | `test/ledger-conway-dijkstra-model` | table tests |
-| `consensus-tachys` | `test/consensus-tachys-model` | table tests |
-| `consensus-nonce` | `fix/nonce-neutral-epoch-and-vrf-input` | neutral epoch nonce and VRF input, as new functions |
+| `consensus-eras` | #3201 (header check order, KES before the opcert start, TPraos overlay and envelope inputs) | #3198, #3199, #3200 | open |
+| `consensus-eras` | #3205 (empty era history, Byron slot-to-epoch, era table tests) | #3202, #3203, #3204 | open |
+| `ledger-bbody` | #3208 (Conway header protocol-version check, block body table tests) | #3206, #3207 | open |
+| `ledger-witnesses` | #3211 (bootstrap witnesses in the genesis-delegate quorum, witness table tests) | #3209, #3210 | open |
+| `ledger-ppup-mir` | #3216 (empty update, phase-2-invalid update and MIR quorum, table tests) | #3212, #3213, #3214, #3215 | open |
+| `ledger-conway-dijkstra` | #3218 (table tests) | #3217 | open |
+| `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | open |
+| `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | open |
 
 ## Not yet attributed
 
