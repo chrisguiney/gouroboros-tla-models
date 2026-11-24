@@ -183,6 +183,7 @@ later. After `MsgDone` it restarts in `StIdle`.
 | `ChainSyncLifecycleDrain.cfg`: only `StopAfterDrain` | 374 | passes |
 | `ChainSyncLifecycleStopBug.cfg`: `Stop` too, as in gOuroboros today | | **fails** |
 | `ChainSyncLifecycleRefuse.cfg`: `Start` refuses after a `Stop` that left requests unanswered | 677 | passes |
+| `ChainSyncLifecycleClose.cfg`: the fix in review; an abandoning `Stop` closes the connection | 9,943 | passes `NoViolationOnLiveConnection` |
 
 The failing trace is short. Sync, one `MsgRequestNext` unanswered at the tip,
 `Stop` times out, `Start`. The server's late roll reaches the new instance,
@@ -199,16 +200,47 @@ only from restarting after an abandoned run.
 A test with a real gOuroboros chain-sync server over `net.Pipe` does the same
 thing. The server answers `MsgRequestNext` with `MsgAwaitReply`. The client
 calls `Stop` (it returns `context deadline exceeded`), then `Start`, and the
-server then sends its roll. The restarted client fails, 3 runs out of 3:
+server then sends its roll. The restarted client fails in 20 runs out of 20
+with `-race`:
 
 ```
 chain-sync: received message type 3 without peer agency, an allowed
 pipelined message, or an outstanding pipelined request in state Idle
 ```
 
+As a control, the same setup with `StopAfterDrain` instead of `Stop` restarts
+and syncs again cleanly in 10 runs out of 10.
+
 This is the "Stop and restart" half of gOuroboros issue #2867. That issue was
 closed when `StopAfterDrain` was added (pull request #2871), but `Stop`
-followed by `Start` on the same connection still breaks.
+followed by `Start` on the same connection still broke. Reported as gOuroboros
+issue #3091.
+
+### What the reference does, and the fix
+
+The reference never leaves chain-sync half-finished on a connection it keeps:
+
+- Asked to terminate, the consensus chain-sync client collects every
+  outstanding pipelined reply (`drainThePipe`), then sends `MsgDone`
+  (ouroboros-consensus `ec239d57f618`,
+  `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/MiniProtocol/ChainSync/Client.hs`,
+  `nextStep` and lines 926-956).
+- Demoting a hot peer waits up to `deactivateTimeout`, 300 s, for its hot
+  protocols to finish, and if they do not, stops the multiplexer and so closes
+  the connection (ouroboros-network `5f356486ab3e`,
+  `ouroboros-network/lib/Ouroboros/Network/PeerSelection/PeerStateActions.hs`
+  lines 109-117 and 998-1030; `Diffusion/Policies.hs` lines 31-32).
+
+Pull request #3092 (in review) does the same. When `Stop` cannot deliver
+`MsgDone`, the client reports `ErrStoppedWithoutDone` and the connection
+closes. `ChainSyncLifecycleClose.cfg` checks it.
+
+The connection handles the error on its own goroutine, so the close is not
+immediate. A `Start` in that gap can still meet the late reply, which raises a
+second protocol error on a connection that is already closing. The model
+shows exactly this: plain `NoViolation` still fails with the fix, while
+`NoViolationOnLiveConnection` holds. That invariant says no violation ever
+happens on a connection that stays open.
 
 ### Spec, reference, and gOuroboros
 
@@ -216,7 +248,7 @@ followed by `Start` on the same connection still breaks.
 | --- | --- | --- | --- |
 | Can a client end chain-sync with requests outstanding? | No: `MsgDone` only from `StIdle` [C1] | No: `SendMsgDone` is typed at `Z` (`ClientPipelined.hs` lines 81-83) [R2] | `StopAfterDrain`: no. `Stop`: yes, by abandoning the protocol without `MsgDone` |
 | What happens to a message the state does not allow? | The connection is aborted (`miniprotocols.tex` lines 27-36) | Same | Same: the protocol reports an error |
-| Restart on the same connection? | After `MsgDone`, the server restarts (spec 5.7) | Same, for responders | After `StopAfterDrain`: works. After an abandoning `Stop`: the late reply breaks the new run |
+| Restart on the same connection? | After `MsgDone`, the server restarts (spec 5.7) | Same, for responders | After `StopAfterDrain`: works. After an abandoning `Stop`: the late reply breaks the new run; with the fix in review, the connection is closed instead, as in the reference |
 
 ## Running it
 

@@ -57,7 +57,11 @@ CONSTANTS
     UseDrain,      \* TRUE: the application may call StopAfterDrain
     \* FALSE in gOuroboros. TRUE: Start refuses to restart after a Stop
     \* that left requests unanswered, so the connection must be closed.
-    StartRefusesAbandoned
+    StartRefusesAbandoned,
+    \* TRUE with the fix in review (ErrStoppedWithoutDone): a Stop that
+    \* could not deliver MsgDone reports an error, and the connection is
+    \* closed, as the reference does when hot protocols do not terminate.
+    CloseOnAbandon
 
 VARIABLES
     \* the client
@@ -71,26 +75,36 @@ VARIABLES
     toServer,   \* client messages in flight: "RN", "FI", "Done"
     toClient,   \* server replies in flight: "RN" (a roll) or "FI"
     sv,         \* the server: "idle", or the message it is answering
+    closing,    \* TRUE once an error has asked the connection to close
+    closed,     \* TRUE once the connection is closed
     \* outcome
     violation   \* "none", or the reply a side received when its state does
                 \* not allow it: "RN" (a roll) or "FI" (MsgIntersectFound)
 
 vars == <<cs, expect, reg, abandoned, starts, sent, toServer, toClient, sv,
-          violation>>
+          closing, closed, violation>>
 
 \* In English: "The client is running but not syncing; nothing is in flight."
 Init ==
     /\ cs = "running" /\ expect = <<>> /\ reg = TRUE /\ abandoned = FALSE
     /\ starts = 0 /\ sent = 0
     /\ toServer = <<>> /\ toClient = <<>> /\ sv = "idle"
+    /\ closing = FALSE /\ closed = FALSE
     /\ violation = "none"
 
 -----------------------------------------------------------------------------
-(* The client [G1]. *)
+(* The client [G1].                                                        *)
+(*                                                                         *)
+(* Every action below starts with the same two lines:                      *)
+(*   /\ ~closed                    "the connection is still open"          *)
+(*   /\ UNCHANGED <<closing, closed>>  "this step does not close it"       *)
+(* Only StopFinish (which may ask for a close) and ConnClose differ.       *)
 
 \* Sync. In English: "Running, with nothing outstanding (prepareIdleProtocol):
 \* send MsgFindIntersect and await its answer."
 Sync ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ cs = "running" /\ expect = <<>>
     /\ toServer' = Append(toServer, "FI")
     /\ expect' = <<"FI">>
@@ -100,6 +114,8 @@ Sync ==
 \* The sync loop. In English: "Once the intersection is answered, keep up to
 \* Limit MsgRequestNext outstanding."
 SendRequestNext ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ cs = "syncing"
     /\ \A i \in 1..Len(expect) : expect[i] = "RN"
     /\ Len(expect) < Limit /\ sent < MaxRequests
@@ -112,6 +128,8 @@ SendRequestNext ==
 \* the muxer drops it [G2]. Otherwise it must be the answer the instance is
 \* waiting for; anything else is a protocol violation [S1]."
 ClientRecv ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ toClient /= <<>>
     /\ LET m == Head(toClient) IN
        IF ~reg
@@ -126,6 +144,8 @@ ClientRecv ==
 
 \* Stop. In English: "The sync stops sending; MsgDone is queued."
 StopBegin ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ UseStop /\ cs \in {"running", "syncing"}
     /\ cs' = "stopping"
     /\ UNCHANGED <<expect, reg, abandoned, starts, sent, toServer, toClient,
@@ -135,6 +155,7 @@ StopBegin ==
 \* the 250 ms timer fires first, and the protocol is unregistered without
 \* it, leaving the server owing replies."
 StopFinish ==
+    /\ ~closed
     /\ cs = "stopping"
     /\ \/ /\ expect = <<>>
           /\ toServer' = Append(toServer, "Done")
@@ -143,17 +164,23 @@ StopFinish ==
           /\ abandoned' = TRUE
           /\ UNCHANGED toServer
     /\ cs' = "stopped" /\ reg' = FALSE /\ expect' = <<>>
-    /\ UNCHANGED <<starts, sent, toClient, sv, violation>>
+    \* "With the fix, stopping with replies owed asks the connection to close."
+    /\ closing' = (closing \/ (CloseOnAbandon /\ expect /= <<>>))
+    /\ UNCHANGED <<starts, sent, toClient, sv, closed, violation>>
 
 \* StopAfterDrain. In English: "Stop sending, wait for every reply, then
 \* send MsgDone from StIdle."
 DrainBegin ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ UseDrain /\ cs \in {"running", "syncing"}
     /\ cs' = "draining"
     /\ UNCHANGED <<expect, reg, abandoned, starts, sent, toServer, toClient,
                    sv, violation>>
 
 DrainFinish ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ cs = "draining" /\ expect = <<>>
     /\ toServer' = Append(toServer, "Done")
     /\ cs' = "stopped" /\ reg' = FALSE
@@ -163,6 +190,8 @@ DrainFinish ==
 \* nothing (outstandingRequestNext = 0). With StartRefusesAbandoned, a Stop
 \* that left requests unanswered makes Start refuse instead."
 Start ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ cs = "stopped" /\ starts < MaxStarts
     /\ ~(StartRefusesAbandoned /\ abandoned)
     /\ cs' = "running" /\ reg' = TRUE /\ expect' = <<>>
@@ -175,6 +204,8 @@ Start ==
 \* In English: "Idle, the server takes the next message. MsgDone ends the
 \* run and it restarts idle; anything else it will answer."
 ServerTake ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ sv = "idle" /\ toServer /= <<>>
     /\ sv' = IF Head(toServer) = "Done" THEN "idle" ELSE Head(toServer)
     /\ toServer' = Tail(toServer)
@@ -182,23 +213,37 @@ ServerTake ==
                    violation>>
 
 ServerReply ==
+    /\ ~closed
+    /\ UNCHANGED <<closing, closed>>
     /\ sv \in {"RN", "FI"}
     /\ toClient' = Append(toClient, sv)
     /\ sv' = "idle"
     /\ UNCHANGED <<cs, expect, reg, abandoned, starts, sent, toServer,
                    violation>>
 
+\* In English: "The connection acts on the error and closes: the muxer
+\* stops, and nothing more is sent or delivered. Until then, Start and the
+\* server's late replies can still happen (Connection handles the error on
+\* its own goroutine)."
+ConnClose ==
+    /\ closing /\ ~closed
+    /\ closed' = TRUE
+    /\ UNCHANGED <<cs, expect, reg, abandoned, starts, sent, toServer, toClient,
+                   sv, closing, violation>>
+
 -----------------------------------------------------------------------------
 
-\* In English: "Nothing left to do: no messages in flight, the server idle."
+\* In English: "Nothing left to do: no messages in flight and the server
+\* idle - or the connection is closed, and nothing more can happen."
 Quiet ==
-    /\ toServer = <<>> /\ toClient = <<>> /\ sv = "idle"
+    /\ \/ toServer = <<>> /\ toClient = <<>> /\ sv = "idle"
+       \/ closed
     /\ UNCHANGED vars
 
 Next ==
     \/ Sync \/ SendRequestNext \/ ClientRecv
     \/ StopBegin \/ StopFinish \/ DrainBegin \/ DrainFinish \/ Start
-    \/ ServerTake \/ ServerReply
+    \/ ServerTake \/ ServerReply \/ ConnClose
     \/ Quiet
 
 Spec == Init /\ [][Next]_vars
@@ -207,6 +252,11 @@ Spec == Init /\ [][Next]_vars
 
 \* In English: "No side ever receives a message it does not expect."
 NoViolation == violation = "none"
+
+\* In English: "No side receives a message it does not expect on a
+\* connection that is staying open." A violation on a connection already
+\* closing for ErrStoppedWithoutDone changes nothing: it is closed either way.
+NoViolationOnLiveConnection == violation = "none" \/ closing
 
 \* Probes, each EXPECTED to be violated.
 \* In English: "Stop never abandons requests." Violated = it does.

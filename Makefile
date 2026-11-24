@@ -86,6 +86,7 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncClientNoDiscardBug.cfg ChainSyncClient.tla || true
 	$(CHAINSYNC) -config ChainSyncLifecycleDrain.cfg ChainSyncLifecycle.tla
 	$(CHAINSYNC) -config ChainSyncLifecycleRefuse.cfg ChainSyncLifecycle.tla
+	$(CHAINSYNC) -config ChainSyncLifecycleClose.cfg ChainSyncLifecycle.tla
 	$(CHAINSYNC) -config ChainSyncLifecycleStopBug.cfg ChainSyncLifecycle.tla || true
 
 chainsync-deep: ## Check the chain-sync client with a window of three
