@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localstatequery dmq leios-peras models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -122,6 +122,18 @@ dmq: ## Check the message-queue models (every config, Bug ones expected to fail)
 
 leios-peras: ## Check the Leios and Peras models (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/12-leios-peras
+
+consensus: ## Check the consensus model (chain selection, opcerts, PBFT)
+	@scripts/run-model.sh specs/13-consensus
+
+ledger-shelley: ## Check the Shelley ledger model (certificates, deposits, snapshots)
+	@scripts/run-model.sh specs/14-ledger-shelley
+
+ledger-governance: ## Check the Conway governance model
+	@scripts/run-model.sh specs/15-ledger-governance
+
+pipeline-cbor: ## Check the block pipeline model
+	@scripts/run-model.sh specs/16-pipeline-cbor
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done

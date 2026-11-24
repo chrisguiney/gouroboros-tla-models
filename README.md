@@ -47,7 +47,15 @@ Read these in order. Each one builds on the last.
     submission (CIP-0137), local submission and notification.
 14. [Model 12: Leios and Peras](specs/12-leios-peras/README.md): the
     experimental notify, fetch and vote protocols.
-15. [Glossary](docs/glossary.md): keep it open while you read anything else.
+15. [Model 13: consensus](specs/13-consensus/README.md): chain selection,
+    operational certificates and KES, and the Byron PBFT window.
+16. [Model 14: the Shelley ledger](specs/14-ledger-shelley/README.md):
+    certificate lifecycles, deposits, stake snapshots, value preservation.
+17. [Model 15: Conway governance](specs/15-ledger-governance/README.md):
+    proposals, voting, ratification, enactment and refunds.
+18. [Model 16: block pipeline and CBOR](specs/16-pipeline-cbor/README.md):
+    ordered apply, rollback fencing, drain, and preserved bytes.
+19. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
