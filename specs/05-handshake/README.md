@@ -1,0 +1,232 @@
+# Model 05: the handshake
+
+The handshake is the first thing two nodes say to each other. The client
+sends `MsgProposeVersions`, a table of every version it speaks with the
+version data (network magic, query flag, and for node-to-node the diffusion
+mode and peer sharing) for each. The server answers once, with
+`MsgAcceptVersion`, `MsgRefuse`, or `MsgQueryReply`, and both sides are done.
+Nothing else ever runs on mini-protocol 0.
+
+Read [Model 01](../01-keepalive/README.md) first: the receive table and the
+"checking the checks" ideas carry over.
+
+## What the code does
+
+gOuroboros (`origin/main` at `61046085`):
+
+- `protocol/handshake/handshake.go` has two state maps, `StateMapNtN` and
+  `StateMapNtC`: `Propose` (client agency), `Confirm` (server agency), `Done`.
+  Both states allow 5760 bytes. Node-to-node waits 10 s in each state;
+  node-to-client never times out. `NewClient` and `NewServer` replace the
+  waiting side's timeout with `Config.Timeout` (10 s by default).
+- `client.go`: `Start` sends the proposal. On `MsgAcceptVersion` the client
+  checks the version was proposed, decodes the data, and compares the
+  network magic. `MsgRefuse` becomes a typed error. `MsgQueryReply` is
+  refused unless the client asked for a query.
+- `server.go` (`handleProposeVersions`): first, if **any** proposed version
+  that decodes asks for a query, answer `MsgQueryReply`. Otherwise
+  intersect the tables, pick the highest common version, and refuse with
+  `VersionMismatch` (no common version), `DecodeError` (its data does not
+  decode), or `Refused` (magics differ); else accept with the server's own
+  data.
+
+## The questions
+
+1. Does the server pick the highest common version (`AcceptsHighestCommon`)?
+2. Does it accept only data that decodes with matching magic
+   (`AcceptsOnlyMatchingMagic`), and never refuse such a proposal
+   (`NoRefusalWhenNegotiable`)?
+3. Does every refusal name the right reason (`RefusalReasonsRight`)?
+4. Does the server answer a query only for a proposal it would accept
+   (`QueryOnlyWhenNegotiable`)?
+5. Do both sides end with the same result (`BothSidesAgree`)?
+6. Against a rogue server, does the client accept only a version it proposed,
+   with its own magic (`ClientAcceptsOnlyProposed`)?
+7. Is any state entered that the transition table does not allow
+   (`OnlyLegalMoves`, `NeverBothHaveAgency`)?
+8. With a silent peer, does node-to-node give up instead of hanging, and does
+   node-to-client hang, as the specification intends?
+9. Simultaneous open (`HandshakeSimOpen.tla`): when both sides dial at once,
+   do both pick the same version (`SymmetricOutcome`, `SimAcceptsHighest`,
+   `SameStateWhenQuiet`)?
+
+## The answers
+
+Two versions, two magics, every client table (80) against every server
+table (8): 640 starting pairs.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `Handshake.cfg` (reference, node-to-node) | 2,560 | passes |
+| `HandshakeNtC.cfg` (reference, node-to-client) | 2,560 | passes |
+| `HandshakeStrictQuery.cfg` (gOuroboros after the fix: strict client) | 2,560 | passes |
+| `HandshakeGouroborosBug.cfg` (gOuroboros today: query checked first) | | **fails** `QueryOnlyWhenNegotiable` |
+| `HandshakeRogue.cfg` (one injected message, reference client) | 149,728 | passes |
+| `HandshakeRogueStrict.cfg` (the same, gOuroboros client) | 149,728 | passes |
+| `HandshakeSilentServer.cfg` (node-to-node, server never answers) | 2,560 | passes: the client times out |
+| `HandshakeSilentClient.cfg` (node-to-node, client never proposes) | 1,280 | passes: the server times out |
+| `HandshakeSilentNtCBug.cfg` (node-to-client, server never answers) | | **deadlock**, by design |
+| `HandshakeSimOpen.cfg` (reference) | 448 | passes |
+| `HandshakeSimOpenGouroborosBug.cfg` (no `MsgReplyVersions`) | | **fails** `NoViolations` |
+| `HandshakeSimOpenAsymmetricBug.cfg` (one side's data undecodable by the other) | | **fails** `SymmetricOutcome` |
+| `HandshakeTable.cfg`, `HandshakeTableGouroboros.cfg` | | print the receive table |
+
+The gOuroboros failure is short: the client proposes only version 1 with the
+query flag, the server supports only version 2. The reference refuses with
+`VersionMismatch`; gOuroboros answers `MsgQueryReply`. The same happens when
+the magics differ (reference: `Refused`) and when only a version that is not
+chosen asks for a query (reference: accept the chosen one).
+
+The client's strictness about `MsgQueryReply` is harmless: against an honest
+server it never fires (`HandshakeStrictQuery.cfg`), because a server only
+answers a query the client asked for.
+
+Simultaneous open is safe in the reference. Asymmetric decoding breaks the
+symmetry: one side refuses, the other accepts. The specification allows
+this ("If any side does not accept any version ... the connection can be
+reset"), and the refusing side closes the connection.
+
+### Checking the checks
+
+| Config (expected to fail) | Safeguard removed | Invariant broken |
+| --- | --- | --- |
+| `HandshakeLowestBug.cfg` | take the highest common version | `AcceptsHighestCommon` |
+| `HandshakeNoMagicBug.cfg` | the server's magic comparison | `AcceptsOnlyMatchingMagic` |
+| `HandshakeWrongReasonBug.cfg` | `DecodeError` for undecodable data | `RefusalReasonsRight` |
+| `HandshakeClientNoMagicBug.cfg` | the client's magic comparison (rogue server) | `ClientAcceptsOnlyProposed` |
+| `HandshakeGouroborosBug.cfg` | negotiating before a query | `QueryOnlyWhenNegotiable` |
+| `HandshakeSimOpenGouroborosBug.cfg` | `MsgReplyVersions` | `NoViolations` |
+
+Reachability probes, each expected to fail, show the passing configs reach
+every answer: `HandshakeProbeAcceptBug.cfg`, `HandshakeProbeQueryBug.cfg`,
+`HandshakeProbeMismatchBug.cfg`, `HandshakeProbeDecodeErrorBug.cfg`,
+`HandshakeProbeRefusedBug.cfg`, `HandshakeProbeAcceptBelowProposedBug.cfg`
+(an accept below a version the client proposed), and
+`HandshakeSimOpenProbeRefusedBug.cfg`.
+
+### The modelling mistake
+
+The first rogue run failed `RefusalReasonsRight`. The rogue peer had sent its
+own `MsgProposeVersions` before the client's, and the server answered that
+one; the invariants compared the answer with the client's table. They now
+compare it with the proposal the server actually answered (`heard`).
+
+## The receive table
+
+`HandshakeTable.cfg` prints, for each role, state, and kind of message, what
+the receiver does (reference behaviour); `HandshakeTableGouroboros.cfg` the
+same with the gOuroboros switches. Differences:
+
+| Cell | Reference | gOuroboros |
+| --- | --- | --- |
+| client in `Confirm`, `MsgProposeVersions` | `StDone` (read as `MsgReplyVersions`) | violation |
+| client in `Confirm`, unsolicited `MsgQueryReply` | `StDone` (query result) | error |
+| any role in `Done`, any message | violation: mini-protocol 0 is unknown to the mux [R7] | silently dropped (observed in Go, not modelled) |
+| a side that holds agency | the message waits | violation (protocol.Protocol judges on arrival) |
+
+## Go tests and mutations
+
+Branch `test/handshake-state-model`,
+`protocol/handshake/statemap_model_test.go`:
+
+- `TestStateMapMatchesModel`, `TestDoneCannotBeLeft`: every within-run cell
+  against `StateMapNtN` and `StateMapNtC`.
+- `TestReceiveMatchesModel`: a running client and server, both modes, in
+  every cell they can rest in (a client cannot rest in `Propose`, a server
+  cannot rest in `Confirm`).
+- `TestStateMapLimitsMatchSpec`, `TestClientConfirmTimeoutMatchesSpec`:
+  5760 bytes, 10 s node-to-node, no node-to-client timeouts.
+- `TestServerNegotiationMatchesModel`: ten proposals with the reference
+  answer, and the gOuroboros answer where it differs.
+
+Each mutation below fails at least one of them: drop the `MsgQueryReply`
+transition; give node-to-client `Confirm` a timeout; ignore
+`Config.Timeout` in `NewClient`; accept an unsolicited `MsgQueryReply`;
+remove the node-to-node `Confirm` size limit; pick the lowest common version;
+skip the server's magic check; refuse a decode failure as `Refused`; give
+`Done` a transition.
+
+Branch `fix/handshake-query-after-negotiation` moves the query check after
+negotiation, as the reference does. Its test fails on `origin/main` for "no
+common version" and "magic mismatch".
+
+Not fixed, written up: simultaneous open. gOuroboros routes segments by
+their direction bit (`muxer/muxer.go`, `readLoop`), so a peer's
+`MsgProposeVersions` goes to the handshake server role, which a dialling
+connection does not run; two gOuroboros connections opening at once both
+fail with `connection shutdown initiated: EOF`. Supporting it needs the
+muxer to deliver both directions of mini-protocol 0 to the client before the
+handshake ends, a `Confirm` transition for `MsgProposeVersions`, and the
+client to negotiate itself.
+
+## Spec, reference, and gOuroboros
+
+| Question | Specification | Reference | gOuroboros | Verdict |
+| --- | --- | --- | --- | --- |
+| Which version? | Highest common [S5] | `lookupGreatestCommonKey` [R3] | Highest common | Agree |
+| Refusal reasons | Mismatch, DecodeError, Refused [S5] | Same [R3] | Same | Agree |
+| When is a query answered? | Query "will send back all supported versions" [S4] | Only if acceptOrRefuse accepts and the agreed data asks [R4] | If any decodable proposed version asks, before negotiating | **Differs**; fixed on a branch |
+| Unsolicited `MsgQueryReply` | Not stated | Taken as a query result [R2] | Error | Stricter, harmless |
+| `MsgQueryReply` in the state machine | Absent [S2] | Present [R1] | Present | Spec out of date |
+| Data in `MsgAcceptVersion` | Negotiated data [S4] | Agreed data [R4][R6] | The server's own data; each side's callback gets the peer's data | Differs; the reference client recomputes the agreement, and `connection.go` combines local and remote flags itself, so no wrong outcome was found |
+| Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; design change, written up |
+| Proposal keys in ascending order | Required [S5] | Unordered keys fail to decode (`Codec.hs` 217-241) | Accepted in any order; duplicates rejected | gOuroboros more lenient |
+| Size limits | 5760 both states [S3] | 5760 [R5] | 5760 | Agree |
+| Timeouts | 10 s both, NtN; none NtC [S3] | `shortWait` = 10 s [R5] | 10 s NtN (overridable), none NtC | Agree |
+| Message after Done | Not stated | Connection torn down [R7] | Dropped | Differs, harmless |
+
+## Sources
+
+Pinned to [IntersectMBO/ouroboros-network commit `5f356486ab3e`](https://github.com/IntersectMBO/ouroboros-network/tree/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c)
+and gOuroboros `origin/main` at `61046085`. Paths under
+`ouroboros-network/framework/lib/Ouroboros/Network/Protocol/Handshake/`
+unless noted.
+
+| Ref | Where | What it says |
+| --- | --- | --- |
+| S1 | `docs/network-spec/miniprotocols.tex` 27-36 | One side has agency; an unexpected message aborts the connection. |
+| S2 | same, 449-501 | States, agency, messages, transitions; `MsgReplyVersions` (479-484). |
+| S3 | same, 503-536, 575-606, 630-649 | 5760 bytes per state; 10 s timeouts node-to-node; none node-to-client. |
+| S4 | same, 541-573, 608-628 | Version data; negotiated data; magic must agree; query inherited from the client. |
+| S5 | same, 651-702 | Ascending unique keys; the server's algorithm, steps 1-8. |
+| S6 | same, 704-759 | Simultaneous open; the symmetric `acceptable` condition. |
+| R1 | `Type.hs` 87-131, 145-153 | Messages and agency; simultaneous open; a refusing side closes without a reason. |
+| R2 | `Client.hs` 119-172 | The client's handling of each answer. |
+| R3 | `Client.hs` 191-222 | `acceptOrRefuse`, `lookupGreatestCommonKey`. |
+| R4 | `Server.hs` 34-48 | Query reply only after acceptance. |
+| R5 | `Codec.hs` 54-99, 152-192; `ouroboros-network/api/lib/Ouroboros/Network/Protocol/Limits.hs` 113-114 | Byte and time limits; decoding by state. |
+| R6 | `cardano-diffusion/api/lib/Cardano/Network/NodeToNode/Version.hs` 134-156; `NodeToClient/Version.hs` 123-135 | `acceptableVersion`, `queryVersion`. |
+| R7 | `network-mux/src/Network/Mux/Ingress.hs` 122-126 | Unknown mini-protocol tears the connection down. |
+| R8 | `network-mux/src/Network/Mux/Types.hs` 320-344 | `bearerAsChannel` reads segments regardless of direction. |
+| G1 | gOuroboros `protocol/handshake/{handshake,client,server}.go`, `connection.go` 746-800, `muxer/muxer.go` `readLoop` | The code compared. |
+
+## Not modelled
+
+Diffusion mode, peer sharing, and Peras flags in the agreed data; version
+numbers gOuroboros cannot decode; the 20 s delay before the reference closes
+a query connection; the connection-wide handshake timeout in `connection.go`.
+
+## Running it
+
+```sh
+cd specs/05-handshake
+for c in Handshake HandshakeNtC HandshakeStrictQuery HandshakeRogue \
+         HandshakeRogueStrict HandshakeSilentServer HandshakeSilentClient; do
+  ../../bin/tlc -config $c.cfg Handshake.tla
+done
+../../bin/tlc -config HandshakeSimOpen.cfg HandshakeSimOpen.tla
+../../bin/tlc -config HandshakeTable.cfg HandshakeTable.tla | grep '^<<'
+../../bin/tlc -config HandshakeTableGouroboros.cfg HandshakeTable.tla | grep '^<<'
+# expected to fail:
+for c in HandshakeGouroborosBug HandshakeLowestBug HandshakeNoMagicBug \
+         HandshakeWrongReasonBug HandshakeClientNoMagicBug HandshakeSilentNtCBug \
+         HandshakeProbeAcceptBug HandshakeProbeQueryBug HandshakeProbeMismatchBug \
+         HandshakeProbeDecodeErrorBug HandshakeProbeRefusedBug \
+         HandshakeProbeAcceptBelowProposedBug; do
+  ../../bin/tlc -config $c.cfg Handshake.tla
+done
+for c in HandshakeSimOpenGouroborosBug HandshakeSimOpenAsymmetricBug \
+         HandshakeSimOpenProbeRefusedBug; do
+  ../../bin/tlc -config $c.cfg HandshakeSimOpen.tla
+done
+```
