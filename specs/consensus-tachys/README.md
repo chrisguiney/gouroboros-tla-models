@@ -173,3 +173,9 @@ selector holds its own interval array, built at construction.
    `individualTotalPoolStake` adds proposal deposits [R1, PoolDistr.hs
    65-76], so it does not sum to `pdTotalActiveStake`; the CIP's fraction
    is `individualPoolStake`. Dingo reads its own snapshot sum.
+
+### Follow-up: header validation order
+
+The header validator now runs its checks in the reference order. A failed registered-VRF-key check skips the eligibility check, and the Tachys schedule check is part of eligibility. The Go table test therefore expects the "not the scheduled leader" error only when both the VRF proof and the registered VRF key pass.
+
+This changes only which error is reported. Which headers are accepted is unchanged, so the model is unaffected: `ValidatorExact` constrains acceptance, not error order. The validation order itself is modelled in `consensus-eras` (`HeaderValidation.tla`).
