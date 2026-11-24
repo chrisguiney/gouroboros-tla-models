@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch peersharing models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -101,6 +101,18 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 
 chainsync-deep: ## Check the chain-sync client with a window of three
 	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla
+
+handshake: ## Check the handshake model (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/05-handshake
+
+blockfetch: ## Check the block-fetch model (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/06-blockfetch
+
+peersharing: ## Check the peer-sharing model (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/08-peersharing
+
+models: ## Check every config of every model, Bug ones expected to fail (slow)
+	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \
