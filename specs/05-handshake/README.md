@@ -49,26 +49,34 @@ gOuroboros (`origin/main` at `61046085`):
 9. Simultaneous open (`HandshakeSimOpen.tla`): when both sides dial at once,
    do both pick the same version (`SymmetricOutcome`, `SimAcceptsHighest`,
    `SameStateWhenQuiet`)?
+10. Does `MsgAcceptVersion` carry the negotiated data
+    (`AcceptCarriesNegotiatedData`)?
+11. Does every receiver reject a version table whose keys are not in
+    ascending order (`UnorderedMapsRejected`)?
 
 ## The answers
 
-Two versions, two magics, every client table (80) against every server
-table (8): 640 starting pairs.
+Two versions, two magics, and in node-to-node a diffusion-mode flag: every
+client table (288) against every server table (24), 6,912 starting pairs
+(node-to-client: 80 against 8).
 
 | Config | States | Result |
 | --- | --- | --- |
-| `Handshake.cfg` (reference, node-to-node) | 2,560 | passes |
+| `Handshake.cfg` (reference, node-to-node) | 27,648 | passes |
 | `HandshakeNtC.cfg` (reference, node-to-client) | 2,560 | passes |
-| `HandshakeStrictQuery.cfg` (gOuroboros after the fix: strict client) | 2,560 | passes |
+| `HandshakeStrictQuery.cfg` (gOuroboros after the fix: strict client) | 27,648 | passes |
 | `HandshakeGouroborosBug.cfg` (gOuroboros today: query checked first) | | **fails** `QueryOnlyWhenNegotiable` |
-| `HandshakeRogue.cfg` (one injected message, reference client) | 149,728 | passes |
-| `HandshakeRogueStrict.cfg` (the same, gOuroboros client) | 149,728 | passes |
-| `HandshakeSilentServer.cfg` (node-to-node, server never answers) | 2,560 | passes: the client times out |
-| `HandshakeSilentClient.cfg` (node-to-node, client never proposes) | 1,280 | passes: the server times out |
+| `HandshakeAcceptOwnDataBug.cfg` (gOuroboros today: accept carries the server's own data) | | **fails** `AcceptCarriesNegotiatedData` |
+| `HandshakeKeyOrder.cfg` (reference; unordered client tables and one injected unordered table, one magic) | 227,428 | passes |
+| `HandshakeKeyOrderBug.cfg` (gOuroboros today: key order not checked) | | **fails** `UnorderedMapsRejected` |
+| `HandshakeRogue.cfg` (one injected message, reference client) | 2,726,172 | passes |
+| `HandshakeRogueStrict.cfg` (the same, gOuroboros client) | 2,726,172 | passes |
+| `HandshakeSilentServer.cfg` (node-to-node, server never answers) | 27,648 | passes: the client times out |
+| `HandshakeSilentClient.cfg` (node-to-node, client never proposes) | 13,824 | passes: the server times out |
 | `HandshakeSilentNtCBug.cfg` (node-to-client, server never answers) | | **deadlock**, by design |
-| `HandshakeSimOpen.cfg` (reference) | 448 | passes |
+| `HandshakeSimOpen.cfg` (reference) | 4,032 | passes |
 | `HandshakeSimOpenGouroborosBug.cfg` (gOuroboros `61046085`: no `MsgReplyVersions`) | | **fails** `NoViolations` |
-| `HandshakeSimOpenGouroboros.cfg` (gOuroboros after the fix) | 448 | passes |
+| `HandshakeSimOpenGouroboros.cfg` (gOuroboros after the fix) | 4,032 | passes |
 | `HandshakeSimOpenEarlyReadBug.cfg` (the fix without the wait in `Client.Start`) | | **fails** `NoViolations` |
 | `HandshakeSimOpenAsymmetricBug.cfg` (one side's data undecodable by the other) | | **fails** `SymmetricOutcome` |
 | `HandshakeTable.cfg`, `HandshakeTableGouroboros.cfg` | | print the receive table |
@@ -78,6 +86,27 @@ query flag, the server supports only version 2. The reference refuses with
 `VersionMismatch`; gOuroboros answers `MsgQueryReply`. The same happens when
 the magics differ (reference: `Refused`) and when only a version that is not
 chosen asks for a query (reference: accept the chosen one).
+
+**The data in `MsgAcceptVersion`.** The reference server sends the agreed
+data, `acceptableVersion local remote` [R9][R6]; gOuroboros sends its own
+data for the chosen version (`AcceptOwnData`). The shortest counterexample:
+the client is initiator-only, the server is not; the reference accepts with
+initiator-only, gOuroboros with initiator-and-responder. No outcome changes
+for a reference client: it recomputes `acceptableVersion` with its own data
+[R2], and every combined field (magic equal, diffusion mode `min`, peer
+sharing `<>`, query `||`, Peras `min`) is idempotent and commutative, so
+`agree(c, agree(s, c)) = agree(c, s)`. The fix
+(`fix/handshake-accept-negotiated-data`) sends the agreed data; the
+`FinishedFunc` callback still receives the peer's data.
+
+**Key order.** The specification requires ascending, unique keys [S7], and
+the reference codec fails to decode anything else [R10]: a protocol error,
+not a `MsgRefuse`. gOuroboros rejected duplicates only (`CheckKeyOrder`).
+Every encoder sends keys ascending (the reference by `Map` order, gOuroboros
+by `SortCoreDeterministic`), so only a broken or hostile peer is affected.
+The fix (`fix/handshake-version-key-order`) checks every key, which the
+reference does only for keys it recognises: an unrecognised key out of
+order is skipped by the reference and refused by the fix.
 
 The client's strictness about `MsgQueryReply` is harmless: against an honest
 server it never fires (`HandshakeStrictQuery.cfg`), because a server only
@@ -99,6 +128,8 @@ reset"), and the refusing side closes the connection.
 | `HandshakeGouroborosBug.cfg` | negotiating before a query | `QueryOnlyWhenNegotiable` |
 | `HandshakeSimOpenGouroborosBug.cfg` | `MsgReplyVersions` | `NoViolations` |
 | `HandshakeSimOpenEarlyReadBug.cfg` | proposing before reading | `NoViolations` |
+| `HandshakeAcceptOwnDataBug.cfg` | sending the agreed data | `AcceptCarriesNegotiatedData` |
+| `HandshakeKeyOrderBug.cfg` | the key-order check | `UnorderedMapsRejected` |
 
 Reachability probes, each expected to fail, show the passing configs reach
 every answer: `HandshakeProbeAcceptBug.cfg`, `HandshakeProbeQueryBug.cfg`,
@@ -192,9 +223,9 @@ fails on `61046085`.
 | When is a query answered? | Query "will send back all supported versions" [S4] | Only if acceptOrRefuse accepts and the agreed data asks [R4] | If any decodable proposed version asks, before negotiating | **Differs**; fixed on a branch |
 | Unsolicited `MsgQueryReply` | Not stated | Taken as a query result [R2] | Error | Stricter, harmless |
 | `MsgQueryReply` in the state machine | Absent [S2] | Present [R1] | Present | Spec out of date |
-| Data in `MsgAcceptVersion` | Negotiated data [S4] | Agreed data [R4][R6] | The server's own data; each side's callback gets the peer's data | Differs; the reference client recomputes the agreement, and `connection.go` combines local and remote flags itself, so no wrong outcome was found |
+| Data in `MsgAcceptVersion` | Negotiated data [S7] | Agreed data [R9][R6] | The server's own data; each side's callback gets the peer's data | **Differs**, no wrong outcome found (the reference client recomputes the agreement); fixed on a branch |
 | Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; fixed on a branch |
-| Proposal keys in ascending order | Required [S5] | Unordered keys fail to decode (`Codec.hs` 217-241) | Accepted in any order; duplicates rejected | gOuroboros more lenient |
+| Proposal keys in ascending order | Required [S7] | Recognised keys out of order fail to decode [R10] | Accepted in any order; duplicates rejected | **Differs** (lenient); fixed on a branch, which checks every key |
 | Size limits | 5760 both states [S3] | 5760 [R5] | 5760 | Agree |
 | Timeouts | 10 s both, NtN; none NtC [S3] | `shortWait` = 10 s [R5] | 10 s NtN (overridable), none NtC | Agree |
 | Message after Done | Not stated | Connection torn down [R7] | Dropped | Differs, harmless |
@@ -221,13 +252,16 @@ unless noted.
 | R5 | `Codec.hs` 54-99, 152-192; `ouroboros-network/api/lib/Ouroboros/Network/Protocol/Limits.hs` 113-114 | Byte and time limits; decoding by state. |
 | R6 | `cardano-diffusion/api/lib/Cardano/Network/NodeToNode/Version.hs` 134-156; `NodeToClient/Version.hs` 123-135 | `acceptableVersion`, `queryVersion`. |
 | R7 | `network-mux/src/Network/Mux/Ingress.hs` 122-126 | Unknown mini-protocol tears the connection down. |
-| R8 | `network-mux/src/Network/Mux/Types.hs` 320-344 | `bearerAsChannel` reads segments regardless of direction. |
+| R9 | `Server.hs` 42-44 | `MsgAcceptVersion` carries `encodeData vNumber agreedData`. |
+| R10 | `Codec.hs` 210-240 | `decodeVersions`: distinct, ascending keys, else "unordered version"; unrecognised keys skipped. |
+| S7 | `docs/network-spec/miniprotocols.tex` 572-573, 653-656 | "the negotiated version data is sent back using MsgAcceptVersion"; keys "unique and appear in ascending order". |
 | G1 | gOuroboros `protocol/handshake/{handshake,client,server}.go`, `connection.go` 746-800, `muxer/muxer.go` `readLoop` | The code compared. |
 
 ## Not modelled
 
-Diffusion mode, peer sharing, and Peras flags in the agreed data; version
-numbers gOuroboros cannot decode; the 20 s delay before the reference closes
+Peer sharing and Peras flags in the agreed data (one diffusion-mode flag
+stands for every combined field); key order in `HandshakeSimOpen.tla`;
+version numbers gOuroboros cannot decode; the 20 s delay before the reference closes
 a query connection; the connection-wide handshake timeout in `connection.go`.
 
 ## Running it
@@ -235,7 +269,8 @@ a query connection; the connection-wide handshake timeout in `connection.go`.
 ```sh
 cd specs/05-handshake
 for c in Handshake HandshakeNtC HandshakeStrictQuery HandshakeRogue \
-         HandshakeRogueStrict HandshakeSilentServer HandshakeSilentClient; do
+         HandshakeRogueStrict HandshakeSilentServer HandshakeSilentClient \
+         HandshakeKeyOrder; do
   ../../bin/tlc -config $c.cfg Handshake.tla
 done
 ../../bin/tlc -config HandshakeSimOpen.cfg HandshakeSimOpen.tla
@@ -247,7 +282,8 @@ for c in HandshakeGouroborosBug HandshakeLowestBug HandshakeNoMagicBug \
          HandshakeWrongReasonBug HandshakeClientNoMagicBug HandshakeSilentNtCBug \
          HandshakeProbeAcceptBug HandshakeProbeQueryBug HandshakeProbeMismatchBug \
          HandshakeProbeDecodeErrorBug HandshakeProbeRefusedBug \
-         HandshakeProbeAcceptBelowProposedBug; do
+         HandshakeProbeAcceptBelowProposedBug HandshakeAcceptOwnDataBug \
+         HandshakeKeyOrderBug; do
   ../../bin/tlc -config $c.cfg Handshake.tla
 done
 for c in HandshakeSimOpenGouroborosBug HandshakeSimOpenAsymmetricBug \

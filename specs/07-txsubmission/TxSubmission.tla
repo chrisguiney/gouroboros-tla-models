@@ -68,6 +68,10 @@ CONSTANTS
     MaxIds,       \* fresh ids the client's mempool can offer in total
     MaxRequests,  \* requests the server may send in total (keeps it finite)
     V16,          \* TRUE: NodeToNodeV_16 or later, where [R4] clamps
+    \* TRUE: the gOuroboros client ("gouroboros" or "fixed") clamps an
+    \* oversized request from V16 as [R4] does, instead of refusing it
+    \* [G2]. FALSE: gOuroboros main, which refuses it in every version.
+    ClientClamps,
     \* Who each side is. "reference": behaves and checks as [R3]/[R6] do.
     \* "gouroboros": as the code is today. "fixed": gouroboros plus the
     \* checks this model shows are missing. "rogue": sends anything, so the
@@ -153,9 +157,12 @@ RefAcceptsReply(b, n, k) == k <= n /\ (b => k >= 1)
 
 \* In English: "Does the client accept MsgRequestTxIds(b, a, n)? gOuroboros
 \* checks the acknowledgement and the window [G2]; the fix adds the style
-\* rules; a rogue client accepts anything."
+\* rules; a rogue client accepts anything. With ClientClamps, from V16 the
+\* window is not a reason to refuse: the reply is clamped instead [R4]."
 ClientAcceptsIds(b, a, n, U) ==
-    LET window == Mutation = "noWindowCheck" \/ Len(U) - a + n <= MaxUnacked
+    LET window == \/ Mutation = "noWindowCheck"
+                  \/ V16 /\ ClientClamps                 \* clamped, not refused [R4]
+                  \/ Len(U) - a + n <= MaxUnacked
         goOK   == a <= Len(U) /\ window
     IN CASE Client = "reference"  -> RefAcceptsIds(b, a, n, U)
          [] Client = "gouroboros" -> goOK
@@ -190,13 +197,16 @@ ServerAcceptsReply(b, a, n, k) ==
        ELSE RefAcceptsReply(b, n, k)
 
 \* In English: "The faults a request reveals: a client accepting what the
-\* reference refuses, a client refusing what the reference accepts, and an
-\* honest server sending what the reference refuses."
-RequestFaults(accepted, legal) ==
+\* reference refuses, a client refusing what the reference accepts (and,
+\* named on its own, refusing it only because it asks past the window),
+\* and an honest server sending what the reference refuses."
+RequestFaults(accepted, legal, overWindow) ==
     (IF Client \in Honest /\ accepted /\ ~legal
         THEN {"clientAcceptedIllegal"} ELSE {})
     \cup (IF Client \in Honest /\ ~accepted /\ legal
              THEN {"clientRefusedLegal"} ELSE {})
+    \cup (IF Client \in Honest /\ ~accepted /\ legal /\ overWindow
+             THEN {"clientRefusedOverWindow"} ELSE {})
     \cup (IF Server \in Honest /\ ~legal THEN {"serverSentIllegal"} ELSE {})
 
 \* In English: "The faults a reply reveals: a server accepting what the
@@ -223,11 +233,12 @@ ServerRequestIds ==
          /\ ServerMaySendIds(b, a, n)
          /\ LET accepted == ClientAcceptsIds(b, a, n, cU)
                 legal    == RefAcceptsIds(b, a, n, cU)
+                overWin  == Len(cU) - a + n > MaxUnacked   \* asks past the client's window
             IN /\ st' = IF ~accepted THEN "StError"
                         ELSE IF b THEN "StTxIdsBlocking"
                         ELSE "StTxIdsNonBlocking"
                /\ pend' = [kind |-> "ids", b |-> b, a |-> a, n |-> n]
-               /\ faults' = faults \cup RequestFaults(accepted, legal)
+               /\ faults' = faults \cup RequestFaults(accepted, legal, overWin)
     /\ nReq' = nReq + 1
     /\ UNCHANGED <<cU, sU, sAck, nextId>>
 
@@ -249,8 +260,9 @@ ServerRequestTxs ==
 
 \* In English: "The client replies with k fresh ids. An honest client sends
 \* at least one to a blocking request for at least one (gOuroboros refuses
-\* to send an empty one [G4]) and no more than it may; a rogue client sends
-\* up to one more than asked. Each side drops the acknowledged ids and
+\* to send an empty one [G4]) and no more than it may (with ClientClamps,
+\* the gOuroboros client too sends only what fits from V16 [R4]); a rogue
+\* client sends up to one more than asked. Each side drops the acknowledged ids and
 \* appends the new ones; the gOuroboros server then acknowledges this reply
 \* next time [G3]."
 ClientReplyIds ==
@@ -259,7 +271,7 @@ ClientReplyIds ==
            a  == pend.a
            n  == pend.n
            hi == IF Client = "rogue" THEN n + 1
-                 ELSE IF Client = "reference" THEN RefRoom(a, n, cU)
+                 ELSE IF Client = "reference" \/ ClientClamps THEN RefRoom(a, n, cU)
                  ELSE n
            lo == IF Client # "rogue" /\ b /\ n > 0 THEN 1 ELSE 0
        IN \E k \in lo..Min(hi, MaxIds + 1 - nextId) :
@@ -344,6 +356,11 @@ BlockingRule ==
     st = "StTxIdsBlocking" => Len(cU) - pend.a = 0
 NonBlockingRule ==
     st = "StTxIdsNonBlocking" => Len(cU) - pend.a > 0
+
+\* In English: "The client never refuses a request only because it asks
+\* for more ids than fit its window, when the reference would clamp it
+\* (from V16 [S4][R4])."
+ClampsOverWindow == "clientRefusedOverWindow" \notin faults
 
 \* In English: "The client's FIFO never holds more than the window."
 WindowBound == Len(cU) <= MaxUnacked

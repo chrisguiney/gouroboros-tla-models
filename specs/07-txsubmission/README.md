@@ -62,7 +62,9 @@ gOuroboros, or a rogue peer that sends anything:
 6. **`WindowBound`**: does the FIFO stay within the window?
 7. **`ViewsAgree`**: do both sides hold the same FIFO between messages?
 8. **`HonestNeverRefused`**: do two honest sides ever refuse each other?
-9. Deadlock, which TLC checks by default.
+9. **`ClampsOverWindow`**: from V16, does the client ever refuse a request
+   only because it asks past its window, which the reference clamps?
+10. Deadlock, which TLC checks by default.
 
 `TxSubmissionTable.tla` asks the per-message question: for every role, state
 and message kind, what does the receiver do?
@@ -87,6 +89,9 @@ Window of 2, 4 fresh ids, 5 requests:
 | `TxSubmissionFixed.cfg` | fixed | fixed | 186 | passes, every invariant |
 | `TxSubmissionV16.cfg` | reference, V16 | reference, V16 | 572 | passes, every invariant |
 | `TxSubmissionV16Bug.cfg` | reference, V16 | fixed | | **fails** `ClientRefusesOnlyIllegal` |
+| `TxSubmissionV16ClampBug.cfg` | reference, V16 | gOuroboros | | **fails** `ClampsOverWindow` |
+| `TxSubmissionV16Clamp.cfg` | reference, V16 | gOuroboros, clamping | 572 | passes, every invariant |
+| `TxSubmissionV16ClampRogue.cfg` | rogue, V16 | fixed, clamping | 2,716 | passes |
 
 Three findings:
 
@@ -117,13 +122,23 @@ The two fixes together (`TxSubmissionFixed.cfg`) pass every invariant. With
 the fixed server, `RequestTxIds(false, …)` is always refused, since that
 server never leaves anything outstanding; it can only use blocking requests.
 
-**Version 16 (a recorded deviation, not fixed).** From `NodeToNodeV_16` the
-window is a local setting of each side, and the reference client clamps an
-oversized request instead of refusing it (`TxOutboundV_2`). gOuroboros
-negotiates V16 but its client still refuses, as before V16. Against a
-reference server configured with a window larger than 10 it would close the
-connection (`TxSubmissionV16Bug.cfg`). The default window is 10 on both sides,
-so default nodes do not meet it.
+**Version 16.** From `NodeToNodeV_16` the window is a local setting of each
+side, and the reference client clamps an oversized request instead of
+refusing it (`TxOutboundV_2`): it replies with at most
+`maxUnacked - (unacked - ack)` ids [R4]. gOuroboros negotiates V16 but its
+client still refuses, as before V16. Against a reference server configured
+with a window larger than 10 it would close the connection
+(`TxSubmissionV16Bug.cfg`, and `TxSubmissionV16ClampBug.cfg`, which names
+the fault on its own: `ClampsOverWindow`). The default window is 10 on both
+sides, so default nodes do not meet it.
+
+`ClientClamps` switches the gOuroboros client to the reference rule. Against
+the reference server every invariant holds (`TxSubmissionV16Clamp.cfg`).
+Against a rogue server, the fixed client with clamping still refuses every
+request the reference refuses and its FIFO stays within the window
+(`TxSubmissionV16ClampRogue.cfg`): clamping replaces only the window check,
+not the acknowledgement or style checks. Before V16 the switch changes
+nothing. Branch `fix/txsubmission-clamp-request-window` makes the change.
 
 ### The receive table
 
@@ -219,7 +234,7 @@ request has no timeout, so the test now stops the server itself.
 | --- | --- | --- | --- | --- |
 | Blocking or not? | Blocking iff nothing remains after the ack [S3][S5] | Same; client throws `RequestBlocking`/`RequestNonBlocking` [R3]; server picks by its FIFO [R6] | Client does not check; server lets the caller choose, and never leaves anything | **Defect**, both sides |
 | Request for nothing? | Blocking: req > 0; non-blocking: ack or req non-zero [S3] | `RequestedNothing` [R3] | Not checked by either side | **Defect**, both sides |
-| Over the window | Error before V16, clamp from V16 [S4] | Same, by version [R4] | Always an error | Deviation from V16 |
+| Over the window | Error before V16, clamp from V16 [S4] | Same, by version [R4] | Always an error | **Differs** from V16; fixed on a branch |
 | Empty blocking reply | Not allowed [S3] | Fails to decode [R2] | Client will not send one for req > 0; server refuses it for req > 0 | Agrees once req = 0 is refused |
 | `MsgDone` | Only from `StTxIdsBlocking` [S2][S3] | Same [R1][R5] | Same (`StateMap`, `handleDone`) | Agrees |
 | `MsgRequestTxs` ids | Announced, outstanding, no duplicates, not already asked for [S3] | Distinct and in the FIFO; "already asked for" not checked [R3] | Distinct and in the FIFO | Agrees with the reference |
@@ -267,10 +282,12 @@ cd specs/07-txsubmission
 ../../bin/tlc -config TxSubmissionRogueClient.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionFixed.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionV16.cfg TxSubmission.tla
+../../bin/tlc -config TxSubmissionV16Clamp.cfg TxSubmission.tla
+../../bin/tlc -config TxSubmissionV16ClampRogue.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionTable.cfg TxSubmissionTable.tla | grep '^<<'
 # expected to fail
 for c in GouroborosBug EmptyReplyBug ServerBug ClientBug ClientBlockingBug \
-         RogueClientBug V16Bug NoWindowBug KeepsAckedBug ProbesBug; do
+         RogueClientBug V16Bug V16ClampBug NoWindowBug KeepsAckedBug ProbesBug; do
   ../../bin/tlc -config TxSubmission$c.cfg TxSubmission.tla || true
 done
 ```
