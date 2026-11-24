@@ -78,7 +78,7 @@ engine-deep: ## Check pipelining with two requests in flight (a few minutes)
 
 CHAINSYNC := cd specs/04-chainsync && ../../bin/tlc
 
-chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
+chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart, queries
 	$(CHAINSYNC) -config ChainSyncClient.cfg ChainSyncClient.tla
 	$(CHAINSYNC) -config ChainSyncClientStop.cfg ChainSyncClient.tla
 	$(CHAINSYNC) -config ChainSyncClientTopUpBug.cfg ChainSyncClient.tla || true
@@ -89,6 +89,11 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncLifecycleClose.cfg ChainSyncLifecycle.tla
 	$(CHAINSYNC) -config ChainSyncLifecycleStopBug.cfg ChainSyncLifecycle.tla || true
 	$(CHAINSYNC) -config ChainSyncLifecycleCloseOnlyBug.cfg ChainSyncLifecycle.tla || true
+	$(CHAINSYNC) -config ChainSyncQueriesPopFirst.cfg ChainSyncQueries.tla
+	$(CHAINSYNC) -config ChainSyncQueriesWaitOwn.cfg ChainSyncQueries.tla
+	$(CHAINSYNC) -config ChainSyncQueriesBug.cfg ChainSyncQueries.tla || true
+	$(CHAINSYNC) -config ChainSyncQueriesNoSyncBug.cfg ChainSyncQueries.tla || true
+	$(CHAINSYNC) -config ChainSyncQueriesPopFirstBug.cfg ChainSyncQueries.tla || true
 
 chainsync-deep: ## Check the chain-sync client with a window of three
 	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla

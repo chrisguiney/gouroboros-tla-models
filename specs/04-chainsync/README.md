@@ -10,7 +10,8 @@ keeps many requests in flight at
 once, and lets the application change course in the middle (`Reintersect`,
 `Stop`, `StopAfterDrain`, `Jump`). This model starts with the part every other
 operation leans on: the **sync window** and **Reintersect** (slice 1), then
-**stopping and restarting** on the same connection (slice 2).
+**stopping and restarting** on the same connection (slice 2), then the
+one-shot **queries** `GetCurrentTip` and `Jump` (slice 3).
 
 Read [Model 03](../03-engine/README.md) first; the pipelining ideas carry over.
 
@@ -143,9 +144,9 @@ and gOuroboros `origin/main` at `c1bc50c6`.
 
 ### Not in this slice
 
-`Stop`, `StopAfterDrain` and restarting (slice 2), `Jump`, `GetCurrentTip`,
-`GetAvailableBlockRange`, the block pipeline behind `RollForward`,
-`MsgIntersectNotFound`, and timeouts.
+`Stop`, `StopAfterDrain` and restarting (slice 2); `Jump`, `GetCurrentTip`
+and `MsgIntersectNotFound` (slice 3); `GetAvailableBlockRange`, the block
+pipeline behind `RollForward`, and timeouts.
 
 ## Slice 2: stop and restart (`ChainSyncLifecycle.tla`)
 
@@ -259,6 +260,103 @@ releases the late reply, failed with the close alone and passes with both.
 | Can a client end chain-sync with requests outstanding? | No: `MsgDone` only from `StIdle` [C1] | No: `SendMsgDone` is typed at `Z` (`ClientPipelined.hs` lines 81-83) [R2] | `StopAfterDrain`: no. `Stop`: yes, by abandoning the protocol without `MsgDone` |
 | What happens to a message the state does not allow? | The connection is aborted (`miniprotocols.tex` lines 27-36) | Same | Same: the protocol reports an error |
 | Restart on the same connection? | After `MsgDone`, the server restarts (spec 5.7) | Same, for responders | After `StopAfterDrain`: works. After an abandoning `Stop`: the late reply breaks the new run; with the fix in review, the connection is closed and the client is not restarted, as in the reference |
+
+## Slice 3: queries (`ChainSyncQueries.tla`)
+
+### What the code does
+
+Two calls send a single `MsgFindIntersect` and wait for an answer:
+
+- **`GetCurrentTip`** sends `MsgFindIntersect` with no points, so the server
+  answers `MsgIntersectNotFound` carrying its tip. It registers on
+  `wantCurrentTipChan` and returns on the **first tip any handler delivers**.
+  The handlers for rolls and for both intersect answers all deliver tips
+  (`sendCurrentTip`).
+- **`Jump`** sends `MsgFindIntersect` with points, registers on
+  `wantIntersectFoundChan`, and returns the first intersect answer a handler
+  delivers.
+
+Both hold `busyMutex` while they wait, so they never overlap. But neither
+request is tagged. A handler gives an answer to whoever is registered when it
+looks. `MsgIntersectNotFound`'s handler (`handleIntersectNotFound`) first
+delivers the tip, then takes the registered intersect request, if any. With
+no request registered it ignores the answer. `MsgIntersectFound` with no
+request registered is a protocol error.
+
+### The question
+
+1. **`JumpGetsOwnAnswer`**: does `Jump` always get the answer to its own
+   `MsgFindIntersect`?
+2. **`NoOrphanAnswer`**: does a `MsgIntersectFound` ever arrive with nobody
+   registered for it?
+
+### The answer
+
+No to (1), and yes to (2). `GetCurrentTip` can return **before the answer to
+its own `MsgFindIntersect` has been handled**. That answer is then still on
+its way, and the next call that registers for an intersect answer receives
+it. There are two ways in:
+
+- **A running sync.** The reply to a `MsgRequestNext` sent earlier arrives
+  first, and the roll's handler delivers a tip. `GetCurrentTip` returns at
+  once, before its own `MsgFindIntersect` has even been sent.
+- **No sync at all.** In `handleIntersectNotFound`, `GetCurrentTip` gets the
+  tip and returns. If a `Jump` registers before the handler's next statement,
+  the handler gives `Jump` this `MsgIntersectNotFound`. The window is a few
+  statements wide.
+
+Either way `Jump` reports no intersection for a point the server knows. Then
+`Jump`'s own `MsgIntersectFound` arrives with nobody registered, which is a
+protocol error, and the connection closes.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ChainSyncQueriesBug.cfg`: today, with a roll delivering the tip | | **fails** both |
+| `ChainSyncQueriesNoSyncBug.cfg`: today, no sync | | **fails** |
+| `ChainSyncQueriesPopFirst.cfg`: the handler takes the request before delivering the tip, no sync | 72 | passes |
+| `ChainSyncQueriesPopFirstBug.cfg`: the same, with a roll delivering the tip | | **fails** |
+| `ChainSyncQueriesWaitOwn.cfg`: `GetCurrentTip` returns only after its own answer is handled | 85 | passes |
+
+Reordering the handler closes only the narrow window. The roll path needs
+`GetCurrentTip` to wait for its own answer. These configs show which designs
+survive the model; they are not a decision on the fix.
+
+### The modelling mistake
+
+The first version of this model had no sync, and only found the narrow
+window. The "pop first" reordering looked like a complete fix. The Go
+reproduction below goes through the roll path instead, and the reordering
+cannot fix that path. Adding `RollTips` to the model showed it, and
+`ChainSyncQueriesPopFirstBug.cfg` keeps the lesson.
+
+### Reproduced in Go
+
+A deterministic test against a real gOuroboros server:
+
+1. A sync runs at the tip with the server holding its roll.
+2. `GetCurrentTip` queues its `MsgFindIntersect`.
+3. The roll is released. The callback stops the sync, so `Jump` can run, and
+   `GetCurrentTip` returns on the roll's tip.
+4. The server holds its `MsgIntersectNotFound` until `Jump` has registered.
+
+In 10 runs out of 10 with `-race`, `Jump` returned "not found" for a point the
+server finds, and the client then failed with:
+
+```
+chain-sync: received IntersectFound without a pending FindIntersect request
+```
+
+A loop of 2,000 plain `GetCurrentTip`-then-`Jump` rounds with no sync never
+hit the narrow window. The model shows it is reachable, but it is very rarely
+hit.
+
+### Spec, reference, and gOuroboros
+
+| Question | Specification | Reference | gOuroboros |
+| --- | --- | --- | --- |
+| How many answers does `MsgFindIntersect` get? | Exactly one, `MsgIntersectFound` or `MsgIntersectNotFound` [C1] | Same | Same on the wire |
+| Who receives it? | The client that sent it; replies are in request order [P1] | The continuation that sent it: `Yield` then `Await` [R2], with no shared registry | Whoever is registered on `wantIntersectFoundChan` when the handler looks |
+| Can a caller move on before its answer? | Not in the state machine: it is in `StIntersect` until the answer | No | Yes: `GetCurrentTip` returns on any tip |
 
 ## Running it
 
