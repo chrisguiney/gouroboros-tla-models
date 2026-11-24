@@ -415,3 +415,13 @@ give `ApplyFunc` a context), and the second belongs in #3161.
 ```sh
 scripts/run-model.sh specs/pipeline-cbor
 ```
+
+Code: `fix/pipeline-callback-stop` `27083d3b`, `fix/pipeline-cancel-cleanup`
+`0f956962`, and the reference-behaviour PR follow-up `1cfba318` (pushed). The
+watcher in gOuroboros watches the context given to `Start`, not the
+pipeline's own context. A fatal processing error cancels only the pipeline's
+context, so it keeps the committed prefix for the `Results` reader until
+`Stop`, as before. The model has no fatal path, so its watcher wakes on any
+cancel. `Stop(ctx)` in the model is `StopSignal` plus `StopWaitTd`. A caller
+that gives up on its context leaves the teardown running; `StopTimeout`
+covers that.
