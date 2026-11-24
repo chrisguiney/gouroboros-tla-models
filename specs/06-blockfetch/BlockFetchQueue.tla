@@ -54,6 +54,16 @@ CONSTANTS
     \* return an error for it. TRUE is a possible fix: leave those to their
     \* caller, which removes them when its send fails.
     DrainSkipsUnsent,
+    \* FALSE as in gOuroboros 61046085. TRUE is the fix on gOuroboros branch
+    \* fix/blockfetch-no-callback-for-unsent: the send's outcome and the
+    \* caller clearing its "sending" mark are separate steps, and a drain
+    \* that finds a request still sending takes it out of the queue without
+    \* resolving it, recording the drain's error for its caller instead
+    \* (rangeRequest.sending, rangeRequest.drainErr).
+    DrainDefersSending,
+    \* TRUE with DrainDefersSending: a caller whose send succeeded resolves
+    \* the request a drain left to it. FALSE is a mutation.
+    SenderResolvesDrained,
     \* TRUE as in gOuroboros: MsgNoBlocks takes its request out of the queue
     \* (removeLocked in handleNoBlocks). FALSE is a mutation.
     NoBlocksRemovesHead,
@@ -65,8 +75,12 @@ Ids == 1..Callers
 
 VARIABLES
     caller,    \* caller[i]: "new", "appended" (in the queue, send pending),
+               \* "sendOk" (the send succeeded, the caller has not yet
+               \* cleared its sending mark; DrainDefersSending only),
                \* "sent" (RequestRange returned the id), "refused"
                \* (RequestRange returned an error)
+    handedOver, \* ids a drain took out of the queue while still sending,
+                \* left for their callers to resolve
     token,     \* the caller holding the send token, or 0
     queue,     \* the client's FIFO: records [id, started]
     up,        \* TRUE while the protocol runs
@@ -79,12 +93,13 @@ VARIABLES
     misrouted, \* TRUE once an answer was applied to another request
     clientErr  \* TRUE once the handler refused an honest answer
 
-vars == <<caller, token, queue, up, toServer, sv, toClient, done, misrouted,
-          clientErr>>
+vars == <<caller, handedOver, token, queue, up, toServer, sv, toClient, done,
+          misrouted, clientErr>>
 
 \* In English: "Nobody has called yet; the protocol runs; nothing in flight."
 Init ==
     /\ caller = [i \in Ids |-> "new"]
+    /\ handedOver = {}
     /\ token = 0
     /\ queue = <<>>
     /\ up = TRUE
@@ -116,23 +131,39 @@ Admit(i) ==
     /\ token' = IF UseSendToken THEN i ELSE token
     /\ queue' = Append(queue, [id |-> i, started |-> FALSE])
     /\ caller' = [caller EXCEPT ![i] = "appended"]
-    /\ UNCHANGED <<up, toServer, sv, toClient, done, misrouted, clientErr>>
+    /\ UNCHANGED <<handedOver, up, toServer, sv, toClient, done, misrouted,
+                   clientErr>>
 
 \* In English: "Caller i queues its MsgRequestRange and returns the id. If
 \* the protocol has stopped, the send fails: the caller removes its request
 \* if it is still queued (removeLocked) and returns an error. Either way it
-\* hands the token back."
+\* hands the token back. With DrainDefersSending, a successful send only
+\* moves the caller to "sendOk"; SendFinish then returns the id."
 Send(i) ==
     /\ caller[i] = "appended"
     /\ IF up
           THEN /\ toServer' = Append(toServer, i)
-               /\ caller' = [caller EXCEPT ![i] = "sent"]
+               /\ caller' = [caller EXCEPT ![i] =
+                                IF DrainDefersSending THEN "sendOk"
+                                                      ELSE "sent"]
                /\ UNCHANGED queue
           ELSE /\ queue' = Without(queue, i)
                /\ caller' = [caller EXCEPT ![i] = "refused"]
                /\ UNCHANGED toServer
     /\ token' = IF token = i THEN 0 ELSE token
-    /\ UNCHANGED <<up, sv, toClient, done, misrouted, clientErr>>
+    /\ UNCHANGED <<handedOver, up, sv, toClient, done, misrouted, clientErr>>
+
+\* In English: "Caller i, whose send succeeded, clears its sending mark and
+\* returns the id. If a drain took the request while it was still sending,
+\* the caller resolves it now with the drain's error." (DrainDefersSending)
+SendFinish(i) ==
+    /\ caller[i] = "sendOk"
+    /\ caller' = [caller EXCEPT ![i] = "sent"]
+    /\ done' = IF SenderResolvesDrained /\ i \in handedOver
+                  THEN [done EXCEPT ![i] = @ + 1]
+                  ELSE done
+    /\ UNCHANGED <<handedOver, token, queue, up, toServer, sv, toClient,
+                   misrouted, clientErr>>
 
 -----------------------------------------------------------------------------
 (* The honest server [B1]: it takes requests in order and answers each     *)
@@ -144,8 +175,8 @@ ServerTake ==
     /\ sv.phase = "idle" /\ toServer /= <<>>
     /\ sv' = [id |-> Head(toServer), phase |-> "busy"]
     /\ toServer' = Tail(toServer)
-    /\ UNCHANGED <<caller, token, queue, up, toClient, done, misrouted,
-                   clientErr>>
+    /\ UNCHANGED <<caller, handedOver, token, queue, up, toClient, done,
+                   misrouted, clientErr>>
 
 \* In English: "Busy, the server answers MsgNoBlocks or MsgStartBatch;
 \* streaming, it sends the block, then MsgBatchDone."
@@ -161,8 +192,8 @@ ServerAnswer ==
        \/ /\ sv.phase = "end"
           /\ toClient' = Append(toClient, [id |-> sv.id, m |-> "BD"])
           /\ sv' = [sv EXCEPT !.phase = "idle"]
-    /\ UNCHANGED <<caller, token, queue, up, toServer, done, misrouted,
-                   clientErr>>
+    /\ UNCHANGED <<caller, handedOver, token, queue, up, toServer, done,
+                   misrouted, clientErr>>
 
 -----------------------------------------------------------------------------
 (* The client's handler [G1]. *)
@@ -198,7 +229,7 @@ ClientRecv ==
                             /\ done' = [done EXCEPT ![h.id] = @ + 1]
                   /\ UNCHANGED <<up, clientErr>>
     /\ toClient' = Tail(toClient)
-    /\ UNCHANGED <<caller, token, toServer, sv>>
+    /\ UNCHANGED <<caller, handedOver, token, toServer, sv>>
 
 \* In English: "The protocol stops: the peer sent something wrong, a range
 \* outlived its deadline, the connection closed, or the application
@@ -206,27 +237,36 @@ ClientRecv ==
 Shutdown ==
     /\ up
     /\ up' = FALSE
-    /\ UNCHANGED <<caller, token, queue, toServer, sv, toClient, done,
-                   misrouted, clientErr>>
+    /\ UNCHANGED <<caller, handedOver, token, queue, toServer, sv, toClient,
+                   done, misrouted, clientErr>>
 
 \* In English: "Once stopped, answers still arriving are dropped."
 ClientDrop ==
     /\ ~up /\ toClient /= <<>>
     /\ toClient' = Tail(toClient)
-    /\ UNCHANGED <<caller, token, queue, up, toServer, sv, done, misrouted,
-                   clientErr>>
+    /\ UNCHANGED <<caller, handedOver, token, queue, up, toServer, sv, done,
+                   misrouted, clientErr>>
 
 \* In English: "Once stopped, the watcher takes every queued request out
 \* and resolves each with ErrProtocolShuttingDown. With DrainSkipsUnsent,
-\* a request whose caller has not yet sent it is left to that caller."
+\* a request whose caller has not yet sent it is left to that caller, still
+\* queued. With DrainDefersSending, every request leaves the queue, but one
+\* whose caller is still sending is handed over to that caller unresolved."
 Drain ==
     /\ DrainOnShutdown
     /\ ~up
-    /\ LET take(r) == ~DrainSkipsUnsent \/ caller[r.id] = "sent"
-           taken == SelectSeq(queue, take)
+    /\ LET sending(r) == caller[r.id] \in {"appended", "sendOk"}
+           resolveNow(r) ==
+               IF DrainDefersSending THEN ~sending(r)
+               ELSE ~DrainSkipsUnsent \/ caller[r.id] = "sent"
+           leave(r) == ~DrainDefersSending /\ ~resolveNow(r)
+           taken == SelectSeq(queue, resolveNow)
+           given == SelectSeq(queue, LAMBDA r :
+                                DrainDefersSending /\ sending(r))
            ids == {taken[k].id : k \in 1..Len(taken)}
-       IN /\ taken /= <<>>
-          /\ queue' = SelectSeq(queue, LAMBDA r : ~take(r))
+       IN /\ (taken /= <<>> \/ given /= <<>>)
+          /\ queue' = SelectSeq(queue, leave)
+          /\ handedOver' = handedOver \cup {given[k].id : k \in 1..Len(given)}
           /\ done' = [i \in Ids |-> IF i \in ids THEN done[i] + 1
                                                 ELSE done[i]]
     /\ UNCHANGED <<caller, token, up, toServer, sv, toClient, misrouted,
@@ -247,7 +287,7 @@ Quiet ==
     /\ UNCHANGED vars
 
 Next ==
-    \/ \E i \in Ids : Admit(i) \/ Send(i)
+    \/ \E i \in Ids : Admit(i) \/ Send(i) \/ SendFinish(i)
     \/ ServerTake \/ ServerAnswer
     \/ ClientRecv \/ Shutdown \/ ClientDrop \/ Drain
     \/ Quiet
@@ -287,4 +327,9 @@ ProbeNeverRefused == \A i \in Ids : caller[i] /= "refused"
 \* queued behind it." Violated = MsgNoBlocks happens mid-pipeline.
 ProbeNoBlocksMidPipeline ==
     ~(Len(queue) >= 2 /\ toClient /= <<>> /\ Head(toClient).m = "NB")
+\* In English: "A drain never hands a request whose send succeeded over to
+\* its caller." Violated = with DrainDefersSending, the path where the
+\* caller resolves the request itself is reachable.
+ProbeNeverHandedOverAndSent ==
+    \A i \in Ids : ~(i \in handedOver /\ caller[i] = "sent")
 =============================================================================
