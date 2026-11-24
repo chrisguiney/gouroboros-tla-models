@@ -79,6 +79,8 @@ protocol.
   Eagerness.
 - [Model 21: the epoch nonce](specs/21-consensus-nonce/README.md): the
   evolving and candidate nonces, the freeze window and the tick.
+- [Model 25: eras](specs/25-consensus-eras/README.md): era transitions,
+  the hard-fork era history, and the order of the header checks.
 
 ### Ledger
 
