@@ -72,8 +72,19 @@ the previous boundary, as the reference's pulser does.
    an action enacted long ago that is no longer the root, the tree breaks
    (`GovLifecycleStaleLookupBug.cfg`, `TreeWellFormed`). Dingo filters these
    out (`ledger/view.go` `GovActionById`, at 2fc7975d), but gOuroboros'
-   interface did not say it must. A local fix branch writes the contract
-   down (below).
+   interface did not say it must.
+
+   The current root must not be answered for either.
+   `UtxoValidateUnknownGovActionIds` accepts a vote on any action
+   `GovActionExists` finds, and the reference looks a voted-on id up in the
+   live proposals only (`proposalsActionsMap`, `GovActionsDoNotExist`). If
+   the state answers for the current root, a vote on an enacted action gets
+   through (`GovLifecycleRootVoteBug.cfg`, `VotesOnlyLive`). Dingo returns the
+   current root at 2fc7975d (`ledger/view.go` 2680-2692), so this was live.
+   The model before this check let the root vote through unnoticed: its
+   `Vote` drew only from live actions, so no invariant looked at what the
+   lookup let a vote name. With `VotesOnlyLive` removed, the root-vote
+   mutation passes (43,529 states).
 
 ## Checking the checks
 
@@ -84,6 +95,7 @@ Every invariant fails under some mutation, and every probe is violated.
 | `GovLifecycleNoAncestryBug.cfg` | GOV accepts any predecessor | `TreeWellFormed` | 153 |
 | `GovLifecycleNoAncestrySpecBug.cfg` | same, only `SpecAgrees` checked | `SpecAgrees` | 451 |
 | `GovLifecycleStaleLookupBug.cfg` | lookup answers for an old enacted action | `TreeWellFormed` | 7,415 |
+| `GovLifecycleRootVoteBug.cfg` | lookup answers for a purpose's current root (lifetime 2) | `VotesOnlyLive` | 2,739 |
 | `GovLifecycleNoThreadRootBug.cfg` | ratifier keeps the roots from the start of the pass | `EnactedPrevMatchesRoot` | 4,135 |
 | `GovLifecycleNoDelayBug.cfg` | a delaying enactment does not stop the pass | `DelayingIsLast` | 1,312 |
 | `GovLifecyclePruneBeforeExpiryBug.cfg` | rivals found in the tree before expiry pruning | `DepositsReturnedOnce` (refunded twice) | 3,499 |
@@ -156,11 +168,27 @@ last, which would refuse votes one epoch early if the vectors reached it.
 | Return account must be registered | always | skipped in bootstrap (PV9) | skipped in PV9 | follows reference |
 | CC voter must be in the enacted committee | always (`isRegistered`) | only from PV11; before, any authorized hot key | same as reference | follows reference |
 | Vote expiry | epoch `<= expiresAfter` | same | `slot <= ExpirySlot`; correct only if `ExpirySlot` is the last slot of that epoch | contract now documented |
-| Predecessor lookup | proposals in the gov state | the proposals tree | whatever `GovActionById` returns | contract now documented |
+| Predecessor lookup | proposals in the gov state | the proposals tree | the purpose root from `GovPurposeRoots`, then whatever `GovActionById` returns | contract now documented |
+| Vote on an enacted action | `GovActionsDoNotExist` | `proposalsActionsMap` holds live proposals only | main: accepted when `GovActionById` returns the root, which the old contract allowed and Dingo does; PR 3155 head `b5294771`: the contract excludes roots, and the hard-fork check takes the root from `GovPurposeRoots` | does not conform → conforms (model: `VotesOnlyLive`); Dingo must stop returning the root |
 | Voter x action table | `canVote` (threshold defined) | `isVotingAllowed` + bootstrap | three rules | agree on all 120 cells |
 | Ratification, delay, enactment, deposits, DRep and CC expiry | defined | defined | absent | out of gOuroboros' scope |
 
-## Fix (local branch, not pushed)
+## Fix: PR 3155
+
+Head `b5294771` (`fix/conway-governance-checks`). Review follow-up: the
+`GovActionById` contract no longer lets a state return a purpose's current
+root, and `UtxoValidateHardForkCanFollow` requires `GovPurposeRootsState`
+for a predecessor the transaction did not propose, since a lookup miss no
+longer tells an unknown predecessor from the root. Go tests:
+`TestUtxoValidateHardForkCanFollowNeedsRootsForLedgerPredecessor` (fails
+before the fix with "predecessor does not exist") and
+`TestUtxoValidateUnknownGovActionIdsRefusesEnactedRoot`. The ancestry table
+(`TestGovProposalAncestryTableModel`) already kept the root out of the
+lookup. ouroboros-mock's conformance `buildLedgerState` removes an enacted
+proposal (`enactProposal` calls `removeProposal`), so it meets the contract
+as is.
+
+## Earlier fix branch
 
 `fix/governance-state-lookup-contract` (from 61046085): doc comments on
 `LedgerState.GovActionById`, `GovActionExists` and
