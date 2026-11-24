@@ -90,7 +90,11 @@ immutable tip (`ProbeNoImmutable`).
   `MsgAcquire`, then waits on the unbuffered `acquireResultChan`.
 - A query made while `acquired` is false first **acquires the volatile tip
   itself** (`runQueryMaxItems`), then sends `MsgQuery` and waits on the
-  unbuffered `queryResultChan`. Nothing ever releases that state.
+  unbuffered `queryResultChan`. On `61046085` nothing ever releases that
+  state; with the fix, the call releases it as it returns.
+- Some calls make two queries: `GetEpochNo` and `GetCurrentProtocolParams`
+  ask for the era, then for that era's data. The model's `Query2` is such a
+  call.
 - `release` sends `MsgRelease` and clears the flag, whatever the flag was.
 - The handler sets `acquired` on `MsgAcquired` and clears it on
   `MsgFailure`, then blocks handing the answer over.
@@ -116,7 +120,9 @@ grows, and `Stop` at any moment.
 4. **`FreshImplicitSnapshot`**: does a query made without an explicit
    acquire answer from a state at least as new as the chain was when the call
    began?
-5. Does every call return, including when `Stop` lands while a request is
+5. **`OneSnapshotPerCall`**: do all the queries of one call answer from the
+   same state?
+6. Does every call return, including when `Stop` lands while a request is
    outstanding? (This is TLC's deadlock check. `Finished` is the only
    stutter step.)
 
@@ -124,13 +130,18 @@ grows, and `Stop` at any moment.
 
 | Config | States | Result |
 | --- | --- | --- |
-| `LocalStateQueryClient.cfg`: today, every call except `Release` | 621,042 | passes 1, 2, 3, 5 |
+| `LocalStateQueryClient.cfg`: today, every call except `Release` | 636,116 | passes 1, 2, 3, 6 |
 | `LocalStateQueryClientReleaseIdleBug.cfg`: today, with `Release` | | **fails** `NoViolation` |
-| `LocalStateQueryClientReleaseCheck.cfg`: `Release` refuses when nothing is acquired | 1,087,326 | passes 1, 2, 3, 5 |
+| `LocalStateQueryClientReleaseCheck.cfg`: `Release` refuses when nothing is acquired | 1,105,828 | passes 1, 2, 3, 6 |
 | `LocalStateQueryClientImmutableOldBug.cfg`: today, node-to-client v9-v15 | | **fails** `NoViolation` |
-| `LocalStateQueryClientImmutableOld.cfg`: v9-v15 with the version gate | 494,564 | passes 1, 2, 3, 5 |
+| `LocalStateQueryClientImmutableOld.cfg`: v9-v15 with the version gate | 506,062 | passes 1, 2, 3, 6 |
 | `LocalStateQueryClientStaleBug.cfg`: today | | **fails** `FreshImplicitSnapshot` |
-| `LocalStateQueryClientFresh.cfg`: design option, a query releases what it acquired itself | 1,088,974 | passes 1-5 |
+| `LocalStateQueryClientFresh.cfg`: the implicit-acquire fix and the `Release` check, with two-query calls | 1,791,198 | passes 1-6 |
+| `LocalStateQueryClientPerQueryReleaseBug.cfg`: rejected design, release after each query | | **fails** `OneSnapshotPerCall` |
+
+(The counts grew slightly from the first version of this model: each call
+now also tracks how many queries it has left and the states they answered
+from.)
 
 So the concurrency is sound. `busyMutex` is held across the whole exchange.
 The result channels are unbuffered, so no stale answer can sit in a buffer.
@@ -139,7 +150,7 @@ another call. Unlike chain-sync, `Stop` has no restart hazard: `Start` never
 brings a stopped client back. A call that is waiting when `Stop` lands
 returns `ErrProtocolShuttingDown`.
 
-Three defects remain:
+Three defects were found:
 
 - **`Release` with nothing acquired.** It sends `MsgRelease` from `StIdle`.
   The send loop refuses it and the connection is torn down, while `Release`
@@ -151,7 +162,8 @@ Three defects remain:
 - **The implicit acquire is never released.** The first query on an idle
   client pins the volatile tip. Every later query answers from that
   snapshot, even though `GetChainPoint` is documented as returning "the
-  current chain tip". The reference has no implicit acquire [R5].
+  current chain tip". The reference has no implicit acquire [R5]. Fixed on
+  a branch: the call releases it as it returns.
 
 ### Checking the checks
 
@@ -220,24 +232,39 @@ were already covered by `TestAcquisitionWireMatrix` in `server_test.go`.
 | --- | --- | --- |
 | `fix/localstatequery-release-when-idle` | `Release` returns `ErrNotAcquired` and sends nothing | `TestReleaseWithNothingAcquired`. Before: `Release()` returned nil, then "message *MsgRelease not allowed in current protocol state Idle", and every later call returned "protocol is shutting down" (5 runs of 5) |
 | `fix/localstatequery-immutable-tip-version` | below v16, acquiring or re-acquiring the immutable tip returns `ErrAcquireImmutableTipUnsupportedVersion` and keeps any acquired state | `TestAcquireImmutableTipNeedsVersion16`. Before: the client sent it on v15 |
+| `fix/localstatequery-implicit-acquire` | a query on an idle client acquires the volatile tip for the rest of the public call; `endCall`, which every public call defers, releases it before letting the next call in | `TestImplicitQueryAnswersFromCurrentTip` (before: second `GetChainBlockNo` returned 100, want 200), `TestImplicitAcquireSpansTheCall` (before: no release), `TestExplicitAcquireKeepsSnapshot` (before: no release after the implicit call), `TestCurrentEraNotCachedAcrossImplicitCalls` (before: era 5, want 6). With per-query release instead, `TestImplicitAcquireSpansTheCall` fails (epoch 8, want 7) |
 | `fix/localstatequery-server-restart` | the server replaces its protocol instance after `MsgDone`, as the chain-sync server does; `Stop` wins over a restart in progress; connection shutdown calls the server's `Stop` | `TestServerAnswersAcquireSentDuringRestart` and `TestServerAnswersBackToBackRestarts` failed with "no reply from restarted server"; a new `localstatequery` case in `TestServerStopDuringRestartStopsServer` fails if `initProtocol` ignores `stopped` |
 
 When the restart fix and the test branch are merged, `gouroborosServer` in
 the test must go back to the reference table. Merged, 12 server `Done`
 cells fail until it does, and the package passes once it does.
 
-### Not fixed: the implicit acquire
+### The implicit acquire
 
 Reproduced on `61046085`. The server's tip is 100 and the client calls
 `GetChainBlockNo`. The tip moves to 200 and the client calls it again. The
 second call returns 100, and the server saw one acquire (3 runs of 3).
-`LocalStateQueryClientFresh.cfg` checks one design: a query that acquired
-implicitly releases afterwards. But calls such as `GetCurrentProtocolParams`
-make two queries (the era, then the parameters). Done per query, that design
-would release between them, so the two queries could straddle an era
-boundary. The scope of the implicit acquire should be the public call. That
-touches every one of the roughly 60 `Get...` methods, so it is a design
-change for the maintainers, not a fix here.
+
+Releasing after each query is not enough: calls such as
+`GetCurrentProtocolParams` make two queries (the era, then the parameters),
+and a release between them lets the two straddle an era boundary.
+`LocalStateQueryClientPerQueryReleaseBug.cfg` shows it. So the implicit
+acquire lasts for the public call. Every public call already took
+`busyMutex` and deferred its unlock, so the fix replaces that one deferred
+line with `endCall`, which releases an implicitly acquired state and then
+unlocks. No query method changed otherwise.
+
+The era is cached for as long as a state is held. Calls made without an
+explicit acquire no longer share it, so each such call that needs the era
+asks for it: one more round trip.
+
+Merging: textually clean with the other three fix branches and the test
+branch. Merged with `test/localstatequery-state-model`,
+`TestConcurrentCallsGetOwnAnswers` times out, because its server has no
+`ReleaseFunc` and the gOuroboros server treats `MsgRelease` without one as
+an error. Giving that test's server a `ReleaseFunc` makes the package pass.
+With `fix/localstatequery-release-when-idle`, `endCall` only releases when
+`acquired` is set, so it never meets `ErrNotAcquired`.
 
 ## Spec, reference, and gOuroboros
 
@@ -251,7 +278,7 @@ change for the maintainers, not a fix here.
 | Release with nothing acquired | Illegal [S3] | Impossible by types [R5] | Sent; tears down the connection | **Defect, fixed on a branch** |
 | Server after `MsgDone` | "terminate" [S3] | Restarted by the inbound governor [R4] | Stays in `Done`, holds later messages | **Defect, fixed on a branch** |
 | Which call gets an answer | The one that asked | The continuation that sent [R5] | The one holding `busyMutex`; always the asker | Agree |
-| Implicit acquire | None | None [R5] | Volatile tip, never released | **Stale answers; written up** |
+| Implicit acquire | None | None [R5] | Volatile tip, never released | **Stale answers; fixed on a branch** (released as the call returns) |
 | Client ending with `MsgDone` | Client may terminate [S3] | `SendMsgDone` [R5] | No API; `Stop` unregisters without `MsgDone` or `MsgRelease`, so the node holds the state until the connection closes | Recorded |
 | Timeouts | "No timeouts" [S3, line 2020] | "There is a timeout" in `StAcquiring` (`Type.hs` line 55) | Acquiring 5 s, Querying 180 s, client side | Recorded |
 | A message while the receiver has agency | Not said | Waits | Refused at once | Recorded (as keep-alive) |
@@ -274,6 +301,7 @@ and gOuroboros `origin/main` at `61046085`. `P` below is
 | R5 | `P/Client.hs` lines 36-89, 149-205 | The reference client: one continuation per state; no implicit acquire; `SendMsgDone` from `StIdle`. |
 | R6 | `cardano-diffusion/api/lib/Cardano/Network/NodeToClient/Version.hs` lines 48-50 | v16 "added ImmutableTip". At this commit only v23 is supported, and `cardano-diffusion/.../LocalStateQuery/Codec.hs` lines 42-43 always uses `LocalStateQuery_V2`. |
 | G1 | gOuroboros `protocol/localstatequery/` | `localstatequery.go` (`StateMap`), `client.go` (`acquire`, `release`, `runQueryMaxItems`, the handlers, `Start`), `server.go` (`handleDone`); `protocol/protocol.go` (`stop`, `enqueueMessage`, the receive checks). |
+| G2 | gOuroboros `35982911` (`fix/localstatequery-implicit-acquire`), `client.go` | `endCall`, `runQueryMaxItems`; `GetEpochNo` makes two queries. |
 
 ## Not modelled
 
@@ -295,7 +323,7 @@ cd specs/10-localstatequery
 ../../bin/tlc -workers 4 -config LocalStateQueryClientImmutableOld.cfg LocalStateQueryClient.tla
 ../../bin/tlc -workers 4 -config LocalStateQueryClientFresh.cfg LocalStateQueryClient.tla
 # expected to fail:
-for c in ReleaseIdle ImmutableOld Stale NoMutex KeepFlag; do
+for c in ReleaseIdle ImmutableOld Stale PerQueryRelease NoMutex KeepFlag; do
   ../../bin/tlc -workers 4 -config LocalStateQueryClient${c}Bug.cfg LocalStateQueryClient.tla || true
 done
 ```
