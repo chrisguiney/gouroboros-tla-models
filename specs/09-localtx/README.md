@@ -199,15 +199,15 @@ signed in this session; see the parent's handoff):
 | `fix/localtxmonitor-stop-releases` | `client.go`, `client_stop_test.go` | `Stop()` sends `MsgRelease` then `MsgDone` when acquired | test fails before the fix (no message, protocol error) |
 | `fix/localtxmonitor-await-acquire-timeout` | `localtxmonitor.go`, `client.go`, `await_acquire_test.go` | no `AcquireTimeout` on an acquire from Acquired; still timed from Idle | test fails before the fix ("timeout waiting on transition from protocol state Acquiring") |
 
-Fixes against gOuroboros `origin/main` `d0b95845`, each with a test that
+Fixes against gOuroboros `origin/main` `d8f5bc2a`, each with a test that
 fails without it:
 
 | Branch | Commit | Covers | Fails before the fix |
 | --- | --- | --- | --- |
-| `fix/localtxmonitor-get-measures` | `55bdab2e` | `MsgGetMeasures` (11) and `MsgReplyGetMeasures` (12), their transitions, `Client.GetMeasures`, the server's answer over the transactions `NextTx` has not returned, gated on `NodeToClientV_20` both ways | `TestServerAnswersGetMeasures`: "no reply ... ReplyGetMeasures" (decoding failed) |
-| `fix/localtxmonitor-await-acquire` | `35b8ee61` | opt-in `AwaitMempoolFunc`: the server answers `MsgAwaitAcquire` only once it returns; stop ends the wait | `TestServerAwaitAcquireWaitsForChange`: "MsgAwaitAcquire answered with an unchanged mempool" |
-| `fix/localtxmonitor-server-restart` | `7f07099a` | restart in Idle after `MsgDone` | `TestServerAnswersAcquireSentDuringRestart`: "no reply from restarted server: Acquired" |
-| `fix/localtxsubmission-server-restart` | `ed1d2769` | restart in Idle after `MsgDone` | `TestServerAnswersSubmitSentDuringRestart`: "no reply from restarted server: AcceptTx" |
+| `fix/localtxmonitor-get-measures` | `923a32dc` | `MsgGetMeasures` (11) and `MsgReplyGetMeasures` (12), their transitions, `Client.GetMeasures`, the server's answer over the transactions `NextTx` has not returned, gated on `NodeToClientV_20` both ways | `TestServerAnswersGetMeasures`: "no reply ... ReplyGetMeasures" (decoding failed) |
+| `fix/localtxmonitor-await-acquire` | `c0ec388e` | opt-in `AwaitMempoolFunc`: the server answers `MsgAwaitAcquire` only once it returns; stop ends the wait | `TestServerAwaitAcquireWaitsForChange`: "MsgAwaitAcquire answered with an unchanged mempool" |
+| `fix/localtxmonitor-server-restart` | `885a5991` | restart in Idle after `MsgDone` | `TestServerAnswersAcquireSentDuringRestart`: "no reply from restarted server: Acquired" |
+| `fix/localtxsubmission-server-restart` | `1086fdb1` | restart in Idle after `MsgDone` | `TestServerAnswersSubmitSentDuringRestart`: "no reply from restarted server: AcceptTx" |
 
 Existing tests already covered: every query/reply pair in `matchReply`, a
 mismatched reply refused by a running client, shutdown releasing waiting
