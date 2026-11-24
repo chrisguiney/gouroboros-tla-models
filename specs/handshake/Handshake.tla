@@ -73,6 +73,7 @@ CONSTANTS
     StrictQueryReply,   \* TRUE: gOuroboros, a client refuses MsgQueryReply it did not ask for
     HandleReplyVersions,\* TRUE: the reference, a client in StConfirm takes MsgProposeVersions as MsgReplyVersions
     AcceptOwnData,      \* TRUE: gOuroboros main, MsgAcceptVersion carries the server's own data, not the agreed data
+    ServerRawPeerData,  \* TRUE: the server ends with the client's raw data, not the agreed data
     KeyOrderRule,       \* "Recognised": the reference, recognised keys must ascend; "Every": every key must; "None": gOuroboros main
     ClientKeyOrders,    \* the wire orders the client may use: "Ascending", "UnknownAnywhere", or "Any"
     Mutation            \* "None", or a safeguard switched off to prove an invariant can fail
@@ -377,6 +378,15 @@ ServerDecision(local, remote) ==
 \*   AcceptOwnData then local of v, else Agree of local of v and remote of v."
 AcceptData(local, remote, v) ==
     IF AcceptOwnData THEN local[v] ELSE Agree(local[v], remote[v])
+
+\* In English: "The version data the server ends with after accepting v:
+\* the client's own data under ServerRawPeerData, else the agreement of the
+\* two." The reference server ends with the agreed data (Server.hs 42-44).
+\* Literally: "ServerEndData of local, remote and v is defined as: if
+\*   ServerRawPeerData then remote of v, else Agree of local of v and remote
+\*   of v."
+ServerEndData(local, remote, v) ==
+    IF ServerRawPeerData THEN remote[v] ELSE Agree(local[v], remote[v])
 
 \* In English: "The message that carries decision d."
 \* Literally: "ReplyMsg of d, local and remote is defined as: in the case d's
@@ -866,6 +876,26 @@ AcceptCarriesNegotiatedData ==
            IN /\ out.type = "MsgAcceptVersion"
               /\ out.p = Agree(table["Server"][v], heard'[v])
       ]_vars
+
+\* In English: "When both sides accepted and no rogue message was injected,
+\* both end with the agreed data for the version, so their connections
+\* derive the same diffusion mode. The client ends with the data in
+\* MsgAcceptVersion (gOuroboros hands it to the callback; the reference
+\* client recombines it with its own, which changes nothing [R2]); the
+\* server ends with ServerEndData."
+\* Literally: "AgreedDataBothSides is defined as: if, for all r in Roles,
+\*   result of r's kind equals "Accept", and rogueLeft equals RogueMessages,
+\*   then, letting v be result of "Server"'s v: AcceptData of table of
+\*   "Server", heard and v equals Agree of table of "Client" of v and table of
+\*   "Server" of v, and ServerEndData of table of "Server", heard and v equals
+\*   Agree of table of "Client" of v and table of "Server" of v."
+AgreedDataBothSides ==
+    (/\ \A r \in Roles : result[r].kind = "Accept"
+     /\ rogueLeft = RogueMessages)
+    => LET v == result["Server"].v
+           agreed == Agree(table["Client"][v], table["Server"][v]) IN
+       /\ AcceptData(table["Server"], heard, v) = agreed
+       /\ ServerEndData(table["Server"], heard, v) = agreed
 
 \* In English: "In every step where a side reads a message whose version
 \* table arrived with its recognised keys out of order, that side hangs up
