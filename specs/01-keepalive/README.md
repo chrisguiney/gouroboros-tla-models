@@ -268,6 +268,10 @@ TLC tries every way two goroutines can interleave:
 - **The restart**, run by the old instance's receive loop when `MsgDone`
   arrives (`handleDone` in `protocol/keepalive/server.go`): stop the old
   instance (`StopForRestart`), install a new one under `protocolMu`, start it.
+- **The muxer slot** for the keep-alive server: one receiver per protocol and
+  role, shared by instances one after another. `Stop` unregisters it;
+  `StopForRestart` *suspends* it, so it keeps buffering for the next
+  instance; `Start` registers or resumes it.
 - **A stopper**, one of: `Server.Stop()`, which reads the current instance
   under the lock and stops it; or connection shutdown (`stopProtocols` in
   `connection.go`), which reads `ProtocolInstance()`, stops it, then stops
@@ -280,13 +284,22 @@ make keepalive-lifecycle
 | Config | Checks | Result |
 | --- | --- | --- |
 | `KeepAliveLifecycleStopBug.cfg` | The fix as first written: `Server.Stop()` racing a restart. | **Fails after 5 steps**: the restart stops the old instance; `Stop` reads that same, already stopped, instance and stops it again, which does nothing; the restart installs and starts a new instance. `Stop` returned, and keep-alive is still served. |
-| `KeepAliveLifecycle.cfg` | The same, with `StopGuard`: `Stop` sets a flag under the lock, and the restart checks it before installing. | Passes: 31 distinct states. Never two instances running; `Stop` always wins. |
+| `KeepAliveLifecycleSlotBug.cfg` | The guard as first written. | **Fails after 5 steps**: `StopForRestart` suspends the slot; `Stop` then cancels the restart, and nothing releases the slot. It keeps buffering the client's bytes, charged against the connection's ingress budget, until the connection closes. |
+| `KeepAliveLifecycle.cfg` | With `StopGuard` and `CancelUnregisters`: `Stop` sets a flag under the lock, and a restart that sees it installs nothing and unregisters the slot. | Passes: 33 distinct states. Never two instances running; `Stop` always wins; nothing stays registered. |
 | `KeepAliveLifecycleCloseBug.cfg` | Connection shutdown racing a restart, guard on. | **Fails**: shutdown stops the old instance and the muxer while the restart is between its steps; the restart then starts its new instance on a stopped muxer, which fails to register and raises "could not register protocol with muxer". |
 
 The first result changed the gOuroboros fix before it was published: the
 guard was added, with a Go test (`TestServerStopWinsOverRestart`) that calls
 `Stop` from the server's `DoneFunc`, which runs inside the same window. The
 test failed 3 times out of 3 without the guard.
+
+The slot result came the other way round. The first version of this module
+tracked only whether each instance ran, not its muxer registration, so it
+passed the guard as written; a review bot then reported the suspended
+receiver. Adding the slot to the model reproduced it, and
+`TestServerStopAfterRestartBeganReleasesReceiver` failed 20 times out of 20
+before the fix. A model only checks what it represents: leave out a piece of
+state and every bug in that state passes.
 
 The second result is not specific to keep-alive. Connection shutdown never
 calls a server's `Stop`, so no guard inside the server can see it, and every
@@ -315,6 +328,7 @@ cells as `make keepalive-table`.
 | `TestClientTimesOutWhenServerFallsSilent` | S2's `StServer` timeout: a client whose ping is never answered gives up. |
 | `TestStateMapTimeoutsMatchSpec` | The per-state timeouts are 97 s and 60 s. |
 | `TestServerStopWinsOverRestart` | `KeepAliveLifecycleStopBug.cfg`'s trace: `Stop` during a restart still stops the server. |
+| `TestServerStopAfterRestartBeganReleasesReceiver` | `KeepAliveLifecycleSlotBug.cfg`'s trace: a restart cancelled by `Stop` releases the muxer receiver. |
 
 Against gOuroboros today, exactly six cells fail, all from the bug: the server
 after `MsgDone` (five kinds), and `MsgDone` followed by a new run. A prototype
@@ -329,8 +343,9 @@ limit.
 - **A bug**: the keep-alive server does not restart after `MsgDone`. See
   [The bug](#the-bug). Reported as gOuroboros issue #3076, fixed by pull
   request #3077.
-- **A bug in that fix, caught before publishing**: `Stop` could lose to a
-  restart in progress. See
+- **Two bugs in that fix**: `Stop` could lose to a restart in progress
+  (caught before publishing), and a restart cancelled by `Stop` left its
+  muxer receiver suspended (caught in review, then modelled). See
   [The restart lifecycle](#the-restart-lifecycle-keepalivelifecycletla).
 - **A shutdown window in every restarting server**: during a connection
   close, a restart can start an instance after the old one was stopped. The

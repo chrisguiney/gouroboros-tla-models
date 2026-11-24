@@ -37,6 +37,7 @@ keepalive-bugs: ## Show the keep-alive counterexamples, including the gOuroboros
 keepalive-lifecycle: ## Check the gOuroboros server restart against Stop and connection close
 	$(KEEPALIVE) -config KeepAliveLifecycle.cfg KeepAliveLifecycle.tla
 	$(KEEPALIVE) -config KeepAliveLifecycleStopBug.cfg KeepAliveLifecycle.tla || true
+	$(KEEPALIVE) -config KeepAliveLifecycleSlotBug.cfg KeepAliveLifecycle.tla || true
 	$(KEEPALIVE) -config KeepAliveLifecycleCloseBug.cfg KeepAliveLifecycle.tla || true
 
 check: ## Check every model that is expected to pass
