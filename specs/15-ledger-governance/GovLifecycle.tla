@@ -24,6 +24,9 @@
 (*   [G2] Gov.lagda.md 503-509; Rules/Gov.hs 356-362: a vote is refused    *)
 (*        once the current epoch is past the action's expiresAfter.        *)
 (*   [G3] Rules/Gov.hs 401-418: expiresAfter = proposal epoch + lifetime.  *)
+(*   [G4] Gov.lagda.md 503-509; Rules/Gov.hs 361-362 (checkVotesAreValid):  *)
+(*        a vote names an action in proposalsActionsMap, the live          *)
+(*        proposals; an enacted root is not in it (GovActionsDoNotExist).  *)
 (*   [R1] Ratify.lagda.md 605-629; Rules/Ratify.hs 336-361: in order, an  *)
 (*        action is enacted when accepted, its predecessor is the current *)
 (*        root, and nothing delaying was enacted before it in this pass;  *)
@@ -64,8 +67,11 @@ CONSTANTS
     MaxEpoch,         \* the last epoch the model reaches
     Lifetime,         \* govActionLifetime, in epochs [G3]
     CheckAncestry,    \* TRUE: GOV refuses a bad predecessor [G1]
-    LiveOnlyLookup,   \* TRUE: the state answers GovActionById only for live
-                      \*   proposals and the current roots (see README)
+    LiveOnlyLookup,   \* TRUE: the state does not answer GovActionById for an
+                      \*   action enacted before the current root (see README)
+    RootNotLive,      \* TRUE: the state does not answer GovActionById for a
+                      \*   purpose's current root either; only live proposals
+                      \*   are found, as the reference's proposalsActionsMap
     ThreadRoot,       \* TRUE: ratification compares with the root as updated
                       \*   by earlier enactments in the same pass [R1]
     Delay,            \* TRUE: a delaying enactment stops the rest of the pass [R1]
@@ -106,10 +112,11 @@ VARIABLES
     log,       \* every enactment, in order, with what the tree looked like
     agree,     \* FALSE once the spec's orphan removal and the reference's
                \*   tree pruning disagreed about what is left [E3]
-    sawDelay   \* TRUE once a delay stopped an action that would have passed
+    sawDelay,  \* TRUE once a delay stopped an action that would have passed
+    deadVote   \* TRUE once a vote was accepted on an action that is not live
 
 vars == <<epoch, nextId, kind, prev, expires, status, accepted, everEnacted,
-          root, snap, snapAcc, refunds, log, agree, sawDelay>>
+          root, snap, snapAcc, refunds, log, agree, sawDelay, deadVote>>
 
 \* In English: the actions that are still waiting for a decision.
 Live == {i \in Ids : status[i] = "live"}
@@ -123,6 +130,15 @@ ParentOk(k, p) ==
     \/ p = root[k]                                      \* the current root
     \/ p \in Live /\ kind[p] = k                        \* a live rival chain
     \/ ~LiveOnlyLookup /\ p \in everEnacted /\ kind[p] = k \* a stale answer
+
+\* In English: the actions GovActionById answers for. The reference's
+\* GovActionsDoNotExist check looks a voted-on id up in the live proposals
+\* only [G4]; an enacted root is not among them. gOuroboros'
+\* UtxoValidateUnknownGovActionIds accepts any id the state answers for.
+Found ==
+    Live
+    \cup (IF RootNotLive THEN {} ELSE {root[q] : q \in Purposes} \ {None})
+    \cup (IF LiveOnlyLookup THEN {} ELSE everEnacted)
 
 Init ==
     /\ epoch = 0
@@ -140,6 +156,7 @@ Init ==
     /\ log = <<>>
     /\ agree = TRUE
     /\ sawDelay = FALSE
+    /\ deadVote = FALSE
 
 (***************************************************************************)
 (* GOV: proposing an action [G1][G3].                                      *)
@@ -159,19 +176,22 @@ Propose ==
     /\ status' = [status EXCEPT ![nextId] = "live"]   \* deposit now held
     /\ nextId' = nextId + 1
     /\ UNCHANGED <<epoch, accepted, everEnacted, root, snap, snapAcc,
-                   refunds, log, agree, sawDelay>>
+                   refunds, log, agree, sawDelay, deadVote>>
 
 (***************************************************************************)
 (* GOV: voting [G2]. Who may vote on what is a pure table; it is tested in *)
 (* Go (README). Here a vote just makes an action "accepted".               *)
 (***************************************************************************)
-\* In English: enough yes votes arrive for live action i, which is allowed
-\* only while the epoch is not past i's expiresAfter.
+\* In English: enough yes votes arrive for action i. GOV lets a vote
+\* through when the state finds i [G4] and the epoch is not past i's
+\* expiresAfter [G2]. A vote that gets through on an action that is not
+\* live is recorded in deadVote.
 Vote ==
-    \E i \in Live :
+    \E i \in Found :
         /\ i \notin accepted
         /\ epoch <= expires[i]                       \* [G2] not expired
         /\ accepted' = accepted \cup {i}
+        /\ deadVote' = (deadVote \/ i \notin Live)
         /\ UNCHANGED <<epoch, nextId, kind, prev, expires, status,
                        everEnacted, root, snap, snapAcc, refunds, log,
                        agree, sawDelay>>
@@ -292,7 +312,7 @@ EpochBoundary ==
        /\ snapAcc' = accepted \cap out.live
        /\ accepted' = accepted \cap out.live
     /\ epoch' = epoch + 1
-    /\ UNCHANGED <<nextId, kind, prev, expires>>
+    /\ UNCHANGED <<nextId, kind, prev, expires, deadVote>>
 
 \* In English: at the horizon nothing more happens; stepping in place keeps
 \* TLC from calling that a deadlock, while a stuck state earlier still is.
@@ -314,6 +334,7 @@ TypeOK ==
     /\ status \in [Ids -> {"none", "live", "enacted", "expired", "pruned"}]
     /\ root \in [Purposes -> {None} \cup Ids]
     /\ refunds \in [Ids -> Nat]
+    /\ deadVote \in BOOLEAN
 
 \* In English: every live action with a purpose hangs off the tree: its
 \* predecessor is the purpose's root or another live action of the same
@@ -342,6 +363,10 @@ DepositsReturnedOnce ==
     \A i \in Ids :
         /\ refunds[i] <= 1
         /\ (refunds[i] = 1) <=> (status[i] \in {"enacted", "expired", "pruned"})
+
+\* In English: no vote is accepted on an action that was enacted, expired
+\* or pruned: GOV refuses a vote naming anything but a live proposal [G4].
+VotesOnlyLive == ~deadVote
 
 \* In English: the spec's orphan removal leaves the same actions as the
 \* reference's tree pruning [E3].

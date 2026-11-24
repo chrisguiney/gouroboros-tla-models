@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-78 entries. On `main`: does not conform 32; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
+79 entries. On `main`: does not conform 33; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -127,6 +127,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L9](#l9) | ledger | Leios committee with fewer pools than `Nc` | `min(Nc, pools)` seats; the bitfield is sized by the seated committee | Requires exactly `Nc` seats, so every valid certificate from a small committee is refused | Take all pools if fewer than `Nc` | does not conform | Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900) |
 | [L10](#l10) | ledger | Leios certificate in a later epoch than its announcement | cardano-ledger refuses it (`LeiosCertAnnouncedInPreviousEpoch`); the consensus prototype does not check | Not checked | Not required | conforms | Recorded (model 20) |
 | [L11](#l11) | ledger | Node-to-client CertRB with inlined EB transactions | none | Accepts a certifying block whose endorser-block transactions are inlined, over node-to-client only | CertRB carries no transactions on chain | conforms | Local delivery only; the on-chain body is unchanged |
+| [L13](#l13) | ledger | Conway vote naming an enacted purpose root | Refused, `GovActionsDoNotExist`: votes resolve against the live proposals only | main: accepted when the caller's `GovActionById` returns the root, which the contract allowed and Dingo does; PR: the contract excludes roots | A vote names a proposal in the governance state | does not conform → conforms | Open PR #3155. Dingo's `GovActionById` must stop returning the current root |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model 16) |
@@ -862,7 +863,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **What differs.** Reference: not representable. gOuroboros: main: `UtxoValidateCCVotingRestrictions` panics; PR: skips it as the sibling rules do.
 - **Spec.** spec silent
 - **Reference.** n/a
-- **gOuroboros.** gOuroboros `d0b95845` `ledger/conway/rules.go` 4663-4666; PR #3155 head `e4f2e61a8` same file 4665
+- **gOuroboros.** gOuroboros `d0b95845` `ledger/conway/rules.go` 4663-4666; PR #3155 head `b5294771` same file 4666
 - **Verdict.** conforms
 - **Status.** Open PR #3155. Library defect, hand-built transactions only
 
@@ -965,6 +966,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** conforms
 - **Status.** Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts
 
+### L13
+
+**Conway vote naming an enacted purpose root** (kind 1: open PR moves to the reference)
+
+- **What differs.** Reference: refused (`GovActionsDoNotExist`). gOuroboros: main: `UtxoValidateUnknownGovActionIds` accepts any id `GovActionExists` finds, and the contract let a state answer for a purpose's current root; PR: the contract excludes the root, and the hard-fork check reads it from `GovPurposeRoots`.
+- **Spec.** formal-ledger-specifications `60b68036c8b4` `src/Ledger/Conway/Specification/Gov.lagda.md` 503-509 (a vote names an action in the governance state)
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Gov.hs` 361-362 (`checkVotesAreValid` over `proposalsActionsMap`)
+- **gOuroboros.** gOuroboros `d0b95845` `ledger/common/state.go` 519-520, `ledger/conway/rules.go` `UtxoValidateUnknownGovActionIds`; PR #3155 head `b5294771` `ledger/common/state.go` 525-533, `ledger/conway/rules.go` 1152, 4183
+- **Verdict.** does not conform → conforms
+- **Status.** Open PR #3155. Model 15 `VotesOnlyLive`, `GovLifecycleRootVoteBug.cfg`. Dingo 2fc7975d `ledger/view.go` 2680-2692 returns the root and must drop that exception
+
 ## Pipeline
 
 ### P1
@@ -1029,7 +1041,7 @@ gOuroboros keeps no ledger state. These rules exist in the spec and the referenc
 - **Epoch boundary**: POOLREAP (retiring pools), SNAP (stake snapshots) and applying the reward update (`eras/shelley/formal-spec/epoch.tex`, POOLREAP at lines 564-572). gOuroboros computes rewards from a caller-supplied `RewardSnapshot` (`ledger/common/rewards.go`).
 - **Pool registration view**: `LedgerState.PoolCurrentState` and `IsPoolRegistered` must reflect POOLREAP (L1).
 - **Leader snapshot**: `LeaderPoolVrfKeyHash` must read the active ("set") snapshot, not current registration (`ledger/common/verify_config.go`).
-- **Conway governance**: ratification, enactment, proposal removal, deposit refunds, DRep and committee expiry. The GOV rules rely on `GovActionById` returning the proposals in the governance state and on `GovActionState.ExpirySlot` (`ledger/common/state.go` 467, 520) being the last slot of epoch `expiresAfter`, matching the spec's `¬ expired` premise (formal-ledger-specifications `60b68036c8b4`, `src/Ledger/Conway/Specification/Gov.lagda.md` 503-507). PR #3155 documents this contract.
+- **Conway governance**: ratification, enactment, proposal removal, deposit refunds, DRep and committee expiry. The GOV rules rely on `GovActionById` returning the proposals in the governance state and on `GovActionState.ExpirySlot` (`ledger/common/state.go` 467, 520) being the last slot of epoch `expiresAfter`, matching the spec's `¬ expired` premise (formal-ledger-specifications `60b68036c8b4`, `src/Ledger/Conway/Specification/Gov.lagda.md` 503-507). PR #3155 documents this contract, including that the current purpose root is not returned (L13).
 - **UTxO and fees**: the caller supplies the UTxO view and, for Byron, the fee policy; it keeps the fee and deposit pots (model 17).
 - **Byron update mechanism**: gOuroboros checks proposals and votes only statelessly (`ledger/byron/payload.go`); registration, vote tally, confirmation, endorsement and adoption are the caller's.
 - **Byron heavyweight delegation**: `ApplyPayloadCbor` must be called once per main block, in slot order, keeping the result only if the block is adopted (`consensus/byron/pbft_delegation.go`).
@@ -1097,5 +1109,6 @@ Fixed by an open pull request (decide by reviewing and merging it):
 - **C5** Byron header envelope: slot and block number. Open PR #3111 (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch.
 - **L1** Pool registration when the caller's view is stale. Open PR #3129. Dingo's view already satisfies the contract.
 - **L2** Transaction id of a body without stored CBOR. Open PR #3141. Decoded bodies were always right; bodies built in code were wrong.
+- **L13** Conway vote naming an enacted purpose root. Open PR #3155; Dingo must stop returning the root.
 
 Also needing a decision, though they conform: **N37**, because PR #3130 follows dmq-node and so departs from the CIP-0137 text; and **L4**, where acceptance depends on other rules resolving inputs.
