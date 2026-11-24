@@ -89,41 +89,72 @@ VARIABLES
     rolledCert, \* history: a CertRB was rolled back
     discarded   \* history: an applied EB was dropped by a non-CertRB
 
+\* Literally: "vars is defined as the tuple of chain, snaps, pending, rolledCert
+\*   and discarded."
 vars == <<chain, snaps, pending, rolledCert, discarded>>
 
 \* No announcement remembered.
+\* Literally: "NoAnn is defined as the record whose field present is FALSE,
+\*   field slot is 0, field eb is the empty sequence, and field applied is
+\*   FALSE."
 NoAnn == [present |-> FALSE, slot |-> 0, eb |-> <<>>, applied |-> FALSE]
 
 \* The ledger: the transactions applied so far in order, the announcing
 \* slots of the EBs applied so far, and the remembered announcement [R2].
+\* Literally: "Genesis is defined as the record whose field log is the empty
+\*   sequence, field endorsed is the empty sequence, and field last is NoAnn."
 Genesis == [log |-> <<>>, endorsed |-> <<>>, last |-> NoAnn]
 
 \* The state the next block is applied to when it does not certify.
+\* Literally: "TipState is defined as snaps of the length of snaps."
 TipState == snaps[Len(snaps)]
 
 \* The slot of the newest block (0 is genesis).
+\* Literally: "TipSlot is defined as: if chain equals the empty sequence then 0,
+\*   else chain of the length of chain's slot."
 TipSlot == IF chain = <<>> THEN 0 ELSE chain[Len(chain)].slot
 
 \* The set of elements of a sequence.
+\* Literally: "Range of s is defined as the set of s of i, for every i that is a
+\*   member of the domain of s."
 Range(s) == {s[i] : i \in DOMAIN s}
 
 \* A sequence without repeats.
+\* Literally: "Distinct of s is defined as: for all i and j in the domain of s,
+\*   if i does not equal j, then s of i does not equal s of j."
 Distinct(s) == \A i, j \in DOMAIN s : i # j => s[i] # s[j]
 
 \* Transactions are valid on a state when none repeats and none is spent
 \* there: the UTxO rule, reduced to "each input is spent once".
+\* Literally: "TxsValid of st and txs is defined as: Distinct of txs, and the
+\*   intersection of Range of txs and Range of st's log equals the empty set."
 TxsValid(st, txs) == Distinct(txs) /\ Range(txs) \cap Range(st.log) = {}
 
 \* The epoch a slot is in.
+\* Literally: "Epoch of s is defined as s integer-divided by EpochLength."
 Epoch(s) == s \div EpochLength
 
 \* The transaction lists a block may carry: none, or one transaction.
+\* Literally: "TxChoices is defined as the union of the set containing the empty
+\*   sequence and the set of the tuple of t, for every t that is a member of
+\*   Txs."
 TxChoices == {<<>>} \cup {<<t>> : t \in Txs}
 
 \* Every block that could be offered next: a slot after the tip, an EB
 \* announced or not, the header flag, a certificate (valid or not), and
 \* transactions. A block without a certificate always has certValid FALSE,
 \* so equal blocks are not counted twice.
+\* Literally: "Candidates is defined as the union of: the set of records whose
+\*   field slot is a member of (TipSlot plus 1) through MaxSlot, field ann is a
+\*   member of the union of the set containing the empty sequence and EbChoices,
+\*   field flag is a member of BOOLEAN, field cert is a member of the set
+\*   containing FALSE, field certValid is a member of the set containing FALSE,
+\*   and field txs is a member of TxChoices; and the set of records whose field
+\*   slot is a member of (TipSlot plus 1) through MaxSlot, field ann is a member
+\*   of the union of the set containing the empty sequence and EbChoices, field
+\*   flag is a member of BOOLEAN, field cert is a member of the set containing
+\*   TRUE, field certValid is a member of BOOLEAN, and field txs is a member of
+\*   TxChoices."
 Candidates ==
     [slot : (TipSlot + 1)..MaxSlot, ann : {<<>>} \cup EbChoices,
      flag : BOOLEAN, cert : {FALSE}, certValid : {FALSE}, txs : TxChoices]
@@ -137,14 +168,24 @@ Candidates ==
 
 \* The state BBODY runs on: after the EB when a CertRB follows an applied
 \* EB [R5], otherwise the tip. A non-CertRB drops any applied EB.
+\* Literally: "RefBase of b is defined as: if b's cert and pending does not
+\*   equal the empty sequence then element 1 of pending, else TipState."
 RefBase(b) == IF b.cert /\ pending # <<>> THEN pending[1] ELSE TipState
 
 \* The header flag matches the body, and a certificate comes alone [R1].
+\* Literally: "RefHeaderBody of b is defined as: b's flag equals b's cert, and
+\*   if b's cert, then (b's txs equals the empty sequence or Mutation equals
+\*   "TxsWithCert")."
 RefHeaderBody(b) ==
     /\ b.flag = b.cert
     /\ (b.cert => (b.txs = <<>> \/ Mutation = "TxsWithCert"))
 
 \* A certificate's rules, read from the state BBODY runs on [R1][R3].
+\* Literally: "RefCertOK of b is defined as: letting a be RefBase of b's last:
+\*   if b's cert, then a's present, and a's applied, and (b's slot is greater
+\*   than or equal to a's slot plus CertDelay, or Mutation equals "NoTiming"),
+\*   and (if RefSameEpoch, then Epoch of b's slot equals Epoch of a's slot), and
+\*   b's certValid."
 RefCertOK(b) ==
     LET a == RefBase(b).last IN
     b.cert =>
@@ -160,6 +201,8 @@ RefCertOK(b) ==
         /\ b.certValid
 
 \* The reference accepts a block.
+\* Literally: "RefAccept of b is defined as: RefHeaderBody of b, and RefCertOK
+\*   of b, and TxsValid of RefBase of b, and b's txs."
 RefAccept(b) ==
     /\ RefHeaderBody(b)
     /\ RefCertOK(b)
@@ -171,6 +214,12 @@ RefAccept(b) ==
 
 \* gOuroboros's own checks, from the block and its predecessor header
 \* [G1][G2][G3].
+\* Literally: "GoChecks of b is defined as: b's flag equals b's cert, and (if
+\*   b's cert, then b's txs equals the empty sequence), and (if b's cert, then
+\*   chain does not equal the empty sequence, and chain of the length of chain's
+\*   ann does not equal the empty sequence, and b's slot is greater than or
+\*   equal to chain of the length of chain's slot plus CertDelay, and b's
+\*   certValid)."
 GoChecks(b) ==
     /\ b.flag = b.cert
     /\ (b.cert => b.txs = <<>>)
@@ -185,10 +234,16 @@ GoChecks(b) ==
 
 \* The state the caller hands gOuroboros: after the EB if the caller
 \* applied it, otherwise the tip.
+\* Literally: "GoBase of b is defined as: if b's cert and GoCallerAppliesEb and
+\*   pending does not equal the empty sequence then element 1 of pending, else
+\*   TipState."
 GoBase(b) ==
     IF b.cert /\ GoCallerAppliesEb /\ pending # <<>> THEN pending[1] ELSE TipState
 
 \* gOuroboros, with its caller, accepts a block.
+\* Literally: "GoAccept of b is defined as: GoChecks of b, and (if b's cert and
+\*   GoCallerAppliesEb, then pending does not equal the empty sequence), and
+\*   TxsValid of GoBase of b, and b's txs."
 GoAccept(b) ==
     /\ GoChecks(b)
     \* a caller that applies EBs refuses a CertRB whose EB it does not have
@@ -200,22 +255,38 @@ GoAccept(b) ==
 (***************************************************************************)
 
 \* Who decides.
+\* Literally: "Accept of b is defined as: if Impl equals "ref" then RefAccept of
+\*   b, else GoAccept of b."
 Accept(b) == IF Impl = "ref" THEN RefAccept(b) ELSE GoAccept(b)
 
 \* The state a block is applied to.
+\* Literally: "BaseFor of b is defined as: if Impl equals "ref" then RefBase of
+\*   b, else GoBase of b."
 BaseFor(b) == IF Impl = "ref" THEN RefBase(b) ELSE GoBase(b)
 
 \* What a block leaves remembered: its own announcement, or nothing [R2].
+\* Literally: "NewLast of st and b is defined as: if b's ann does not equal the
+\*   empty sequence then the record whose field present is TRUE, field slot is
+\*   b's slot, field eb is b's ann, and field applied is FALSE; else if Mutation
+\*   equals "KeepAnnouncement" then st's last, else NoAnn."
 NewLast(st, b) ==
     IF b.ann # <<>>
     THEN [present |-> TRUE, slot |-> b.slot, eb |-> b.ann, applied |-> FALSE]
     ELSE IF Mutation = "KeepAnnouncement" THEN st.last ELSE NoAnn
 
 \* The state after a block: its transactions spent, its announcement kept.
+\* Literally: "ApplyBlock of st and b is defined as the record whose field log
+\*   is st's log followed by b's txs, whose field endorsed is st's endorsed, and
+\*   whose field last is NewLast of st and b."
 ApplyBlock(st, b) ==
     [log |-> st.log \o b.txs, endorsed |-> st.endorsed,
      last |-> NewLast(st, b)]
 
+\* In English: "An empty chain on the genesis state, no EB kept aside, and no
+\* history yet."
+\* Literally: "Init is defined as: chain equals the empty sequence, and snaps
+\*   equals the tuple of Genesis, and pending equals the empty sequence, and
+\*   rolledCert equals FALSE, and discarded equals FALSE."
 Init ==
     /\ chain = <<>>
     /\ snaps = <<Genesis>>
@@ -225,6 +296,13 @@ Init ==
 
 \* A new block extends the chain, if accepted. Any applied EB it does not
 \* certify is dropped [C1].
+\* Literally: "AddRB is defined as: the length of chain is less than MaxChain,
+\*   and there exists a b in Candidates such that Accept of b, and chain in the
+\*   next state equals chain with b appended, and snaps in the next state equals
+\*   snaps with ApplyBlock of BaseFor of b, and b appended, and pending in the
+\*   next state equals the empty sequence, and discarded in the next state
+\*   equals (discarded or (pending does not equal the empty sequence and b's
+\*   cert is not true)), and rolledCert is unchanged."
 AddRB ==
     /\ Len(chain) < MaxChain
     /\ \E b \in Candidates :
@@ -237,6 +315,19 @@ AddRB ==
 
 \* The EB rule [R4]: the tip's announced EB arrives and is applied on top
 \* of the tip's state, kept aside until a CertRB uses it.
+\* Literally: "FetchApplyEB is defined as: there exists an eb in EbChoices such
+\*   that, letting base be: if pending equals the empty sequence then TipState,
+\*   else element 1 of pending; a be base's last; and st be the record whose
+\*   field log is base's log followed by eb, whose field endorsed is base's
+\*   endorsed with a's slot appended, and whose field last is a except that its
+\*   applied is TRUE: a's present, and (eb equals a's eb or Mutation equals
+\*   "NoHashCheck"), and (a's applied is not true or Mutation equals
+\*   "ReapplyUnchecked"), and (TxsValid of base and eb, or Mutation equals
+\*   "ReapplyUnchecked"), and if Mutation equals "EagerEb" then (snaps in the
+\*   next state equals snaps except that its length of snaps entry is st, and
+\*   pending is unchanged), else (pending in the next state equals the tuple of
+\*   st, and snaps is unchanged); and chain, rolledCert and discarded are
+\*   unchanged."
 FetchApplyEB ==
     \E eb \in EbChoices :
         LET base == IF pending = <<>> THEN TipState ELSE pending[1]
@@ -263,6 +354,16 @@ FetchApplyEB ==
 
 \* The tip block is rolled back: the state before it comes back, and any
 \* applied EB is dropped.
+\* Literally: "Rollback is defined as: chain does not equal the empty sequence,
+\*   and chain in the next state equals the subsequence of chain from 1 through
+\*   the length of chain minus 1, and snaps in the next state equals: if
+\*   Mutation equals "RollbackKeepsState" then the subsequence of snaps from 1
+\*   through the length of snaps minus 1, except that its (the length of snaps
+\*   minus 1) entry is snaps of the length of snaps; else the subsequence of
+\*   snaps from 1 through the length of snaps minus 1; and pending in the next
+\*   state equals: if Mutation equals "RollbackKeepsPending" then pending, else
+\*   the empty sequence; and rolledCert in the next state equals (rolledCert or
+\*   chain of the length of chain's cert), and discarded is unchanged."
 Rollback ==
     /\ chain # <<>>
     /\ chain' = SubSeq(chain, 1, Len(chain) - 1)
@@ -277,8 +378,14 @@ Rollback ==
     /\ rolledCert' = (rolledCert \/ chain[Len(chain)].cert)
     /\ UNCHANGED discarded
 
+\* In English: "Each step adds a block, fetches and applies an EB, or rolls the
+\* tip back."
+\* Literally: "Next is defined as: AddRB or FetchApplyEB or Rollback."
 Next == AddRB \/ FetchApplyEB \/ Rollback
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* Literally: "Spec is defined as: Init holds at the start, and always, every
+\*   step is a Next step or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 (***************************************************************************)
@@ -287,9 +394,16 @@ Spec == Init /\ [][Next]_vars
 
 \* The EBs the configurations use: one of two transactions, and one of the
 \* second alone, so an EB can conflict with an RB transaction or another EB.
+\* Literally: "DefaultEbs is defined as the set containing the tuple of "t1" and
+\*   "t2", and the tuple of "t2"."
 DefaultEbs == {<<"t1", "t2">>, <<"t2">>}
 
 \* Every variable has the expected shape.
+\* Literally: "TypeOK is defined as: the length of snaps equals the length of
+\*   chain plus 1, and for all i in the domain of chain, chain of i's slot is a
+\*   member of 1 through MaxSlot, and (pending equals the empty sequence or
+\*   element 1 of pending's last's applied), and rolledCert is a member of
+\*   BOOLEAN, and discarded is a member of BOOLEAN."
 TypeOK ==
     /\ Len(snaps) = Len(chain) + 1
     /\ \A i \in DOMAIN chain : chain[i].slot \in 1..MaxSlot
@@ -300,6 +414,11 @@ TypeOK ==
 \* What the ledger should hold for a chain: per block, the EB of its
 \* predecessor if it certifies one [C2], then its own transactions.
 RECURSIVE Replay(_)
+\* Literally: "Replay of c is defined as: if c equals the empty sequence then
+\*   the empty sequence, else, letting n be the length of c: Replay of the
+\*   subsequence of c from 1 through n minus 1, followed by (if c of n's cert
+\*   and n is greater than 1 then c of n minus 1's ann, else the empty
+\*   sequence), followed by c of n's txs."
 Replay(c) ==
     IF c = <<>> THEN <<>>
     ELSE LET n == Len(c) IN
@@ -309,6 +428,11 @@ Replay(c) ==
 
 \* The announcing slots of the EBs a chain certifies.
 RECURSIVE Endorsements(_)
+\* Literally: "Endorsements of c is defined as: if c equals the empty sequence
+\*   then the empty sequence, else, letting n be the length of c: Endorsements
+\*   of the subsequence of c from 1 through n minus 1, followed by (if c of n's
+\*   cert and n is greater than 1 then the tuple of c of n minus 1's slot, else
+\*   the empty sequence)."
 Endorsements(c) ==
     IF c = <<>> THEN <<>>
     ELSE LET n == Len(c) IN
@@ -318,12 +442,21 @@ Endorsements(c) ==
 \* The ledger is exactly the replay of the chain: an EB's transactions are
 \* in it only while a CertRB for it is on the chain, so a rollback undoes
 \* the endorsement, and every reference resolved to the announced EB.
+\* Literally: "LedgerMatchesChain is defined as: TipState's log equals Replay of
+\*   chain, and TipState's endorsed equals Endorsements of chain."
 LedgerMatchesChain ==
     /\ TipState.log = Replay(chain)
     /\ TipState.endorsed = Endorsements(chain)
 
 \* Every CertRB on the chain follows an announcing block, late enough,
 \* with a valid certificate, the flag set and no transactions [C1][R1].
+\* Literally: "CertifiedChainWellFormed is defined as: for all i in the domain
+\*   of chain, if chain of i's cert, then i is greater than 1, and chain of i
+\*   minus 1's ann does not equal the empty sequence, and chain of i's slot is
+\*   greater than or equal to chain of i minus 1's slot plus CertDelay, and (if
+\*   RefSameEpoch, then Epoch of chain of i's slot equals Epoch of chain of i
+\*   minus 1's slot), and chain of i's certValid, and chain of i's flag, and
+\*   chain of i's txs equals the empty sequence."
 CertifiedChainWellFormed ==
     \A i \in DOMAIN chain : chain[i].cert =>
         /\ i > 1
@@ -335,21 +468,38 @@ CertifiedChainWellFormed ==
         /\ chain[i].txs = <<>>
 
 \* No transaction is applied twice, across RBs and EBs.
+\* Literally: "NoTxTwice is defined as Distinct of TipState's log."
 NoTxTwice == Distinct(TipState.log)
 
 \* No EB is applied twice, on the chain or in the EB kept aside.
+\* Literally: "EbAppliedAtMostOnce is defined as: Distinct of TipState's
+\*   endorsed, and (if pending does not equal the empty sequence, then Distinct
+\*   of element 1 of pending's endorsed)."
 EbAppliedAtMostOnce ==
     /\ Distinct(TipState.endorsed)
     /\ (pending # <<>> => Distinct(pending[1].endorsed))
 
 \* gOuroboros with its caller accepts exactly the blocks the reference
 \* accepts, from every reachable state.
+\* Literally: "GoAgrees is defined as: for all b in Candidates, RefAccept of b
+\*   equals GoAccept of b."
 GoAgrees == \A b \in Candidates : RefAccept(b) = GoAccept(b)
 
 \* Probes, EXPECTED to be violated: each shows a behaviour is reachable.
+\* In English: "No CertRB is ever on the chain."
+\* Literally: "ProbeNoCertAccepted is defined as: for all i in the domain of
+\*   chain, chain of i's cert is not true."
 ProbeNoCertAccepted == \A i \in DOMAIN chain : ~chain[i].cert
+\* In English: "No CertRB is ever rolled back."
+\* Literally: "ProbeNoCertRolledBack is defined as: rolledCert is not true."
 ProbeNoCertRolledBack == ~rolledCert
+\* In English: "No applied EB is ever dropped by a non-CertRB."
+\* Literally: "ProbeNoEbDiscarded is defined as: discarded is not true."
 ProbeNoEbDiscarded == ~discarded
+\* In English: "No CertRB ever certifies an EB announced in an earlier epoch."
+\* Literally: "ProbeNoCrossEpochCert is defined as: for all i in the domain of
+\*   chain, if chain of i's cert and i is greater than 1, then Epoch of chain of
+\*   i's slot equals Epoch of chain of i minus 1's slot."
 ProbeNoCrossEpochCert ==
     \A i \in DOMAIN chain : (chain[i].cert /\ i > 1) =>
         Epoch(chain[i].slot) = Epoch(chain[i - 1].slot)
