@@ -42,9 +42,12 @@ CONSTANTS
     DrainWaitsForApply, \* TRUE: the fix. FALSE: gOuroboros 61046085, where WaitForDrain
                         \* returns success during Stop without waiting for ApplyFunc
     FailStops,          \* TRUE: [G] and [R3]. FALSE: a mutation that keeps applying after a failure
-    ResultsNonBlocking  \* TRUE: the fix, where handing a result off never waits and a full
+    ResultsNonBlocking, \* TRUE: the fix, where handing a result off never waits and a full
                         \* Results buffer drops its oldest entry. FALSE: gOuroboros 61046085,
                         \* where the runner waits for room in Results
+    LosslessResults     \* TRUE: WithLosslessResults on top of the fix. A full Results
+                        \* buffer then makes the runner wait for the reader, as before the
+                        \* fix, and drops are allowed only once Stop has begun [G]
 
 ASSUME MaxPending \in Nat /\ MaxPending >= 1 /\ CapacityBound \in Nat
 ASSUME QueueCap \in Nat /\ QueueCap >= 1   \* the fix keeps at least one result
@@ -356,6 +359,7 @@ Forward ==
           /\ results' = Append(results, Head(toForward))
           /\ UNCHANGED dropped
        \/ /\ ResultsNonBlocking                              \* the fix only
+          /\ ~LosslessResults \/ stopping                    \* lossless: only once Stop began
           /\ Len(results) >= QueueCap                        \* no room
           /\ results' = Append(Tail(results), Head(toForward)) \* drop the oldest
           /\ dropped' = dropped + 1
@@ -448,6 +452,10 @@ ReadLosslessWithoutDrops ==
 \* ErrPendingLimitExceeded.
 PendingBounded == ~overflow
 
+\* In English: in lossless mode no committed result is dropped before Stop
+\* begins, so a reader receives every block it was handed.
+LosslessNeverDropsBeforeStop == LosslessResults => (dropped = 0 \/ stopping)
+
 \* In English: after a successful WaitForDrain and the client's rollback,
 \* no block from before the drain boundary is committed.
 NoCommitAfterRollback == ~lateCommit
@@ -470,4 +478,10 @@ ProbeAllApplied == pc = "done" => Len(applied) = N
 
 \* In English: claims no result is ever dropped.
 ProbeNeverDrop == dropped = 0
+
+\* Probe, EXPECTED to be violated: "In lossless mode the runner never waits
+\* for the reader." Violated = a full Results buffer does hold it back.
+ProbeLosslessNeverHoldsBack ==
+    ~(LosslessResults /\ ~stopping /\ rpc = "forward" /\ toForward # <<>>
+      /\ Len(results) >= QueueCap)
 =============================================================================

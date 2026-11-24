@@ -239,6 +239,33 @@ sooner), trusted decode-only and header-only modes, panics in stages, parent
 context cancellation without `Stop`, more than one client, and Leios or Peras
 messages in the reference queue.
 
+## Lossless results (`WithLosslessResults`)
+
+A caller that receives decoded blocks through `Results`, as Dingo does in
+trusted decode-only mode where no `ApplyFunc` runs, needs one result per
+submitted block. The non-blocking default drops the oldest undelivered result
+when a reader falls behind, which would lose blocks for such a caller, and a
+Dingo test that waits for every result deadlocked against it. The opt-in
+`WithLosslessResults` restores lossless delivery. Switch `LosslessResults`:
+while the Results buffer is full the forwarder takes nothing more, so the
+runner waits for the reader. Drops are allowed only once Stop has begun.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockPipelineLossless.cfg` (reader, failures, Stop) | 19,838 | passes, including `LosslessNeverDropsBeforeStop` |
+| `BlockPipelineLosslessStop.cfg` (no reader, Stop available) | 15,089 | passes: Stop always completes |
+| `BlockPipelineLosslessNoConsumerBug.cfg` (no reader, no Stop) | | deadlocks, as documented: committing waits for a reader |
+| `BlockPipelineProbeLosslessHoldsBackBug.cfg` | | probe violated: the runner is held back |
+
+Ignoring the switch (letting the forwarder drop while not stopping) violates
+`LosslessNeverDropsBeforeStop`; checked by a temporary mutation.
+
+This does not change anything on the wire. A slower commit only delays the
+chain-sync client's next request, which the protocol allows; the reference
+also applies backpressure to block fetching through its bounded add-block
+queue, and never makes chain selection wait on a follower, which the default
+mode still follows.
+
 ## Running it
 
 ```sh
