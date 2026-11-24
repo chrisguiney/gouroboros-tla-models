@@ -34,6 +34,9 @@
 (*   gOuroboros, blinklabs-io/gouroboros 61046085:                         *)
 (*   [G1] protocol/blockfetch/client.go: sendRequestRange (965-1058: the   *)
 (*        token, append, send, and removeLocked when the send fails),      *)
+(*        on branch fix/blockfetch-reference-behaviour RequestRange; the   *)
+(*        send outcome and the removal are separate steps (SendFail,       *)
+(*        SendRefused), so the token's release can be placed between them. *)
 (*        headForResponse (1175), handleStartBatch (1353), handleNoBlocks  *)
 (*        (1377), handleBatchDone (1707), resolve (1217),                  *)
 (*        failOutstanding (1259), failOutstandingForProtocol (1281),       *)
@@ -69,7 +72,17 @@ CONSTANTS
     NoBlocksRemovesHead,
     \* TRUE as in gOuroboros: MsgStartBatch marks its request started
     \* (handleStartBatch). FALSE is a mutation.
-    StartMarksStarted
+    StartMarksStarted,
+    \* TRUE: a send can fail while the protocol still runs, because the
+    \* caller's context or the range deadline ends while MsgRequestRange
+    \* waits to be queued (SendMessageContext with rangeCtx).
+    SendCanFail,
+    \* TRUE as in gOuroboros 61046085 and the fix at d10daf24 on branch
+    \* fix/blockfetch-reference-behaviour: a caller whose send failed hands
+    \* the token back only after removing its request from the queue.
+    \* FALSE is that branch at 395b9c2e, where a deferred function hands the
+    \* token back as soon as the send returns, before the removal.
+    TokenCoversRemoval
 
 Ids == 1..Callers
 
@@ -77,6 +90,8 @@ VARIABLES
     caller,    \* caller[i]: "new", "appended" (in the queue, send pending),
                \* "sendOk" (the send succeeded, the caller has not yet
                \* cleared its sending mark; DrainDefersSending only),
+               \* "sendFailed" (the send failed, the caller has not yet
+               \* taken its request out of the queue),
                \* "sent" (RequestRange returned the id), "refused"
                \* (RequestRange returned an error)
     handedOver, \* ids a drain took out of the queue while still sending,
@@ -134,24 +149,41 @@ Admit(i) ==
     /\ UNCHANGED <<handedOver, up, toServer, sv, toClient, done, misrouted,
                    clientErr>>
 
-\* In English: "Caller i queues its MsgRequestRange and returns the id. If
-\* the protocol has stopped, the send fails: the caller removes its request
-\* if it is still queued (removeLocked) and returns an error. Either way it
+\* In English: "Caller i queues its MsgRequestRange and returns the id, and
 \* hands the token back. With DrainDefersSending, a successful send only
 \* moves the caller to "sendOk"; SendFinish then returns the id."
 Send(i) ==
     /\ caller[i] = "appended"
-    /\ IF up
-          THEN /\ toServer' = Append(toServer, i)
-               /\ caller' = [caller EXCEPT ![i] =
-                                IF DrainDefersSending THEN "sendOk"
-                                                      ELSE "sent"]
-               /\ UNCHANGED queue
-          ELSE /\ queue' = Without(queue, i)
-               /\ caller' = [caller EXCEPT ![i] = "refused"]
-               /\ UNCHANGED toServer
+    /\ up
+    /\ toServer' = Append(toServer, i)
+    /\ caller' = [caller EXCEPT ![i] =
+                     IF DrainDefersSending THEN "sendOk" ELSE "sent"]
     /\ token' = IF token = i THEN 0 ELSE token
-    /\ UNCHANGED <<handedOver, up, sv, toClient, done, misrouted, clientErr>>
+    /\ UNCHANGED <<handedOver, queue, up, sv, toClient, done, misrouted,
+                   clientErr>>
+
+\* In English: "Caller i's send fails: always once the protocol has
+\* stopped, and with SendCanFail also while it runs. Nothing reaches the
+\* wire. Without TokenCoversRemoval the token is handed back here, while
+\* the request is still queued."
+SendFail(i) ==
+    /\ caller[i] = "appended"
+    /\ ~up \/ SendCanFail
+    /\ caller' = [caller EXCEPT ![i] = "sendFailed"]
+    /\ token' = IF ~TokenCoversRemoval /\ token = i THEN 0 ELSE token
+    /\ UNCHANGED <<handedOver, queue, up, toServer, sv, toClient, done,
+                   misrouted, clientErr>>
+
+\* In English: "Caller i, whose send failed, takes its request out of the
+\* queue if it is still there (removeLocked), hands the token back if it
+\* still holds it, and returns an error."
+SendRefused(i) ==
+    /\ caller[i] = "sendFailed"
+    /\ queue' = Without(queue, i)
+    /\ caller' = [caller EXCEPT ![i] = "refused"]
+    /\ token' = IF token = i THEN 0 ELSE token
+    /\ UNCHANGED <<handedOver, up, toServer, sv, toClient, done, misrouted,
+                   clientErr>>
 
 \* In English: "Caller i, whose send succeeded, clears its sending mark and
 \* returns the id. If a drain took the request while it was still sending,
@@ -255,7 +287,7 @@ ClientDrop ==
 Drain ==
     /\ DrainOnShutdown
     /\ ~up
-    /\ LET sending(r) == caller[r.id] \in {"appended", "sendOk"}
+    /\ LET sending(r) == caller[r.id] \in {"appended", "sendOk", "sendFailed"}
            resolveNow(r) ==
                IF DrainDefersSending THEN ~sending(r)
                ELSE ~DrainSkipsUnsent \/ caller[r.id] = "sent"
@@ -288,6 +320,7 @@ Quiet ==
 
 Next ==
     \/ \E i \in Ids : Admit(i) \/ Send(i) \/ SendFinish(i)
+                      \/ SendFail(i) \/ SendRefused(i)
     \/ ServerTake \/ ServerAnswer
     \/ ClientRecv \/ Shutdown \/ ClientDrop \/ Drain
     \/ Quiet
@@ -327,6 +360,9 @@ ProbeNeverRefused == \A i \in Ids : caller[i] /= "refused"
 \* queued behind it." Violated = MsgNoBlocks happens mid-pipeline.
 ProbeNoBlocksMidPipeline ==
     ~(Len(queue) >= 2 /\ toClient /= <<>> /\ Head(toClient).m = "NB")
+\* In English: "No send fails while the protocol runs." Violated = the
+\* SendCanFail path is reachable.
+ProbeNeverFailsWhileUp == \A i \in Ids : ~(caller[i] = "sendFailed" /\ up)
 \* In English: "A drain never hands a request whose send succeeded over to
 \* its caller." Violated = with DrainDefersSending, the path where the
 \* caller resolves the request itself is reachable.

@@ -60,10 +60,11 @@ Three callers, an honest server that may answer any range with
 
 | Config | States | Result |
 | --- | --- | --- |
-| `BlockFetchQueue.cfg`: gOuroboros today, questions 1-4 | 7,702 | passes |
+| `BlockFetchQueue.cfg`: gOuroboros today, questions 1-4 | 9,448 | passes |
 | `BlockFetchQueueRefusedBug.cfg`: gOuroboros today, question 5 | | **fails** |
 | `BlockFetchQueueSkipUnsent.cfg`: the drain leaves unsent requests to their callers, all five | 6,657 | passes |
-| `BlockFetchQueueDeferSending.cfg`: the fix on branch `fix/blockfetch-no-callback-for-unsent`, all five | 62,932 | passes |
+| `BlockFetchQueueDeferSending.cfg`: the fix on branch `fix/blockfetch-no-callback-for-unsent`, all five | 71,962 | passes |
+| `BlockFetchQueueSendFails.cfg`: the same, with sends that fail while the protocol runs (PR #3114 at `d10daf24`) | 74,702 | passes |
 
 Questions 1-4 hold. Answer order is wire order, so the head of the queue is
 always the request being answered, and `MsgNoBlocks` mid-pipeline resolves
@@ -99,6 +100,39 @@ caller resolves a handed-over request is reached.
 `RangeDoneFunc`'s doc comment now says it runs exactly once for each id
 `RequestRange` returned and never for a call that returned an error.
 
+### Refused sends keep the token until they leave the queue
+
+Review of PR #3114 at `395b9c2e` found that `RequestRange` handed the send
+token back, in a deferred function, as soon as `SendMessageContext` returned,
+and only then took a refused request out of the queue. A send can fail while
+the protocol still runs (the caller's context or the range deadline ends), so
+another `RequestRange` could take the token, queue its request behind the
+never-sent entry and send it; `headForResponse` then gave that range's
+`MsgStartBatch` to the stale entry, and the later `MsgBatchDone` tore the
+connection down. The model shared the gap: a send failed only once the
+protocol had stopped, and its failure, removal and token release were one
+step, so no interleaving could put another request behind the stale one.
+
+A failed send is now two steps, `SendFail` and `SendRefused`, and
+`SendCanFail` lets it fail while the protocol runs. `TokenCoversRemoval`
+(TRUE: the fix at `d10daf24`, as on `61046085`) places the token's release
+after the removal; FALSE places it at `SendFail`, as at `395b9c2e`. A request
+whose send has failed counts as still sending for the drain, because Go clears
+`sending` under `queueMutex` in the same section as the removal. Splitting the
+step raises the state counts of the existing configs; their results are
+unchanged.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchQueueSendFails.cfg` (`TokenCoversRemoval = TRUE`) | 74,702 | passes all five questions |
+| `BlockFetchQueueSendFailsEarlyTokenBug.cfg` (`395b9c2e`) | | `AnswersReachTheirRequest` violated |
+| `BlockFetchQueueProbeFailsWhileUpBug.cfg` | | probe violated: a send does fail while the protocol runs |
+
+Go test `TestRequestRangeRefusedHoldsTokenUntilRemoved` holds `queueMutex`
+while a send fails on a canceled context and checks whether the token is
+free: it fails 3/3 at `395b9c2e` (token free, refused request still queued)
+and passes at `d10daf24`.
+
 ### Checking the checks
 
 Each safeguard has a switch; turning it off must break an invariant:
@@ -111,6 +145,7 @@ Each safeguard has a switch; turning it off must break an invariant:
 | `BlockFetchQueueNoStartBug.cfg` | `MsgStartBatch` marks its request started | `HonestAnswersAccepted` |
 | `BlockFetchQueueNoDrainBug.cfg` | the shutdown drain | `EveryReturnedIdResolved` |
 | `BlockFetchQueueDeferSendingNoResolveBug.cfg` | with the fix, the caller resolves a request a drain handed to it | `EveryReturnedIdResolved` |
+| `BlockFetchQueueSendFailsEarlyTokenBug.cfg` | a refused caller keeps the token until its request leaves the queue | `AnswersReachTheirRequest` |
 
 The probes at the bottom of the `.tla` each claim something never happens,
 and TLC finds each one with the `BlockFetchQueue.cfg` constants: more than one
@@ -265,6 +300,7 @@ cd specs/06-blockfetch
 ../../bin/tlc -config BlockFetchQueue.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueSkipUnsent.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueDeferSending.cfg BlockFetchQueue.tla
+../../bin/tlc -config BlockFetchQueueSendFails.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchLifecycleRefuse.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleCloseOnlyLive.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleClose.cfg BlockFetchLifecycle.tla
@@ -276,6 +312,8 @@ cd specs/06-blockfetch
 ../../bin/tlc -config BlockFetchQueueNoStartBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueNoDrainBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueDeferSendingNoResolveBug.cfg BlockFetchQueue.tla
+../../bin/tlc -config BlockFetchQueueSendFailsEarlyTokenBug.cfg BlockFetchQueue.tla
+../../bin/tlc -config BlockFetchQueueProbeFailsWhileUpBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchLifecycleStopBug.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleCloseOnlyBug.cfg BlockFetchLifecycle.tla
 ```
