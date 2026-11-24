@@ -137,6 +137,17 @@ The literal readings use these words for each symbol:
 | `<>P` | "eventually P" |
 | `P ~> Q` | "P leads to Q" |
 | `WF_v(A)`, `SF_v(A)` | "weak fairness of A", "strong fairness of A" |
+| `x # y` | "x does not equal y" (same as `/=`) |
+| `x \div y`, `x % y` | "x integer-divided by y", "x modulo y" |
+| `s \o t` | "s followed by t" |
+| `SubSeq(s, m, n)` | "the subsequence of s from element m through element n" |
+| `SelectSeq(s, LAMBDA x : P)` | "the subsequence of s made of every x such that P" |
+| `SUBSET S` | "the set of subsets of S" |
+| `UNION S` | "the union of all the sets in S" |
+| `S \X T` | "the Cartesian product of S and T" (every pair of a member of S and a member of T) |
+| `[r EXCEPT !.f = v]` | "r except that its f field is v" |
+| `RECURSIVE F(_)` | "F is defined recursively" (the reading sits above this line) |
+| `ASSUME P` | "it is assumed that P" |
 
 ## What is in the repository
 
