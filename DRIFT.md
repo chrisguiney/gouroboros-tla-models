@@ -626,9 +626,9 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **What differs.** Reference: never requests after quit (`drainThePipe`); an early `MsgCanceled` throws. gOuroboros: main: `Stop` racing a refill can send a request after `MsgQuit`; an early `MsgCanceled` is ignored and the loop stalls; PR: both fixed.
 - **Spec.** spec silent
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../MiniProtocol/LeiosNotify/Client.hs` 105 (`MsgCanceled -> throwIO ExnLeiosNotifyUnexpectedCancel`), 228 (`drainThePipe`)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/leiosnotify/client.go` 95-97, 168, 215; PR #3160 head `cfa1edeb0` same file 34-38, 188, 235
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/leiosnotify/client.go` 95-97, 168, 215; PR #3160 head `ad0d48de` same file 34-38, 188, 235, and `Sync`, which checks `quitting` before the running loop so that `Sync` after `Stop` returns `ErrProtocolShuttingDown` even while the loop is still parked (at `cfa1edeb` it returned "notification loop is already running")
 - **Verdict.** conforms
-- **Status.** Open PR #3160
+- **Status.** Open PR #3160 (head `ad0d48de`). Model: `specs/12-leios-peras/LeiosNotifySyncOrderBug.cfg` (`SyncAfterStopReportsShutdown`)
 
 ### N44
 

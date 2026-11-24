@@ -74,6 +74,8 @@ with `MsgCanceled` once `MsgQuit` has arrived, and then sends `MsgDone`.
 | `LeiosNotifyRogueCancelBug.cfg`: today's client and that server | 93 | **fails** `LoopCanProgress` |
 | `LeiosNotifyNoCancelBug.cfg`: mutation, a dry server that does not cancel on `MsgQuit` | 8 | **fails**: deadlock |
 | `LeiosNotifyProbesBug.cfg`: probe, `Stop` during a refill | 80 | violated, as expected |
+| `LeiosNotifySyncOrderBug.cfg`: the fix at PR #3160 `cfa1edeb`, `Sync` checks the running loop before `quitting` | 6 | **fails** `SyncAfterStopReportsShutdown` |
+| `LeiosNotifyProbeLoopAfterStopBug.cfg`: probe, the loop still running after `Stop` | 6 | violated, as expected |
 
 **Defect 1: a request after `MsgQuit`.** Nothing orders `Stop` against the
 loop's refill. The loop checks `quitting`, finds it false, and starts sending.
@@ -84,6 +86,21 @@ reference client sends nothing after `MsgQuit` [R2]. A gOuroboros or reference
 server sends `MsgDone`, restarts, and takes the stray request as the first of
 a new run the client does not know about. `Sync` after `Stop` also queued a
 request (the probe `ProbeNeverHeld` finds it). With the fix it is refused.
+
+**Which refusal `Sync` reports after `Stop` (found in review of PR #3160).**
+After `Stop` the loop stays in Wait until the protocol ends. At `cfa1edeb`
+`Sync` checked "notification loop is already running" first, so a client
+stopped while syncing got that error rather than `ErrProtocolShuttingDown`.
+The model shared it by leaving the error out: `Sync` was simply not enabled
+in either case. `SyncAnswer` now gives what `Sync` returns in each state,
+ordered by `SyncChecksQuitFirst`, and `SyncAfterStopReportsShutdown`
+requires the shutdown once `Stop` has run; the passing configs check it,
+with unchanged state counts. PR #3160 head `ad0d48de` checks `quitting`
+first; Go: `TestSyncAfterStopWhileSyncingIsRefused`, which fails before the
+fix. The same order is in the LeiosVotes client's `Sync` and `RequestNext`
+on `main` (the vote loop also waits for a vote after `Stop`); this PR does
+not change that client's code, and `LeiosVotes.tla` does not model its
+errors.
 
 **Defect 2: an early `MsgCanceled` stalls the loop.** The client ignored
 `MsgCanceled` whatever its state. It never reaches the loop, which counts on
