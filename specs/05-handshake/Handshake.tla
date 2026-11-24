@@ -37,6 +37,14 @@
 (*   [R7] network-mux/src/Network/Mux/Ingress.hs 122-126: after the        *)
 (*        handshake, a segment for mini-protocol 0 is for an unknown       *)
 (*        mini-protocol, and the connection is torn down.                  *)
+(*   [R9] Server.hs 42-44: MsgAcceptVersion carries encodeData of the      *)
+(*        agreed data, the result of acceptableVersion local remote.       *)
+(*   [R10] Codec.hs 210-240 (decodeVersions): the keys of a version table  *)
+(*        must be distinct and ascending, or decoding fails ("unordered    *)
+(*        version"); the codec encodes them ascending (encodeVersions).    *)
+(*   [S7] miniprotocols.tex 572-573: "the negotiated version data is sent  *)
+(*        back using MsgAcceptVersion"; 653-656: the version numbers in    *)
+(*        the table "are unique and appear in ascending order".            *)
 (*                                                                         *)
 (* The gOuroboros code it is compared with: protocol/handshake/            *)
 (* handshake.go (StateMapNtN, StateMapNtC), client.go (messageHandler,     *)
@@ -62,6 +70,9 @@ CONSTANTS
     QueryFirst,         \* TRUE: gOuroboros today, the query flag is checked before negotiating
     StrictQueryReply,   \* TRUE: gOuroboros, a client refuses MsgQueryReply it did not ask for
     HandleReplyVersions,\* TRUE: the reference, a client in StConfirm takes MsgProposeVersions as MsgReplyVersions
+    AcceptOwnData,      \* TRUE: gOuroboros main, MsgAcceptVersion carries the server's own data, not the agreed data
+    CheckKeyOrder,      \* TRUE: the reference, a version table whose keys are not ascending fails to decode
+    UnorderedKeys,      \* TRUE: the client may send its version table with the keys out of order
     Mutation            \* "None", or a safeguard switched off to prove an invariant can fail
 
 Roles    == {"Client", "Server"}
@@ -72,12 +83,26 @@ Reasons  == {"None", "VersionMismatch", "DecodeError", "Refused"}
 \* The version data the model needs. `magic` is the network magic [S4].
 \* `query` asks for the supported versions instead of a connection [S4].
 \* `ok` says whether the receiver can decode the data at all [S5 step 4].
-\* In English: "Params is every record of a magic, a query flag, and a
-\* decodable flag."
-Params == [magic : Magics, query : BOOLEAN, ok : BOOLEAN]
+\* `init` is the node-to-node diffusion mode, TRUE for initiator-only [S4];
+\* it stands for every field the two sides combine (diffusion mode, peer
+\* sharing, Peras support [R6]). Node-to-client data has no such field.
+\* In English: "Params is every record of a magic, a query flag, a
+\* decodable flag, and an initiator-only flag."
+InitModes == IF Mode = "NtN" THEN BOOLEAN ELSE {FALSE}
+Params == [magic : Magics, query : BOOLEAN, ok : BOOLEAN, init : InitModes]
 
 \* A placeholder for messages that carry no version data.
-NoParams == [magic |-> CHOOSE m \in Magics : TRUE, query |-> FALSE, ok |-> TRUE]
+NoParams == [magic |-> CHOOSE m \in Magics : TRUE, query |-> FALSE, ok |-> TRUE,
+             init |-> FALSE]
+
+\* The negotiated data: acceptableVersion local remote [R6][S4]. The magic
+\* is the local one (the two agree, or there is no agreement); a side is
+\* initiator-only if either side is (`min` of the diffusion modes); query
+\* is local || remote.
+\* In English: "Agree(l, r) is l's magic, query if either asks, and
+\* initiator-only if either is."
+Agree(l, r) == [magic |-> l.magic, query |-> l.query \/ r.query, ok |-> TRUE,
+                init |-> l.init \/ r.init]
 
 \* A version table maps version numbers to version data [S2].
 \* In English: "Tables(P) is every function from some set of versions to
@@ -98,12 +123,26 @@ Min(S) == CHOOSE x \in S : \A y \in S : x <= y
 \* A message is a record; fields a type does not use hold placeholders.
 \* `vmap` is the table of MsgProposeVersions and MsgQueryReply; `v` and `p`
 \* the version and data of MsgAcceptVersion; `reason` that of MsgRefuse;
-\* `big` marks a message over the state's size limit [S3].
-Msg(t, vm, v, p, r, big) ==
-    [type |-> t, vmap |-> vm, v |-> v, p |-> p, reason |-> r, big |-> big]
+\* `big` marks a message over the state's size limit [S3]; `asc` says the
+\* keys of `vmap` arrived in ascending order [S7][R10].
+MsgA(t, vm, v, p, r, big, asc) ==
+    [type |-> t, vmap |-> vm, v |-> v, p |-> p, reason |-> r, big |-> big, asc |-> asc]
+\* In English: "A message whose table, if any, is in ascending order", as
+\* every encoder sends it (encodeVersions [R10]; gOuroboros sorts map keys).
+Msg(t, vm, v, p, r, big) == MsgA(t, vm, v, p, r, big, TRUE)
 
 Messages == [type : MsgTypes, vmap : Tables(Params), v : Versions \cup {0},
-             p : Params, reason : Reasons, big : BOOLEAN]
+             p : Params, reason : Reasons, big : BOOLEAN, asc : BOOLEAN]
+
+\* In English: "The key orders a client may send table t in: ascending,
+\* or, with UnorderedKeys and at least two keys, out of order too."
+KeyOrders(t) ==
+    IF UnorderedKeys /\ Cardinality(DOMAIN t) >= 2 THEN BOOLEAN ELSE {TRUE}
+
+\* In English: "The receiver rejects m's table for its key order: the
+\* reference fails to decode an unordered table [R10]; gOuroboros main does
+\* not look at the order."
+BadKeyOrder(m) == CheckKeyOrder /\ ~m.asc
 
 \* What a side ends with. `kind` is "None" (not finished), "Accept"
 \* (version v agreed), "Refuse" (the server refused with `reason`),
@@ -188,10 +227,15 @@ ServerDecision(local, remote) ==
     ELSE d
 
 \* In English: "The message carrying decision d from a server with table
-\* local." An accept carries the server's data for v; the client only
-\* checks its magic, which agreed data inherits [S4].
-ReplyMsg(d, local) ==
-    CASE d.kind = "Accept" -> Msg("MsgAcceptVersion", <<>>, d.v, local[d.v], "None", FALSE)
+\* local, answering table remote." An accept carries the agreed data for v
+\* [S7][R9]; gOuroboros main (AcceptOwnData) sends the server's own data.
+\* The client checks only its magic, which agreed data inherits [S4].
+AcceptData(local, remote, v) ==
+    IF AcceptOwnData THEN local[v] ELSE Agree(local[v], remote[v])
+
+ReplyMsg(d, local, remote) ==
+    CASE d.kind = "Accept" -> Msg("MsgAcceptVersion", <<>>, d.v,
+                                  AcceptData(local, remote, d.v), "None", FALSE)
     []   d.kind = "Refuse" -> Msg("MsgRefuse", <<>>, d.v, NoParams, d.reason, FALSE)
     []   d.kind = "Query"  -> Msg("MsgQueryReply", local, 0, NoParams, "None", FALSE)
 
@@ -232,7 +276,8 @@ ClientJudge(table, m) ==
 (*   at once.                                                              *)
 (***************************************************************************)
 RefVersion == Max(Versions)
-RefParams  == [magic |-> CHOOSE m \in Magics : TRUE, query |-> FALSE, ok |-> TRUE]
+RefParams  == [magic |-> CHOOSE m \in Magics : TRUE, query |-> FALSE, ok |-> TRUE,
+               init |-> FALSE]
 RefTable   == [v \in {RefVersion} |-> RefParams]
 
 Kinds == {"MsgProposeVersions", "MsgAcceptVersion", "MsgRefuse",
@@ -295,12 +340,14 @@ ClientPropose ==
     /\ SilentPeer /= "Client"
     /\ view["Client"] = "StPropose"
     /\ view' = [view EXCEPT !["Client"] = "StConfirm"]
-    /\ inbox' = [inbox EXCEPT !["Server"] =
-                   Append(@, Msg("MsgProposeVersions", table["Client"], 0, NoParams, "None", FALSE))]
+    /\ \E asc \in KeyOrders(table["Client"]) :                \* keys in order, or not
+         inbox' = [inbox EXCEPT !["Server"] =
+                     Append(@, MsgA("MsgProposeVersions", table["Client"], 0, NoParams, "None", FALSE, asc))]
     /\ UNCHANGED <<table, result, heard, rogueLeft>>
 
 \* In English: "A server in StPropose that is not silent reads the oldest
-\* message. Too big, or not MsgProposeVersions: violation. Otherwise it
+\* message. Too big, not MsgProposeVersions, or (reference) a table with
+\* its keys out of order [R10]: violation. Otherwise it
 \* decides, sends its answer, and is done." The read and the answer are one
 \* step: the reference yields at once [R4], gOuroboros answers inside its
 \* message handler, so a server never rests in StConfirm.
@@ -310,7 +357,7 @@ ServerRecv ==
     /\ inbox["Server"] /= <<>>
     /\ LET m == Head(inbox["Server"])
            d == ServerDecision(table["Server"], m.vmap) IN
-       IF m.big \/ ~IsLegal("StPropose", m.type)
+       IF m.big \/ ~IsLegal("StPropose", m.type) \/ BadKeyOrder(m)
        THEN /\ view' = [view EXCEPT !["Server"] = "Violation"]       \* hang up
             /\ UNCHANGED <<result, heard>>
             /\ inbox' = [inbox EXCEPT !["Server"] = Tail(@)]
@@ -318,17 +365,18 @@ ServerRecv ==
             /\ result' = [result EXCEPT !["Server"] = d]
             /\ heard' = m.vmap                                       \* remember what it answered
             /\ inbox' = [inbox EXCEPT !["Server"] = Tail(@),
-                                      !["Client"] = Append(@, ReplyMsg(d, table["Server"]))]
+                                      !["Client"] = Append(@, ReplyMsg(d, table["Server"], m.vmap))]
     /\ UNCHANGED <<table, rogueLeft>>
 
-\* In English: "A client in StConfirm reads the oldest message. Too big, or
-\* not legal in StConfirm: violation. Otherwise it judges the answer, is
-\* done, and keeps the result."
+\* In English: "A client in StConfirm reads the oldest message. Too big,
+\* not legal in StConfirm, or (reference) a table with its keys out of
+\* order [R10]: violation. Otherwise it judges the answer, is done, and
+\* keeps the result."
 ClientRecv ==
     /\ view["Client"] = "StConfirm"
     /\ inbox["Client"] /= <<>>
     /\ LET m == Head(inbox["Client"]) IN
-       IF m.big \/ ~IsLegal("StConfirm", m.type)
+       IF m.big \/ ~IsLegal("StConfirm", m.type) \/ BadKeyOrder(m)
        THEN /\ view' = [view EXCEPT !["Client"] = "Violation"]
             /\ UNCHANGED result
        ELSE /\ view' = [view EXCEPT !["Client"] = "StDone"]
@@ -355,10 +403,15 @@ Inject(r, m) ==
 
 \* The messages the rogue peer picks from: each kind of the receive table,
 \* plus an accept for every version and data, so the client's checks on
-\* MsgAcceptVersion are all exercised.
+\* MsgAcceptVersion are all exercised; with UnorderedKeys, also each
+\* table-carrying message with every version, keys out of order.
+FullTable == [v \in Versions |-> RefParams]
 RogueSet ==
     {KindMsg(k) : k \in Kinds} \cup
-    {Msg("MsgAcceptVersion", <<>>, v, p, "None", FALSE) : v \in Versions, p \in Params}
+    {Msg("MsgAcceptVersion", <<>>, v, p, "None", FALSE) : v \in Versions, p \in Params} \cup
+    {MsgA(t, FullTable, 0, NoParams, "None", FALSE, FALSE) :
+        t \in IF KeyOrders(FullTable) = BOOLEAN
+              THEN {"MsgProposeVersions", "MsgQueryReply"} ELSE {}}
 
 Progress == ClientPropose \/ ServerRecv \/ ClientRecv \/ \E r \in Roles : DoneRecv(r)
 
@@ -468,6 +521,30 @@ ClientAcceptsOnlyProposed ==
            /\ m.v \in DOMAIN table["Client"]                \* it proposed v
            /\ m.p.ok                                        \* the data decodes
            /\ m.p.magic = table["Client"][m.v].magic        \* and the magic is its own
+      ]_vars
+
+\* In English: "In every step where the server accepts, the
+\* MsgAcceptVersion it sends carries the negotiated data: the result of
+\* combining its own data for v with the client's [S7][R9]."
+AcceptCarriesNegotiatedData ==
+    [][ (/\ view["Server"] = "StPropose"
+         /\ result'["Server"].kind = "Accept")
+        => LET v   == result'["Server"].v
+               out == inbox'["Client"][Len(inbox'["Client"])]   \* what it just sent
+           IN /\ out.type = "MsgAcceptVersion"
+              /\ out.p = Agree(table["Server"][v], heard'[v])
+      ]_vars
+
+\* In English: "In every step where a side reads a message whose version
+\* table arrived with its keys out of order, that side hangs up [S7][R10]."
+\* A read is the only step that shortens r's inbox.
+UnorderedMapsRejected ==
+    [][\A r \in Roles :
+         (/\ view[r] \in {"StPropose", "StConfirm"}
+          /\ inbox[r] /= <<>>
+          /\ Len(inbox'[r]) < Len(inbox[r])
+          /\ ~Head(inbox[r]).asc)
+         => view'[r] = "Violation"
       ]_vars
 
 \* In English: "It is never the case that both sides believe they may send."

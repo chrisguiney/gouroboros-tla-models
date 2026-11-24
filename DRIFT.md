@@ -67,15 +67,15 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N10](#n10) | network | Handshake query answered before negotiation | Query reply only when the proposal is acceptable and the agreed data asks for it | main: any decodable proposed version that asks for a query gets one, even with no common version or the wrong network magic; PR: after negotiation | Query sends back the supported versions; negotiation fails on a magic mismatch | conforms (implementation choice) → conforms | Open PR #3127 |
 | [N11](#n11) | network | Handshake simultaneous open | Supported: a `MsgProposeVersions` received in `Confirm` is read as `MsgReplyVersions` | main: not supported (a proposal in `Confirm` is an error); PR: supported | Supported | does not conform → conforms | Open PR #3127 |
 | [N12](#n12) | network | Handshake `MsgQueryReply` without a query | Taken as a query result | Error | Silent | conforms (stricter) | Recorded (model 05) |
-| [N13](#n13) | network | Handshake `MsgAcceptVersion` carries the server's own data | Sends the negotiated (agreed) data | Sends its own version data for the chosen version; each side combines the flags itself | The negotiated data is sent back | does not conform | Not fixed. No wrong outcome found: the reference client recomputes the agreement and gOuroboros' `connection.go` combines local and remote flags |
-| [N14](#n14) | network | Handshake version keys out of order | Expects keys in ascending order; others fail to decode | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Not fixed; lenient receiver only, harmless |
+| [N13](#n13) | network | Handshake `MsgAcceptVersion` carries the server's own data | Sends the negotiated (agreed) data | Sends its own version data for the chosen version; each side combines the flags itself | The negotiated data is sent back | does not conform | Fixed on local branch `fix/handshake-accept-negotiated-data` (model 05 `AcceptCarriesNegotiatedData`). No wrong outcome: the reference client recomputes the agreement |
+| [N14](#n14) | network | Handshake version keys out of order | Expects keys in ascending order; others fail to decode | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Fixed on local branch `fix/handshake-version-key-order` (model 05 `UnorderedMapsRejected`); checks every key, the reference only recognised ones |
 | [N15](#n15) | network | Block-fetch `Stop` with ranges outstanding | Collects every answer, then sends `MsgClientDone`; a demotion that times out closes the connection | main: gives up after 250 ms without `MsgClientDone` and allows `Start`, so a late reply reaches the new run; PR: abandons only when owed, latches, stops the muxer | `MsgClientDone` only from `StIdle` | does not conform → conforms | Open PR #3114 (chain-sync's identical defect was fixed by merged #3092) |
 | [N16](#n16) | network | Block-fetch `RangeDoneFunc` for a request that was never sent | A request's receiver exists only once the request is sent | main: the shutdown drain calls `RangeDoneFunc` for a request whose `RequestRange` returned an error; PR: not | Silent (library API) | conforms | Open PR #3114. Library defect; Dingo works around it |
 | [N17](#n17) | network | Block-fetch `StBusy` timeout default | 60 s | main: `NewConfig` sets `BatchStartTimeout` 5 s; PR: 60 s | 60 s | conforms (stricter) → conforms | Open PR #3114 (Dingo already sets 60 s) |
 | [N18](#n18) | network | Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client) | 65,535 bytes | 2,500,000 bytes, because a `MsgBlock` that arrives early is judged against `StBusy` | 65,535 bytes | does not conform | Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives |
 | [N19](#n19) | network | Block-fetch `RangeTimeout` | None | A whole range must finish within about 36 hours by default | Silent | conforms (implementation choice) | gOuroboros addition. Local only: it ends the caller's wait and sends nothing |
 | [N20](#n20) | network | Tx-submission blocking and non-blocking request rules | Client throws `ProtocolErrorRequestBlocking`, `RequestNonBlocking`, `RequestedNothing`; server picks the style from its FIFO | main: the client does not check; `Server.RequestTxIds` lets the caller pick either style; PR: both enforced | Blocking iff nothing stays unacknowledged; ack or request non-zero | does not conform → conforms | Open PR #3128 (Dingo always sends blocking requests for at least one id) |
-| [N21](#n21) | network | Tx-submission request over the window from `NodeToNodeV_16` | From V16 the client clamps the reply to its own window | Always a protocol error | From V16 not an error; reply with as many as fit | does not conform | Not fixed; default windows (10 each side) never trigger it |
+| [N21](#n21) | network | Tx-submission request over the window from `NodeToNodeV_16` | From V16 the client clamps the reply to its own window | Always a protocol error | From V16 not an error; reply with as many as fit | does not conform | Fixed on local branch `fix/txsubmission-clamp-request-window` (model 07 `ClampsOverWindow`) |
 | [N22](#n22) | network | Tx-submission duplicate ids in one reply | Not checked | Refused | Silent | conforms (stricter) | Recorded; a reference peer never sends duplicates |
 | [N23](#n23) | network | Peer-sharing: how many peers the server sends | `min(10, amount)` | `min(amount, 230)` | At most the amount requested, bounded by the message size | conforms (implementation choice) | Policy choice |
 | [N24](#n24) | network | Peer-sharing request when peer sharing was negotiated off | Mini-protocol not registered; a segment for it is `UnknownMiniProtocol` and tears the connection down | Answers an empty list | Such a node does not run the server | conforms (implementation choice) | Deliberate (documented in the package) |
@@ -293,7 +293,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Server.hs` 43 (`Yield (MsgAcceptVersion vNumber $ encodeData vNumber agreedData)`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/server.go` 161, 228
 - **Verdict.** does not conform
-- **Status.** Not fixed. No wrong outcome found: the reference client recomputes the agreement and gOuroboros' `connection.go` combines local and remote flags
+- **Status.** Fixed on local branch `fix/handshake-accept-negotiated-data`; model 05 `HandshakeAcceptOwnDataBug.cfg` reproduces main. No wrong outcome found: the reference client recomputes the agreement, and every combining rule is idempotent and commutative
 
 ### N14
 
@@ -304,7 +304,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Codec.hs` 101-102 ("encodes proposed map in ascending order and it expects to receive them in this order")
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/collection_decode.go` 85 (duplicate check only)
 - **Verdict.** does not conform
-- **Status.** Not fixed; lenient receiver only, harmless
+- **Status.** Fixed on local branch `fix/handshake-version-key-order`; model 05 `HandshakeKeyOrderBug.cfg` reproduces main. The fix checks every key; the reference skips keys it does not recognise
 
 ### N15
 
@@ -381,7 +381,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../TxSubmission/Outbound.hs` 95-104 (`TxOutboundV_2`), 150 (`reqNo0 \`min\` maxReqNo`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/txsubmission/client.go` 331-339
 - **Verdict.** does not conform
-- **Status.** Not fixed; default windows (10 each side) never trigger it
+- **Status.** Fixed on local branch `fix/txsubmission-clamp-request-window`; model 07 `TxSubmissionV16ClampBug.cfg` reproduces main. Default windows (10 each side) never trigger it
 
 ### N22
 
@@ -1062,10 +1062,10 @@ Entries where gOuroboros on `main` breaks a stated rule, with what would close e
 
 No pull request yet (decide whether and how to fix):
 
-- **N13** Handshake `MsgAcceptVersion` carries the server's own data. Not fixed. No wrong outcome found: the reference client recomputes the agreement and gOuroboros' `connection.go` combines local and remote flags.
-- **N14** Handshake version keys out of order. Not fixed; lenient receiver only, harmless.
+- **N13** Handshake `MsgAcceptVersion` carries the server's own data. Fixed on local branch `fix/handshake-accept-negotiated-data`.
+- **N14** Handshake version keys out of order. Fixed on local branch `fix/handshake-version-key-order`.
 - **N18** Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client). Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives.
-- **N21** Tx-submission request over the window from `NodeToNodeV_16`. Not fixed; default windows (10 each side) never trigger it.
+- **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed on local branch `fix/txsubmission-clamp-request-window`.
 - **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Not fixed; needs a mempool-change signal from the application.
 - **N28** Local-tx-monitor `MsgGetMeasures`. Not fixed; a missing feature.
 - **N32** Other servers that do not restart after `MsgDone`. Not fixed. Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.
