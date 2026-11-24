@@ -31,7 +31,7 @@ Plain-language definitions, with a Go comparison where one helps.
 : The stake distribution laid end to end: pools in ID order, each owning an
   interval as wide as its stake. A uniform sample then lands in a pool's
   interval with probability equal to its stake share. See
-  [model 27](../specs/27-consensus-tachys/README.md).
+  [model `consensus-tachys`](../specs/consensus-tachys/README.md).
 
 **Distinct states**
 : How many different states TLC found. A measure of model size, and of how
@@ -49,7 +49,7 @@ Plain-language definitions, with a Go comparison where one helps.
 : The random value every VRF check in an epoch uses. Each block folds its VRF
   output into an evolving nonce; a candidate copy stops following it a window
   of slots before the epoch ends, and the next epoch's nonce is made from that
-  candidate. See [model 21](../specs/21-consensus-nonce/README.md).
+  candidate. See [model `consensus-nonce`](../specs/consensus-nonce/README.md).
 
 **Fairness**
 : An assumption that a step which keeps being possible eventually happens.
@@ -110,11 +110,11 @@ Plain-language definitions, with a Go comparison where one helps.
 **Public leader schedule** (Ouroboros Tachys)
 : A schedule anyone can compute that names exactly one pool for every slot,
   replacing Praos's private VRF lottery. See
-  [model 27](../specs/27-consensus-tachys/README.md).
+  [model `consensus-tachys`](../specs/consensus-tachys/README.md).
 
 **`RECURSIVE F(_)`**
 : Declares an operator that calls itself, like a recursive Go function.
-  Model 27's `Sum` adds up a set this way.
+  Model `consensus-tachys`'s `Sum` adds up a set this way.
 
 **Record (`[a |-> x, b |-> y]`)**
 : A value with named fields, like a Go struct. `m.a` reads a field. The

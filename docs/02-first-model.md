@@ -1,6 +1,6 @@
 # Your first model
 
-Open `specs/00-hello/Hello.tla` next to this page. It is a toy version of
+Open `specs/hello/Hello.tla` next to this page. It is a toy version of
 gouroboros's keep-alive mini-protocol (`protocol/keepalive` in gouroboros):
 
 - The **client** sends a ping.

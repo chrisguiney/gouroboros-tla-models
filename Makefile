@@ -5,7 +5,7 @@ SHELL := bash
 # is an intentionally broken teaching example and is expected to FAIL.
 CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
-KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
+KEEPALIVE := cd specs/keepalive && ../../bin/tlc
 
 .PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir models check clean
 
@@ -16,10 +16,10 @@ install: ## Download Java + TLA+ tools into .tools/ (no sudo)
 	@scripts/install-tla.sh
 
 hello: ## Check the hello-world model (proves the install works)
-	cd specs/00-hello && ../../bin/tlc -config Hello.cfg Hello.tla
+	cd specs/hello && ../../bin/tlc -config Hello.cfg Hello.tla
 
 hello-bug: ## Watch TLC catch a bug and print the steps that cause it
-	cd specs/00-hello && ../../bin/tlc -config HelloBug.cfg Hello.tla || true
+	cd specs/hello && ../../bin/tlc -config HelloBug.cfg Hello.tla || true
 
 keepalive: ## Check the keep-alive model with honest, slow, and rogue peers
 	$(KEEPALIVE) -config KeepAlive.cfg KeepAlive.tla
@@ -41,7 +41,7 @@ keepalive-lifecycle: ## Check the gOuroboros server restart against Stop and con
 	$(KEEPALIVE) -config KeepAliveLifecycleSlotBug.cfg KeepAliveLifecycle.tla || true
 	$(KEEPALIVE) -config KeepAliveLifecycleCloseBug.cfg KeepAliveLifecycle.tla || true
 
-CONNECTION := cd specs/02-connection && ../../bin/tlc
+CONNECTION := cd specs/connection && ../../bin/tlc
 
 connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config MuxHandover.cfg MuxHandover.tla
@@ -60,7 +60,7 @@ connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config ConnectionShutdown.cfg ConnectionShutdown.tla
 	$(CONNECTION) -config ConnectionShutdownLateErrorBug.cfg ConnectionShutdown.tla || true
 
-ENGINE := cd specs/03-engine && ../../bin/tlc
+ENGINE := cd specs/engine && ../../bin/tlc
 
 engine: ## Check the protocol engine: admission and pipelining
 	$(ENGINE) -config EngineAdmissionKeepAlive.cfg EngineAdmission.tla
@@ -76,7 +76,7 @@ engine-deep: ## Check pipelining with two requests in flight (a few minutes)
 	$(ENGINE) -workers auto -config EnginePipeliningBlockFetchDeep.cfg EnginePipelining.tla
 	$(ENGINE) -workers auto -config EnginePipeliningChainSyncDeep.cfg EnginePipelining.tla
 
-CHAINSYNC := cd specs/04-chainsync && ../../bin/tlc
+CHAINSYNC := cd specs/chainsync && ../../bin/tlc
 
 chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart, queries
 	$(CHAINSYNC) -config ChainSyncClient.cfg ChainSyncClient.tla
@@ -103,73 +103,73 @@ chainsync-deep: ## Check the chain-sync client with a window of three
 	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla
 
 handshake: ## Check the handshake model (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/05-handshake
+	@scripts/run-model.sh specs/handshake
 
 blockfetch: ## Check the block-fetch model (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/06-blockfetch
+	@scripts/run-model.sh specs/blockfetch
 
 txsubmission: ## Check the tx-submission model (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/07-txsubmission
+	@scripts/run-model.sh specs/txsubmission
 
 peersharing: ## Check the peer-sharing model (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/08-peersharing
+	@scripts/run-model.sh specs/peersharing
 
 localtx: ## Check the local tx submission and monitor models (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/09-localtx
+	@scripts/run-model.sh specs/localtx
 
 localstatequery: ## Check the local-state-query model (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/10-localstatequery
+	@scripts/run-model.sh specs/localstatequery
 
 dmq: ## Check the message-queue models (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/11-dmq
+	@scripts/run-model.sh specs/dmq
 
 leios-peras: ## Check the Leios and Peras models (every config, Bug ones expected to fail)
-	@scripts/run-model.sh specs/12-leios-peras
+	@scripts/run-model.sh specs/leios-peras
 
 consensus: ## Check the consensus model (chain selection, opcerts, PBFT)
-	@scripts/run-model.sh specs/13-consensus
+	@scripts/run-model.sh specs/consensus
 
 ledger-shelley: ## Check the Shelley ledger model (certificates, deposits, snapshots)
-	@scripts/run-model.sh specs/14-ledger-shelley
+	@scripts/run-model.sh specs/ledger-shelley
 
 ledger-governance: ## Check the Conway governance model
-	@scripts/run-model.sh specs/15-ledger-governance
+	@scripts/run-model.sh specs/ledger-governance
 
 pipeline-cbor: ## Check the block pipeline model
-	@scripts/run-model.sh specs/16-pipeline-cbor
+	@scripts/run-model.sh specs/pipeline-cbor
 
 ledger-utxo: ## Check the UTXO rule model (Shelley to Babbage)
-	@scripts/run-model.sh specs/17-ledger-utxo
+	@scripts/run-model.sh specs/ledger-utxo
 
 consensus-genesis: ## Check the Genesis density model (GDD, LoE, GenesisSelector)
-	@scripts/run-model.sh specs/18-consensus-genesis
+	@scripts/run-model.sh specs/consensus-genesis
 
 ledger-byron: ## Check the Byron ledger model (UTxO, heavyweight delegation)
-	@scripts/run-model.sh specs/19-ledger-byron
+	@scripts/run-model.sh specs/ledger-byron
 
 ledger-leios: ## Check the Leios ledger model (certification, EB application, committee)
-	@scripts/run-model.sh specs/20-ledger-leios
+	@scripts/run-model.sh specs/ledger-leios
 
 consensus-nonce: ## Check the epoch nonce model (evolving, candidate, tick)
-	@scripts/run-model.sh specs/21-consensus-nonce
+	@scripts/run-model.sh specs/consensus-nonce
 
 ledger-bbody: ## Check the block-body rule model (size, hash, order, totals)
-	@scripts/run-model.sh specs/23-ledger-bbody
+	@scripts/run-model.sh specs/ledger-bbody
 
 ledger-conway-dijkstra: ## Check the Conway and Dijkstra ledger model (gates, deposits, sub-transactions)
-	@scripts/run-model.sh specs/24-ledger-conway-dijkstra
+	@scripts/run-model.sh specs/ledger-conway-dijkstra
 
 consensus-eras: ## Check the eras model (era history, header check order, TPraos overlay)
-	@scripts/run-model.sh specs/25-consensus-eras
+	@scripts/run-model.sh specs/consensus-eras
 
 ledger-witnesses: ## Check the UTXOW witness model (keys, scripts, redeemers, datums)
-	@scripts/run-model.sh specs/22-ledger-witnesses
+	@scripts/run-model.sh specs/ledger-witnesses
 
 consensus-tachys: ## Check the Tachys public leader schedule model (CIP-0177)
-	@scripts/run-model.sh specs/27-consensus-tachys
+	@scripts/run-model.sh specs/consensus-tachys
 
 ledger-ppup-mir: ## Check the parameter-update (PPUP) and MIR model (proposals, quorum, pots)
-	@scripts/run-model.sh specs/26-ledger-ppup-mir
+	@scripts/run-model.sh specs/ledger-ppup-mir
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done

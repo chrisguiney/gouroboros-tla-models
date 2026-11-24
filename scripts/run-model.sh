@@ -10,7 +10,7 @@
 # A Bug config only counts as failing if TLC reports a violated property or
 # a deadlock: a parse or evaluation error is a broken model, not a finding.
 #
-# Usage: scripts/run-model.sh specs/06-blockfetch
+# Usage: scripts/run-model.sh specs/blockfetch
 set -uo pipefail
 
 dir="${1:?usage: scripts/run-model.sh specs/<model-directory>}"
