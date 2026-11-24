@@ -59,15 +59,24 @@ VARIABLES
     stopped,   \* the timer fired and the protocol stopped
     blamed     \* the timer fired while this side, not the peer, was busy
 
+\* Literally: "vars is defined as the tuple of all seven variables."
 vars == <<agency, phase, inbox, sent, timer, stopped, blamed>>
 
 \* In English: "Where an inbound transition into state agency a leaves the
 \* timer."
+\* Literally: "ArmAtTransition of a is defined as: in the case TimerArm equals
+\*   "everyState", "armed"; in the case TimerArm equals "atTransition", if a
+\*   equals "peer" then "armed", else "off"; in every other case, "off"."
 ArmAtTransition(a) ==
     CASE TimerArm = "everyState"   -> "armed"
       [] TimerArm = "atTransition" -> IF a = "peer" THEN "armed" ELSE "off"
       [] OTHER                     -> "off"
 
+\* In English: "At the start this side holds agency, recvLoop is idle, nothing
+\* is queued or sent, the timer is off, and nothing has stopped or been blamed."
+\* Literally: "Init is defined as: agency equals "local", and phase equals
+\*   "idle", and inbox equals FALSE, and sent equals 0, and timer equals "off",
+\*   and stopped equals FALSE, and blamed equals FALSE."
 Init ==
     /\ agency = "local"          \* this side starts with agency
     /\ phase = "idle"
@@ -82,6 +91,11 @@ Init ==
 \* This side now waits for the peer, so the timer is armed, except with the
 \* fix while a handler runs: recvLoop cannot take the peer's answer until
 \* the handler returns."
+\* Literally: "LocalSend is defined as: stopped is not true, and agency equals
+\*   "local", and sent is less than Msgs, and agency in the next state equals
+\*   "peer", and timer in the next state equals: if TimerArm equals
+\*   "afterHandler" and phase equals "handling", then "off", else "armed", and
+\*   phase, inbox, sent, stopped and blamed are unchanged."
 LocalSend ==
     /\ ~stopped /\ agency = "local" /\ sent < Msgs
     /\ agency' = "peer"
@@ -91,6 +105,10 @@ LocalSend ==
 
 \* In English: "The peer, holding agency, sends its message; the read loop
 \* queues it."
+\* Literally: "PeerSend is defined as: stopped is not true, and agency equals
+\*   "peer", and inbox is not true, and sent is less than Msgs, and inbox in the
+\*   next state equals TRUE, and sent in the next state equals sent plus 1, and
+\*   agency, phase, timer, stopped and blamed are unchanged."
 PeerSend ==
     /\ ~stopped /\ agency = "peer" /\ ~inbox /\ sent < Msgs
     /\ inbox' = TRUE
@@ -100,6 +118,13 @@ PeerSend ==
 \* In English: "recvLoop takes the queued message and transitions. The next
 \* state may leave agency with the peer (block-fetch MsgBlock in Streaming)
 \* or give it to this side. Then MessageHandlerFunc starts."
+\* Literally: "RecvTransition is defined as: stopped is not true, and phase
+\*   equals "idle", and inbox is true, and agency equals "peer", and there
+\*   exists a next in the set containing "local" and "peer" such that agency in
+\*   the next state equals next and timer in the next state equals
+\*   ArmAtTransition of next, and inbox in the next state equals FALSE, and
+\*   phase in the next state equals "handling", and sent, stopped and blamed are
+\*   unchanged."
 RecvTransition ==
     /\ ~stopped /\ phase = "idle" /\ inbox /\ agency = "peer"
     /\ \E next \in {"local", "peer"} :
@@ -111,6 +136,11 @@ RecvTransition ==
 
 \* In English: "MessageHandlerFunc returns. With the fix, recvLoop tells
 \* stateLoop, which arms the current state's timer if the peer has agency."
+\* Literally: "HandlerDone is defined as: stopped is not true, and phase equals
+\*   "handling", and phase in the next state equals "idle", and timer in the
+\*   next state equals: if TimerArm equals "afterHandler" and agency equals
+\*   "peer", then "armed", else timer, and agency, inbox, sent, stopped and
+\*   blamed are unchanged."
 HandlerDone ==
     /\ ~stopped /\ phase = "handling"
     /\ phase' = "idle"
@@ -121,6 +151,11 @@ HandlerDone ==
 \* In English: "The timer fires and the protocol stops. It is this side's
 \* fault, not the peer's, if this side holds agency or is still handling
 \* the peer's last message."
+\* Literally: "Fire is defined as: stopped is not true, and timer equals
+\*   "armed", and stopped in the next state equals TRUE, and blamed in the next
+\*   state equals (agency equals "local" or phase equals "handling"), and timer
+\*   in the next state equals "off", and agency, phase, inbox and sent are
+\*   unchanged."
 Fire ==
     /\ ~stopped /\ timer = "armed"
     /\ stopped' = TRUE
@@ -129,14 +164,23 @@ Fire ==
     /\ UNCHANGED <<agency, phase, inbox, sent>>
 
 \* In English: "Nothing is left to do: the run is over, or stopped."
+\* Literally: "Quiet is defined as: stopped is true, or (sent equals Msgs and
+\*   inbox is not true and phase equals "idle"); and vars is unchanged."
 Quiet ==
     /\ stopped \/ (sent = Msgs /\ ~inbox /\ phase = "idle")
     /\ UNCHANGED vars
 
+\* In English: "A step is a local send, a peer send, a receive, a handler
+\* returning, the timer firing, or nothing left to do."
+\* Literally: "Next is defined as: LocalSend or PeerSend or RecvTransition or
+\*   HandlerDone or Fire or Quiet."
 Next ==
     \/ LocalSend \/ PeerSend \/ RecvTransition \/ HandlerDone \/ Fire
     \/ Quiet
 
+\* In English: "Start in Init, and take only Next steps."
+\* Literally: "Spec is defined as: Init, and always, every step is a Next step
+\*   or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
@@ -144,19 +188,26 @@ Spec == Init /\ [][Next]_vars
 
 \* In English: "A timeout never fires while this side holds agency or is
 \* still handling the peer's message: only the peer's slowness counts."
+\* Literally: "OnlyThePeerIsTimed is defined as: blamed is not true."
 OnlyThePeerIsTimed == ~blamed
 
 \* In English: "Whenever this side is only waiting for the peer, the state's
 \* timer runs: the fix still times the peer."
+\* Literally: "PeerWaitIsTimed is defined as: if stopped is not true and agency
+\*   equals "peer" and phase equals "idle" and inbox is not true and sent is
+\*   less than Msgs, then timer equals "armed"."
 PeerWaitIsTimed ==
     (~stopped /\ agency = "peer" /\ phase = "idle" /\ ~inbox /\ sent < Msgs)
         => timer = "armed"
 
 \* Probe, EXPECTED to be violated: "The timer never fires." Violated = a
 \* slow peer is still timed out.
+\* Literally: "ProbeTimerNeverFires is defined as: stopped is not true."
 ProbeTimerNeverFires == ~stopped
 
 \* Probe, EXPECTED to be violated: "No handler runs in a state where the peer
 \* keeps agency." Violated = the case the fix is about is reached.
+\* Literally: "ProbeNeverHandlingWhilePeerHasAgency is defined as: (phase equals
+\*   "handling" and agency equals "peer") is not true."
 ProbeNeverHandlingWhilePeerHasAgency == ~(phase = "handling" /\ agency = "peer")
 =============================================================================
