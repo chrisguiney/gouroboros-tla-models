@@ -41,7 +41,11 @@ Read these in order. Each one builds on the last.
     acknowledgement window and the blocking-style rules.
 11. [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
     rules, size limits and timeouts.
-12. [Glossary](docs/glossary.md): keep it open while you read anything else.
+12. [Model 10: local-state-query](specs/10-localstatequery/README.md):
+    acquiring, querying, releasing, and the client's concurrent calls.
+13. [Model 11: message queue](specs/11-dmq/README.md): message
+    submission (CIP-0137), local submission and notification.
+14. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.

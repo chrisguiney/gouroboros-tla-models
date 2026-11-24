@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localstatequery dmq models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -113,6 +113,12 @@ txsubmission: ## Check the tx-submission model (every config, Bug ones expected 
 
 peersharing: ## Check the peer-sharing model (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/08-peersharing
+
+localstatequery: ## Check the local-state-query model (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/10-localstatequery
+
+dmq: ## Check the message-queue models (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/11-dmq
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done
