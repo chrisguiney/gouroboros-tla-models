@@ -479,9 +479,9 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **What differs.** Reference: no time limits in the node-to-client codecs. gOuroboros: main: local-state-query 5 s / 180 s, local-tx-monitor 5 s / 30 s, local-tx-submission 30 s; PRs: none by default.
 - **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, "Timeouts per state" for local tx-submission (1884-1886), local-state-query (2018-2020), local tx-monitor (2172-2174): "No timeouts."
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/LocalStateQuery/Type.hs` 55 (a comment, "There is a timeout in this state", that no codec enforces)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/localstatequery/localstatequery.go` 185-186, `protocol/localtxmonitor/localtxmonitor.go` 205-206, `protocol/localtxsubmission/localtxsubmission.go` 114; PR #3159 head `c0a5ca9c3` (LSQ, monitor), PR #3140 head `18f074686` `localtxsubmission.go` 113
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/localstatequery/localstatequery.go` 185-186, `protocol/localtxmonitor/localtxmonitor.go` 205-206, `protocol/localtxsubmission/localtxsubmission.go` 114; PR #3159 head `c0a5ca9c3` (LSQ, monitor), PR #3140 head `641eff0a` `localtxsubmission.go` 113, with `client.go` `Stop` ending a held `SubmitTx` (at `18f07468` a `Stop` during a held submission waited under `busyMutex` for the node) and `TestClientBusyTimeout` checking the Busy timer a running client gets, by default and with `WithTimeout`
 - **Verdict.** does not conform → conforms
-- **Status.** Open PRs #3159 and #3140
+- **Status.** Open PRs #3159 and #3140 (head `641eff0a`). Model: `specs/09-localtx/LocalTxSubmissionStopWaitBug.cfg` (`StopNeverWaitsOnPeer`)
 
 A node holds `MsgSubmitTx` while its mempool is full, and a state query can be slow; a 30 s client timeout tears down a correct exchange.
 

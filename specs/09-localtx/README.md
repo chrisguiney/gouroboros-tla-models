@@ -155,9 +155,16 @@ connection, not a protocol property.
 
 The client's `SubmitTx` takes `busyMutex`, sends `MsgSubmitTx`, and waits on
 an unbuffered `submitResultChan`, which both answer handlers write to.
-`NewConfig` sets a 30-second timeout on Busy. The server calls
-`SubmitTxFunc` inside its handler and answers; it does not restart after
-`MsgDone`.
+`NewConfig` sets a 30-second timeout on Busy on main; PR #3140 sets none by
+default, and `WithTimeout` opts in (`ClientTimeouts`). `NewClient` copies
+that value onto its own Busy state: `TestClientBusyTimeout` checks on a
+running client that a held submission is not timed by default and is timed
+with `WithTimeout`. That test changes no behaviour, so the model is
+unaffected by it: `ClientTimeouts` already describes both settings.
+`Stop()` takes the same `busyMutex`; on PR #3140 it first closes a channel
+that ends a waiting `SubmitTx`, then closes the protocol without `MsgDone`.
+The server calls `SubmitTxFunc` inside its handler and answers; it does not
+restart after `MsgDone`.
 
 ### The questions
 
@@ -165,24 +172,34 @@ an unbuffered `submitResultChan`, which both answer handlers write to.
    order ties them to a request. Does an answer ever reach the wrong caller?
 2. **`OneSubmitInFlight`**: is more than one transaction ever on the wire?
 3. **`NoFailures`**, **`NeverBothHaveAgency`**, deadlock, as above.
+4. **`StopNeverWaitsOnPeer`**, as above; a waiting `SubmitTx` holds
+   `busyMutex` (`LockHeld`).
 
 ### The answers
 
 | Config | Setting | States (distinct) | Result |
 | --- | --- | --- | --- |
-| `LocalTxSubmission.cfg` | reference; 2 runs, 2 transactions, mempool fills and drains twice | 162 | all hold |
-| `LocalTxSubmissionGouroboros.cfg` | gOuroboros client, server never waits; 1 run | 27 | all hold |
+| `LocalTxSubmission.cfg` | reference; 2 runs, 2 transactions, mempool fills and drains twice | 453 | all hold |
+| `LocalTxSubmissionGouroboros.cfg` | gOuroboros client, server never waits; 1 run | 82 | all hold |
 | `LocalTxSubmissionTable.cfg` | prints the receive table (24 rows) | 3 | passes |
-| `LocalTxSubmissionTimeoutBug.cfg` | **gOuroboros client against the node, mempool full** | 23 | `NoFailures` violated |
+| `LocalTxSubmissionTimeoutBug.cfg` | **gOuroboros client against the node, mempool full** | 63 | `NoFailures` violated |
+| `LocalTxSubmissionStopWaitBug.cfg` | **gOuroboros `Stop()` at PR #3140 `18f07468`, mempool full** | 16 | `StopNeverWaitsOnPeer` violated |
 | `LocalTxSubmissionRestartBug.cfg` | gOuroboros server on main, second run | 23 | `NewRunServed` violated |
 
 The node's `addTx` "will block until the transaction fits into the
 mempool" [R4], and the reference sets no timeout [S3]. The gOuroboros
 client's 30-second default tears the connection down while a full mempool
-drains. The fix is a change of default (none), but
-`protocol/limits_test.go` ("LocalTxSubmission timeouts") requires a
-positive default, so it is a maintainers' decision, recorded here and not
-applied.
+drains. PR #3140 changes the default to none.
+
+That made a second defect reachable, found in the class audit of the
+review of PR #3140: with no timer, `SubmitTx` holds `busyMutex` for as long
+as the mempool stays full, and `Stop()` took the same mutex before acting.
+The model shared it: `ClientStop` ran only when no caller waited. Stop is
+now called at any time, and `LocalTxSubmissionStopWaitBug.cfg` fails
+`StopNeverWaitsOnPeer` when Stop cannot cancel. PR #3140 head `641eff0a`
+has Stop end the waiting `SubmitTx` and close without `MsgDone`
+(`StopCancelsWait = TRUE`); Go: `TestStopDoesNotWaitForSubmit`, which fails
+before the fix with "Stop waited for the node to answer".
 
 ### Checking the checks
 
@@ -193,6 +210,7 @@ applied.
 | `LocalTxSubmissionAgencyBug.cfg` | honest server (rogue answer) | `NeverBothHaveAgency` |
 | `LocalTxSubmissionTimeoutBug.cfg` | no client timer | `NoFailures` |
 | `LocalTxSubmissionRestartBug.cfg` | the server restarts | `NewRunServed` |
+| `LocalTxSubmissionStopWaitBug.cfg` | Stop ends a waiting `SubmitTx` | `StopNeverWaitsOnPeer` |
 
 Without `busyMutex` the second transaction still waits in the send queue
 (the send loop needs agency), but two callers wait on one channel and the
@@ -201,7 +219,8 @@ The Go runtime wakes receivers in arrival order, so this is not
 reproducible deterministically in Go; the model is the evidence.
 
 Probes on the reference config: `ProbeServerNeverBlocks`,
-`ProbeNoSecondRun`.
+`ProbeNoSecondRun`, `ProbeNoCancelledHeldSubmit` (Stop cancels a
+submission the node holds for a full mempool).
 
 ## The modelling mistakes
 
@@ -255,7 +274,8 @@ callers, `MsgDone` from Idle in submission, and accept/reject round trips.
 | `MsgAwaitAcquire` | waits for a new snapshot [S3] | same bytes as `MsgAcquire` [R2]; node blocks until the snapshot differs [R5] | client: same bytes, but timed (5 s); server: answers at once | **Client defect** (fixed); server deviation, fixed opt-in on `fix/localtxmonitor-await-acquire` (`AwaitMempoolFunc`), since only the application knows when its mempool changed |
 | `MsgGetMeasures` | in the protocol [S3] | always decoded and answered [R2][R3] | not implemented; decoding fails and the connection is torn down | Deviation; fixed on `fix/localtxmonitor-get-measures` |
 | `MsgGetMeasures` before `NodeToClientV_20` | not stated | the encoder refuses both messages [R6]; the node now negotiates only V_23, so it never arises there | with the fix: the client returns an error without sending; the server fails the protocol | Follows the reference |
-| Timeouts | "No timeouts" [S4], [S3 submission] | none defined | monitor: 5 s / 30 s; submission: 30 s | Deviation; harmful where the node may wait (await; full mempool) |
+| Timeouts | "No timeouts" [S4], [S3 submission] | none defined | monitor: 5 s / 30 s; submission: 30 s; PR #3140 `641eff0a`: submission none by default, `WithTimeout` opts in, checked on a running client | Deviation; harmful where the node may wait (await; full mempool); submission fixed on PR #3140 |
+| Stop while a submission is held | no client message from `StBusy` [S2] | the client thread is cancelled; nothing is sent [R4] | PR #3140 `18f07468`: `Stop()` waits under `busyMutex` for as long as the mempool stays full; `641eff0a`: ends the wait and closes without `MsgDone` | **Defect** (fixed on PR #3140) |
 | `MsgDone` from Acquired | not allowed [S3] | not expressible [R4] | `Stop()` sends it and fails | **Defect** (fixed) |
 | Stop while waiting for the server | no client message from `StAcquiring` or `StBusy` [S2] | the client thread is cancelled; nothing is sent [R4] | PR #3154 `e9996ade`: `Stop()` waits for the answer under `busyMutex`, forever for an await; `615e2a84`: ends the wait and closes without `MsgDone` | **Defect** (fixed on PR #3154) |
 | Server after `MsgDone` | restarts [S5] | inbound governor restarts it [R7] | stays done | Deviation; fixed for both servers on `fix/localtxmonitor-server-restart` and `fix/localtxsubmission-server-restart` |
