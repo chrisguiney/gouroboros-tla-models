@@ -70,7 +70,8 @@ Read these in order. Each one builds on the last.
     certificate's committee.
 23. [Model 21: the epoch nonce](specs/21-consensus-nonce/README.md): the
     evolving and candidate nonces, the freeze window and the tick.
-24. [Glossary](docs/glossary.md): keep it open while you read anything else.
+24. [Drift](DRIFT.md): every place gOuroboros differs from the reference, with the spec's verdict.
+25. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
