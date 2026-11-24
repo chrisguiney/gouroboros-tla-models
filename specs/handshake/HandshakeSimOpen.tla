@@ -35,6 +35,13 @@
 (* holds agency and protocol.Protocol rejects any message on arrival.      *)
 (* ReadsBeforeProposing = TRUE models that early read.                     *)
 (*                                                                         *)
+(* The version data a side ends with is what its connection derives the   *)
+(* diffusion mode from. The reference returns the agreed data,             *)
+(* acceptVersion vData vData' (Client.hs 201-215), the same on both sides. *)
+(* The branch at 78792c96 hands each side the peer's raw data, so two     *)
+(* sides with different diffusion modes end with opposite modes.          *)
+(* RawPeerData = TRUE models that.                                         *)
+(*                                                                         *)
 (* The labels "Client" and "Server" from Handshake.tla are kept as names   *)
 (* for the two sides; here both behave as clients.                         *)
 (***************************************************************************)
@@ -42,6 +49,23 @@ EXTENDS Handshake
 
 CONSTANT AsymmetricDecode   \* TRUE: a side's data may be undecodable by the other
 CONSTANT ReadsBeforeProposing \* TRUE: a side may read the peer's message while still in StPropose
+CONSTANT RawPeerData        \* TRUE: a side ends with the peer's raw data, not the agreed data
+
+VARIABLE data   \* data[r]: the version data side r ends with, NoParams until it accepts
+
+\* In English: "Every variable, the shared ones and data."
+\* Literally: "simVars is defined as the tuple of vars and data."
+simVars == <<vars, data>>
+
+\* In English: "The data side r ends with after accepting version v: the
+\* peer's own data for v under RawPeerData, else the agreement of r's data
+\* with the peer's."
+\* Literally: "EndData of r and v is defined as: if RawPeerData then table of
+\*   Peer of r, applied to v; else Agree of table of r applied to v and table of
+\*   Peer of r applied to v."
+EndData(r, v) ==
+    IF RawPeerData THEN table[Peer(r)][v]
+    ELSE Agree(table[r][v], table[Peer(r)][v])
 
 \* Both sides' data never asks for a query. With AsymmetricDecode the `ok`
 \* flag varies: one side may send data the other cannot decode.
@@ -58,7 +82,8 @@ SimTables == Tables(SimParams) \ {<<>>}
 \*   in Roles to the empty sequence, and table is a member of the set of
 \*   functions from Roles to SimTables, and result equals the function that
 \*   maps every r in Roles to NoResult, and heard equals the empty sequence,
-\*   and rogueLeft equals 0."
+\*   and rogueLeft equals 0, and data equals the function that maps every r in
+\*   Roles to NoParams."
 SimInit ==
     /\ view = [r \in Roles |-> "StPropose"]
     /\ inbox = [r \in Roles |-> <<>>]
@@ -66,6 +91,7 @@ SimInit ==
     /\ result = [r \in Roles |-> NoResult]
     /\ heard = <<>>
     /\ rogueLeft = 0
+    /\ data = [r \in Roles |-> NoParams]
 
 \* In English: "Side r in StPropose sends its table to its peer and moves
 \* to StConfirm."
@@ -73,36 +99,43 @@ SimInit ==
 \*   view in the next state equals view except that its r entry is "StConfirm",
 \*   and inbox in the next state equals inbox except that its Peer of r entry
 \*   is the old entry with Msg of "MsgProposeVersions", table of r, 0,
-\*   NoParams, "None" and FALSE appended, and table, result, heard and
-\*   rogueLeft are unchanged."
+\*   NoParams, "None" and FALSE appended, and table, result, heard,
+\*   rogueLeft and data are unchanged."
 SimPropose(r) ==
     /\ view[r] = "StPropose"                         \* r has not proposed yet
     /\ view' = [view EXCEPT ![r] = "StConfirm"]      \* r now waits for an answer
     /\ inbox' = [inbox EXCEPT ![Peer(r)] =           \* the peer receives r's table
                    Append(@, Msg("MsgProposeVersions", table[r], 0, NoParams, "None", FALSE))]
-    /\ UNCHANGED <<table, result, heard, rogueLeft>> \* nothing else changes
+    /\ UNCHANGED <<table, result, heard, rogueLeft, data>> \* nothing else changes
 
 \* In English: "Side r in StConfirm reads the peer's proposal. If it is not
 \* legal there (gOuroboros), r hangs up. Otherwise r is done, with the
-\* result of negotiating its own table against the peer's [R2]."
+\* result of negotiating its own table against the peer's [R2], and, if it
+\* accepted, the data EndData gives it."
 \* Literally: "SimRecv of r is defined as: view of r equals "StConfirm", and
 \*   inbox of r does not equal the empty sequence, and, letting m be the head
 \*   of inbox of r: if IsLegal of "StConfirm" and m's type is not true, then
 \*   (view in the next state equals view except that its r entry is
-\*   "Violation", and result is unchanged), else (view in the next state equals
-\*   view except that its r entry is "StDone", and result in the next state
-\*   equals result except that its r entry is ClientJudge of table of r and m);
-\*   and inbox in the next state equals inbox except that its r entry is the
-\*   tail of the old entry, and table, heard and rogueLeft are unchanged."
+\*   "Violation", and result and data are unchanged), else, letting d be
+\*   ClientJudge of table of r and m, (view in the next state equals view
+\*   except that its r entry is "StDone", and result in the next state equals
+\*   result except that its r entry is d, and data in the next state equals
+\*   data except that its r entry is, if d's kind equals "Accept", EndData of
+\*   r and d's v, else NoParams); and inbox in the next state equals inbox
+\*   except that its r entry is the tail of the old entry, and table, heard and
+\*   rogueLeft are unchanged."
 SimRecv(r) ==
     /\ view[r] = "StConfirm"
     /\ inbox[r] /= <<>>
     /\ LET m == Head(inbox[r]) IN
        IF ~IsLegal("StConfirm", m.type)
        THEN /\ view' = [view EXCEPT ![r] = "Violation"]
-            /\ UNCHANGED result
-       ELSE /\ view' = [view EXCEPT ![r] = "StDone"]
-            /\ result' = [result EXCEPT ![r] = ClientJudge(table[r], m)]
+            /\ UNCHANGED <<result, data>>
+       ELSE LET d == ClientJudge(table[r], m) IN
+            /\ view' = [view EXCEPT ![r] = "StDone"]
+            /\ result' = [result EXCEPT ![r] = d]
+            /\ data' = [data EXCEPT ![r] =
+                           IF d.kind = "Accept" THEN EndData(r, d.v) ELSE NoParams]
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]
     /\ UNCHANGED <<table, heard, rogueLeft>>
 
@@ -115,30 +148,30 @@ SimRecv(r) ==
 \*   and view of r equals "StPropose", and inbox of r does not equal the empty
 \*   sequence, and view in the next state equals view except that its r entry
 \*   is "Violation", and inbox in the next state equals inbox except that its r
-\*   entry is the tail of the old entry, and table, result, heard and rogueLeft
-\*   are unchanged."
+\*   entry is the tail of the old entry, and table, result, heard, rogueLeft
+\*   and data are unchanged."
 SimRecvEarly(r) ==
     /\ ReadsBeforeProposing                          \* only the early-reading variant
     /\ view[r] = "StPropose"                         \* r has not proposed yet
     /\ inbox[r] /= <<>>                              \* the peer's proposal has arrived
     /\ view' = [view EXCEPT ![r] = "Violation"]      \* r rejects it and hangs up
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]        \* the message is consumed
-    /\ UNCHANGED <<table, result, heard, rogueLeft>> \* nothing else changes
+    /\ UNCHANGED <<table, result, heard, rogueLeft, data>> \* nothing else changes
 
 \* In English: "A step is some side proposing, reading, or reading early, or,
 \* once the connection is over, nothing changing."
 \* Literally: "SimNext is defined as: there exists an r in Roles such that
 \*   SimPropose of r or SimRecv of r or SimRecvEarly of r; or Ended is true and
-\*   vars is unchanged."
+\*   simVars is unchanged."
 SimNext ==
     \/ \E r \in Roles : SimPropose(r) \/ SimRecv(r) \/ SimRecvEarly(r)
-    \/ Ended /\ UNCHANGED vars
+    \/ Ended /\ UNCHANGED simVars
 
 \* In English: "Start in SimInit, and from then on every step is a SimNext
 \* step."
 \* Literally: "SimSpec is defined as: SimInit holds at the start, and always,
-\*   every step is a SimNext step or a step that leaves vars unchanged."
-SimSpec == SimInit /\ [][SimNext]_vars
+\*   every step is a SimNext step or a step that leaves simVars unchanged."
+SimSpec == SimInit /\ [][SimNext]_simVars
 
 -----------------------------------------------------------------------------
 
@@ -152,13 +185,15 @@ SimSpec == SimInit /\ [][SimNext]_vars
 \*   Roles to the set of records whose field kind is a member of the set
 \*   containing "None", "Accept", "Refuse", "Query" and "Error", field v is a
 \*   member of the union of Versions and the set containing 0, and field reason
-\*   is a member of Reasons."
+\*   is a member of Reasons; and data is a member of the set of functions from
+\*   Roles to Params."
 SimTypeOK ==
     /\ view \in [Roles -> States \cup Failures]
     /\ inbox \in [Roles -> Seq(Messages)]
     /\ table \in [Roles -> SimTables]
     /\ result \in [Roles -> [kind : {"None", "Accept", "Refuse", "Query", "Error"},
                              v : Versions \cup {0}, reason : Reasons]]
+    /\ data \in [Roles -> Params]
 
 \* In English: "When both sides are done, both accepted the same version or
 \* both refused [S6]. A side that refuses closes the connection [R1], so a
@@ -192,4 +227,19 @@ SimAcceptsHighest ==
 \*   "Server"."
 SameStateWhenQuiet ==
     (\A r \in Roles : inbox[r] = <<>>) => view["Client"] = view["Server"]
+
+\* In English: "When both sides accepted, both end with the same version
+\* data, the agreement of the two sides' data for the chosen version, so
+\* their connections derive the same diffusion mode [R2]. The reference
+\* client returns acceptVersion vData vData' on MsgReplyVersions
+\* (Client.hs 213-215), and every combined field is commutative."
+\* Literally: "SimAgreedData is defined as: if, for all r in Roles, result of
+\*   r's kind equals "Accept", then, for all r in Roles, data of r equals Agree
+\*   of table of r applied to result of r's v and table of Peer of r applied
+\*   to result of r's v; and data of "Client" equals data of "Server"."
+SimAgreedData ==
+    (\A r \in Roles : result[r].kind = "Accept") =>
+        /\ \A r \in Roles :
+               data[r] = Agree(table[r][result[r].v], table[Peer(r)][result[r].v])
+        /\ data["Client"] = data["Server"]
 =============================================================================
