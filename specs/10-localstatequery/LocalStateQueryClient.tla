@@ -13,7 +13,11 @@
 (*     unbuffered acquireResultChan.                                       *)
 (*   - runQueryMaxItems() first acquires the volatile tip if `acquired` is *)
 (*     false (the implicit acquire), then sends MsgQuery and waits on the  *)
-(*     unbuffered queryResultChan. It never releases what it acquired.     *)
+(*     unbuffered queryResultChan. Before the fix it never released what   *)
+(*     it acquired; with it (ReleaseImplicit), endCall releases it as the  *)
+(*     public call returns, still holding busyMutex.                       *)
+(*   - Some calls make two queries (GetEpochNo, GetCurrentProtocolParams:  *)
+(*     the era, then a query for that era); Query2 is such a call.         *)
 (*   - release() sends MsgRelease and clears `acquired`, whatever the      *)
 (*     flag was.                                                           *)
 (*   - The handler (one goroutine, protocol.Protocol's recvLoop) sets      *)
@@ -36,6 +40,8 @@
 (*   FreshImplicitSnapshot does a query made with no explicit acquire      *)
 (*                         answer from a state at least as new as the      *)
 (*                         chain when the call began?                      *)
+(*   OneSnapshotPerCall    do all the queries of one call answer from the  *)
+(*                         same ledger state?                              *)
 (*   and, by TLC's deadlock check, does every call return, also when Stop  *)
 (*   lands with a request outstanding?                                     *)
 (*                                                                         *)
@@ -51,6 +57,9 @@
 (*   [G1] gOuroboros 61046085 protocol/localstatequery/client.go: acquire, *)
 (*        release, runQueryMaxItems, handleAcquired, handleFailure,        *)
 (*        handleResult, Start; protocol/protocol.go: stop, enqueueMessage. *)
+(*   [G2] gOuroboros 35982911 (branch                                      *)
+(*        fix/localstatequery-implicit-acquire) client.go: endCall,        *)
+(*        runQueryMaxItems; GetEpochNo makes two queries.                  *)
 (*                                                                         *)
 (* Not modelled: query encodings, the cached era (currentEra), timeouts    *)
 (* (an expired timeout is a protocol error, like the violations here), and *)
@@ -70,14 +79,22 @@ CONSTANTS
     \* Fixes and designs, FALSE in gOuroboros today:
     GateImmutable,          \* acquiring the immutable tip on OldVersion returns an error
     ReleaseChecksAcquired,  \* Release with nothing acquired returns an error
-    ReleaseImplicit,        \* a query that acquired implicitly releases afterwards
+    ReleaseImplicit,        \* a call whose query acquired implicitly releases as it returns [G2]
+    ReleasePerQuery,        \* (rejected design) release after each implicitly acquired query
     \* Mutations, FALSE in gOuroboros today, to check the checks:
     NoMutex,                \* calls do not take busyMutex
     KeepAcquiredOnFailure   \* handleFailure leaves `acquired` set
 
 None == "none"
 
-AllOps == {"AcqPoint", "AcqVolatile", "AcqImmutable", "Release", "Query"}
+AllOps == {"AcqPoint", "AcqVolatile", "AcqImmutable", "Release", "Query",
+           "Query2"}
+
+\* In English: "The calls that query: Query makes one query, Query2 two."
+QueryOps == {"Query", "Query2"}
+
+\* In English: "How many queries call o makes."
+QueriesIn(o) == IF o = "Query2" THEN 2 ELSE 1
 
 \* In English: "The acquire target each Acquire call names."
 OpTarget(o) == CASE o = "AcqPoint"     -> "SpecificPoint"
@@ -111,6 +128,8 @@ VARIABLES
     cont,       \* cont[c]: after an acquire answer, "unlock" or "query"
     implicit,   \* implicit[c]: this query acquired the volatile tip itself
     startTip,   \* startTip[c]: the server's tip when the call began
+    qleft,      \* qleft[c]: queries call c has still to make
+    seen,       \* seen[c]: the snapshots call c's results came from
     busy,       \* who holds busyMutex, or None
     acquired,   \* the client's `acquired` flag
     explicit,   \* ghost: the state held was acquired by an Acquire call
@@ -126,13 +145,14 @@ VARIABLES
     stopped,    \* Stop was called
     done,       \* DoneChan closed: the result channels are closed
     wrong,      \* ghost: some call received an answer to another call's request
-    stale       \* ghost: an implicit query answered from a state older than its start
+    stale,      \* ghost: an implicit query answered from a state older than its start
+    split       \* ghost: two queries of one call answered from different states
 
-vars == <<cpc, op, left, cont, implicit, startTip, busy, acquired, explicit,
-          cstate, sstate, toServer, toClient, hpc, hmsg, pending, snap, tip,
-          stopped, done, wrong, stale>>
+vars == <<cpc, op, left, cont, implicit, startTip, qleft, seen, busy,
+          acquired, explicit, cstate, sstate, toServer, toClient, hpc, hmsg,
+          pending, snap, tip, stopped, done, wrong, stale, split>>
 
-callerVars == <<cpc, op, left, cont, implicit, startTip>>
+callerVars == <<cpc, op, left, cont, implicit, startTip, qleft, seen>>
 serverVars == <<sstate, pending, snap, tip>>
 
 NoMsg == Msg(None, None, None, None)
@@ -146,13 +166,15 @@ Init ==
     /\ cont = [c \in Callers |-> "unlock"]
     /\ implicit = [c \in Callers |-> FALSE]
     /\ startTip = [c \in Callers |-> 0]
+    /\ qleft = [c \in Callers |-> 0]                \* no call has begun
+    /\ seen = [c \in Callers |-> {}]                \* no results yet
     /\ busy = None /\ acquired = FALSE /\ explicit = FALSE
     /\ cstate = "StIdle" /\ sstate = "StIdle"
     /\ toServer = <<>> /\ toClient = <<>>
     /\ hpc = "idle" /\ hmsg = NoMsg
     /\ pending = NoMsg /\ snap = None /\ tip = 0
     /\ stopped = FALSE /\ done = FALSE
-    /\ wrong = FALSE /\ stale = FALSE
+    /\ wrong = FALSE /\ stale = FALSE /\ split = FALSE
 
 -----------------------------------------------------------------------------
 (* Sending [G1]: protocol.Protocol refuses to queue once stopped, and its  *)
@@ -183,16 +205,19 @@ AcquireMsg(c, tg) ==
 -----------------------------------------------------------------------------
 (* The calls [G1].                                                         *)
 
-\* In English: "Goroutine c picks its next call and notes the chain tip."
+\* In English: "Goroutine c picks its next call, notes the chain tip, and
+\* starts with all of the call's queries still to make and none answered."
 Begin(c) ==
     /\ cpc[c] = "start" /\ left[c] > 0
     /\ \E o \in Ops :
          /\ op' = [op EXCEPT ![c] = o]
          /\ cpc' = [cpc EXCEPT ![c] = IF NoMutex THEN "body" ELSE "lock"]
+         /\ qleft' = [qleft EXCEPT ![c] = QueriesIn(o)]   \* queries to make
+    /\ seen' = [seen EXCEPT ![c] = {}]                    \* no results yet
     /\ left' = [left EXCEPT ![c] = @ - 1]
     /\ startTip' = [startTip EXCEPT ![c] = tip]
     /\ UNCHANGED <<cont, implicit, busy, acquired, explicit, cstate, toServer,
-                   toClient, hpc, hmsg, stopped, done, wrong, stale>>
+                   toClient, hpc, hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED serverVars
 
 \* In English: "Take busyMutex when nobody holds it."
@@ -200,9 +225,10 @@ Lock(c) ==
     /\ cpc[c] = "lock" /\ busy = None
     /\ busy' = c
     /\ cpc' = [cpc EXCEPT ![c] = "body"]
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, cont, implicit, startTip, acquired, explicit,
                    cstate, toServer, toClient, hpc, hmsg, stopped, done,
-                   wrong, stale>>
+                   wrong, stale, split>>
     /\ UNCHANGED serverVars
 
 \* In English: "Acquire, AcquireVolatileTip, AcquireImmutableTip: with the
@@ -215,8 +241,9 @@ BodyAcquire(c) ==
                /\ UNCHANGED <<cstate, toServer, cont>>
           ELSE /\ SendThen(c, AcquireMsg(c, OpTarget(op[c])), "acq_wait")
                /\ cont' = [cont EXCEPT ![c] = "unlock"]
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, implicit, startTip, busy, acquired, explicit,
-                   toClient, hpc, hmsg, stopped, done, wrong, stale>>
+                   toClient, hpc, hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED serverVars
 
 \* In English: "Release: with the check, nothing acquired is an error;
@@ -230,22 +257,25 @@ BodyRelease(c) ==
                \* release() clears the flag only once SendMessage succeeded.
                /\ acquired' = (acquired /\ (stopped \/ done))
                /\ explicit' = (explicit /\ (stopped \/ done))
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, cont, implicit, startTip, busy, toClient, hpc,
-                   hmsg, stopped, done, wrong, stale>>
+                   hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED serverVars
 
-\* In English: "A query: if nothing is acquired, first acquire the volatile
-\* tip and come back; otherwise send MsgQuery [G1 runQueryMaxItems]."
+\* In English: "A call's next query: if nothing is acquired, first acquire
+\* the volatile tip and come back; otherwise send MsgQuery
+\* [G1 runQueryMaxItems]."
 BodyQuery(c) ==
-    /\ cpc[c] \in {"body", "query"} /\ op[c] = "Query"
+    /\ cpc[c] \in {"body", "query"} /\ op[c] \in QueryOps   \* a query call, at a query
     /\ IF ~acquired /\ cpc[c] = "body"
           THEN /\ SendThen(c, AcquireMsg(c, "VolatileTip"), "acq_wait")
                /\ cont' = [cont EXCEPT ![c] = "query"]
                /\ implicit' = [implicit EXCEPT ![c] = TRUE]
           ELSE /\ SendThen(c, Msg("MsgQuery", None, c, None), "query_wait")
                /\ UNCHANGED <<cont, implicit>>
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, startTip, busy, acquired, explicit, toClient, hpc,
-                   hmsg, stopped, done, wrong, stale>>
+                   hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED serverVars
 
 \* In English: "Waiting on acquireResultChan: take the handler's acquire
@@ -258,40 +288,66 @@ AcqWait(c) ==
           /\ wrong' = (wrong \/ hmsg.for /= c)
           /\ cpc' = [cpc EXCEPT ![c] =
                        IF hmsg.type = "MsgAcquired" THEN cont[c] ELSE "unlock"]
-          /\ explicit' = (hmsg.type = "MsgAcquired" /\ op[c] /= "Query")
+          /\ explicit' = (hmsg.type = "MsgAcquired" /\ op[c] \notin QueryOps)
        \/ /\ done
           /\ cpc' = [cpc EXCEPT ![c] = "unlock"]
           /\ UNCHANGED <<hpc, wrong, explicit>>
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, cont, implicit, startTip, busy, acquired, cstate,
-                   toServer, toClient, hmsg, stopped, done, stale>>
+                   toServer, toClient, hmsg, stopped, done, stale, split>>
     /\ UNCHANGED serverVars
 
 \* In English: "Waiting on queryResultChan: take the result, or return once
 \* the channel is closed. A result from a snapshot older than the chain at
-\* the start of a call that did not acquire explicitly is stale."
+\* the start of a call that did not acquire explicitly is stale. A result
+\* from a different snapshot than an earlier result of the same call splits
+\* the call. Then: with the rejected per-query design, release what this
+\* query acquired; else make the call's next query; else, with the fix,
+\* release what the call acquired; else return."
 QueryWait(c) ==
     /\ cpc[c] = "query_wait"
     /\ \/ /\ hpc = "give" /\ hmsg.type = "MsgResult"
           /\ hpc' = "idle"
           /\ wrong' = (wrong \/ hmsg.for /= c)
           /\ stale' = (stale \/ (~explicit /\ hmsg.snap < startTip[c]))
+          /\ split' = (split \/ (seen[c] /= {} /\ hmsg.snap \notin seen[c]))
+          /\ seen' = [seen EXCEPT ![c] = @ \union {hmsg.snap}]   \* note the snapshot
+          /\ qleft' = [qleft EXCEPT ![c] = @ - 1]                 \* one query done
           /\ cpc' = [cpc EXCEPT ![c] =
-                       IF ReleaseImplicit /\ implicit[c] THEN "rel_implicit"
+                       IF ReleasePerQuery /\ implicit[c] THEN "rel_query"
+                       ELSE IF qleft[c] > 1 THEN "body"
+                       ELSE IF ReleaseImplicit /\ implicit[c] THEN "rel_implicit"
                        ELSE "unlock"]
        \/ /\ done
           /\ cpc' = [cpc EXCEPT ![c] = "unlock"]
-          /\ UNCHANGED <<hpc, wrong, stale>>
+          /\ UNCHANGED <<hpc, wrong, stale, split, qleft, seen>>
     /\ UNCHANGED <<op, left, cont, implicit, startTip, busy, acquired, explicit,
                    cstate, toServer, toClient, hmsg, stopped, done>>
     /\ UNCHANGED serverVars
 
-\* In English: "(Design option) release what this query acquired itself."
+\* In English: "The fix [G2 endCall]: as the call returns, still holding
+\* busyMutex, release what its queries acquired; release() clears the flag
+\* only once SendMessage succeeded."
 ReleaseOwn(c) ==
     /\ cpc[c] = "rel_implicit"
     /\ SendThen(c, Msg("MsgRelease", None, c, None), "unlock")
-    /\ acquired' = (acquired /\ (stopped \/ done))
+    /\ acquired' = (acquired /\ (stopped \/ done))   \* cleared unless shutting down
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, cont, implicit, startTip, busy, explicit, toClient,
-                   hpc, hmsg, stopped, done, wrong, stale>>
+                   hpc, hmsg, stopped, done, wrong, stale, split>>
+    /\ UNCHANGED serverVars
+
+\* In English: "The rejected design: release what this one query acquired,
+\* then make the call's next query (which acquires again), or return."
+ReleaseOwnQuery(c) ==
+    /\ cpc[c] = "rel_query"
+    /\ SendThen(c, Msg("MsgRelease", None, c, None),
+                IF qleft[c] > 0 THEN "body" ELSE "unlock")  \* next query, or return
+    /\ acquired' = (acquired /\ (stopped \/ done))   \* cleared unless shutting down
+    /\ implicit' = [implicit EXCEPT ![c] = FALSE]     \* the next query acquires anew
+    /\ UNCHANGED <<qleft, seen>>
+    /\ UNCHANGED <<op, left, cont, startTip, busy, explicit, toClient,
+                   hpc, hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED serverVars
 
 \* In English: "Return: release busyMutex and go on to the next call."
@@ -300,8 +356,9 @@ Unlock(c) ==
     /\ busy' = IF busy = c THEN None ELSE busy
     /\ implicit' = [implicit EXCEPT ![c] = FALSE]
     /\ cpc' = [cpc EXCEPT ![c] = IF left[c] > 0 THEN "start" ELSE "done"]
+    /\ UNCHANGED <<qleft, seen>>
     /\ UNCHANGED <<op, left, cont, startTip, acquired, explicit, cstate,
-                   toServer, toClient, hpc, hmsg, stopped, done, wrong, stale>>
+                   toServer, toClient, hpc, hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED serverVars
 
 -----------------------------------------------------------------------------
@@ -325,7 +382,7 @@ HandlerRead ==
                                 []   OTHER                  -> acquired
                  /\ explicit' = IF m.type = "MsgFailure" THEN FALSE ELSE explicit
     /\ toClient' = Tail(toClient)
-    /\ UNCHANGED <<busy, toServer, stopped, done, wrong, stale>>
+    /\ UNCHANGED <<busy, toServer, stopped, done, wrong, stale, split>>
     /\ UNCHANGED callerVars /\ UNCHANGED serverVars
 
 -----------------------------------------------------------------------------
@@ -345,7 +402,7 @@ ServerRead ==
     /\ toServer' = Tail(toServer)
     /\ UNCHANGED <<tip>>
     /\ UNCHANGED <<busy, acquired, explicit, cstate, toClient, hpc, hmsg,
-                   stopped, done, wrong, stale>>
+                   stopped, done, wrong, stale, split>>
     /\ UNCHANGED callerVars
 
 \* In English: "In StAcquiring, acquire: the volatile tip is the chain tip;
@@ -363,7 +420,7 @@ ServerAcquire ==
           /\ toClient' = Append(toClient, Msg("MsgFailure", None, pending.for, None))
     /\ UNCHANGED <<pending, tip>>
     /\ UNCHANGED <<busy, acquired, explicit, cstate, toServer, hpc, hmsg,
-                   stopped, done, wrong, stale>>
+                   stopped, done, wrong, stale, split>>
     /\ UNCHANGED callerVars
 
 \* In English: "In StQuerying, answer from the snapshot held."
@@ -373,7 +430,7 @@ ServerResult ==
     /\ toClient' = Append(toClient, Msg("MsgResult", None, pending.for, snap))
     /\ UNCHANGED <<pending, snap, tip>>
     /\ UNCHANGED <<busy, acquired, explicit, cstate, toServer, hpc, hmsg,
-                   stopped, done, wrong, stale>>
+                   stopped, done, wrong, stale, split>>
     /\ UNCHANGED callerVars
 
 \* In English: "The chain grows."
@@ -382,7 +439,7 @@ Tick ==
     /\ tip' = tip + 1
     /\ UNCHANGED <<sstate, pending, snap>>
     /\ UNCHANGED <<busy, acquired, explicit, cstate, toServer, toClient, hpc,
-                   hmsg, stopped, done, wrong, stale>>
+                   hmsg, stopped, done, wrong, stale, split>>
     /\ UNCHANGED callerVars
 
 -----------------------------------------------------------------------------
@@ -393,7 +450,7 @@ Stop ==
     /\ MayStop /\ ~stopped
     /\ stopped' = TRUE
     /\ UNCHANGED <<busy, acquired, explicit, cstate, toServer, toClient, hpc,
-                   hmsg, done, wrong, stale>>
+                   hmsg, done, wrong, stale, split>>
     /\ UNCHANGED callerVars /\ UNCHANGED serverVars
 
 \* In English: "Once stopped, or after a protocol error on either side, the
@@ -404,7 +461,7 @@ Teardown ==
     /\ stopped \/ cstate = "Violation" \/ sstate = "Violation"
     /\ done' = TRUE
     /\ UNCHANGED <<busy, acquired, explicit, cstate, toServer, toClient, hpc,
-                   hmsg, stopped, wrong, stale>>
+                   hmsg, stopped, wrong, stale, split>>
     /\ UNCHANGED callerVars /\ UNCHANGED serverVars
 
 \* In English: "Every call has returned."
@@ -416,6 +473,7 @@ Next ==
     \/ \E c \in Callers :
           \/ Begin(c) \/ Lock(c) \/ BodyAcquire(c) \/ BodyRelease(c)
           \/ BodyQuery(c) \/ AcqWait(c) \/ QueryWait(c) \/ ReleaseOwn(c)
+          \/ ReleaseOwnQuery(c)
           \/ Unlock(c)
     \/ HandlerRead
     \/ ServerRead \/ ServerAcquire \/ ServerResult \/ Tick
@@ -445,6 +503,11 @@ FlagMatchesState ==
 \* In English: "A query made with no explicit acquire never answers from a
 \* state older than the chain when the call began."
 FreshImplicitSnapshot == ~stale
+
+\* In English: "All the queries of one call answer from the same ledger
+\* state, so a call that asks for the era and then for that era's data
+\* never decodes one state's answer with another state's era."
+OneSnapshotPerCall == ~split
 
 \* Reachability probes, EXPECTED to be violated.
 \* "Stop never lands while a call waits for its answer."
