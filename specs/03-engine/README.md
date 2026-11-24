@@ -112,7 +112,7 @@ allowance's condition that the snapshot's state gave the peer agency fails
 none. Without that condition, a message that started arriving while we held
 agency would be admitted once our own send handed agency to the peer, instead
 of being refused as sent out of turn. Reported as gOuroboros issue #3089;
-pull request #3090 (in review) adds `TestInboundAdmissionGenerationDrift`, a
+pull request #3090 (merged) added `TestInboundAdmissionGenerationDrift`, a
 table of drift zero, one after a peer-agency snapshot, one after a
 local-agency snapshot, and two, each row shown to fail under the mutation it
 guards.
