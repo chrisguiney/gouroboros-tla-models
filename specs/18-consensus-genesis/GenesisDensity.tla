@@ -129,9 +129,13 @@ ClipLen(p) == Cardinality({i \in 1..Len(Suffix(p)) : Suffix(p)[i] < FirstAfter})
 \* when it is empty (an empty fragment's head is its anchor).
 ClipHead(p) == IF ClipLen(p) = 0 THEN LoESlot ELSE Suffix(p)[ClipLen(p)]
 
-\* In English: the clipped fragment's last point, which names the block it
-\* ends at (the list of slots leading to it) [G3 470].
-ClipPoint(p) == SubSeq(cand[p], 1, LoELen + ClipLen(p))
+\* In English: the clipped fragment's AF.lastPoint [G3 470]: its OLDEST
+\* block, the first after the LoE tip, or the LoE tip itself when the
+\* fragment is empty (an empty fragment's last point is its anchor). A
+\* block is named by the list of slots leading to it. GDD compares only
+\* these: two peers whose clipped fragments start with the same block are
+\* never compared, however they continue (Note [Chain disagreement]).
+ClipPoint(p) == SubSeq(cand[p], 1, LoELen + Min(ClipLen(p), 1))
 
 \* In English: GDD skips a peer that has sent no header yet [G5].
 Considered == {p \in Peers : Len(cand[p]) > 0}
@@ -195,19 +199,21 @@ GoFrag(p) == SubSeq(cand[p], GoAnchorLen(p) + 1, Len(cand[p]))
 GoBlocks(p) == Len(GoFrag(p))
 
 \* In English: TipSlot: the fragment's tip, its anchor when it is empty.
-GoTip(p) == IF GoBlocks(p) = 0 THEN GoAnchorSlot(p) ELSE Last(GoFrag(p))
+FragTip(f, a) == IF Len(f) = 0 THEN a ELSE Last(f)
 
-\* In English: BlockCountInWindow(sgen). "Exact" counts blocks at slots s
-\* with s - anchor <= sgen, the window of [G3]. "Simple" is
-\* SimpleChainFragment: none when the tip is not after the anchor, all when
-\* the window covers the whole fragment, otherwise blocks * sgen / span
-\* rounded down.
-GoCount(p) ==
+\* In English: BlockCountInWindow(sgen) of fragment f anchored at slot a.
+\* "Exact" counts blocks at slots s with s - a <= sgen, the window of
+\* [G3]. "Simple" is SimpleChainFragment: none when the tip is not after
+\* the anchor, all when the window covers the whole fragment, otherwise
+\* blocks * sgen / span rounded down.
+FragCount(f, a) ==
     IF Counter = "Exact"
-    THEN Cardinality({i \in 1..GoBlocks(p) : GoFrag(p)[i] - GoAnchorSlot(p) <= SGen})
-    ELSE IF GoTip(p) <= GoAnchorSlot(p) THEN 0
-         ELSE IF SGen >= GoTip(p) - GoAnchorSlot(p) THEN GoBlocks(p)
-         ELSE (GoBlocks(p) * SGen) \div (GoTip(p) - GoAnchorSlot(p))
+    THEN Cardinality({i \in 1..Len(f) : f[i] - a <= SGen})
+    ELSE IF FragTip(f, a) <= a THEN 0
+         ELSE IF SGen >= FragTip(f, a) - a THEN Len(f)
+         ELSE (Len(f) * SGen) \div (FragTip(f, a) - a)
+
+GoCount(p) == FragCount(GoFrag(p), GoAnchorSlot(p))
 
 \* In English: Compare(a, b) > 0: more blocks in the window; on equal
 \* counts, more blocks in total.
@@ -222,6 +228,27 @@ Scan(best, i) ==
     IF i > NPeers THEN best
     ELSE Scan(IF GoBetter(i, best) THEN i ELSE best, i + 1)
 GoChoice == Scan(1, 2)
+
+\* In English: the same Preferred over the candidates as the reference's
+\* chain selection sees them: each trimmed to at most k blocks past the
+\* LoE tip [G4] (every candidate holds the LoE tip), then cut at the same
+\* anchor as GoFrag. GDD's bounds above still use the whole candidates.
+GoTrimFrag(p) == SubSeq(cand[p], GoAnchorLen(p) + 1,
+                        Min(Len(cand[p]), LoELen + K))
+GoTrimBetter(a, b) ==
+    LET ca == FragCount(GoTrimFrag(a), GoAnchorSlot(a))
+        cb == FragCount(GoTrimFrag(b), GoAnchorSlot(b))
+    IN  \/ ca > cb
+        \/ ca = cb /\ Len(GoTrimFrag(a)) > Len(GoTrimFrag(b))
+RECURSIVE TrimScan(_, _)
+TrimScan(best, i) ==
+    IF i > NPeers THEN best
+    ELSE TrimScan(IF GoTrimBetter(i, best) THEN i ELSE best, i + 1)
+GoTrimChoice == TrimScan(1, 2)
+
+\* In English: the reference count of the trimmed candidate: its first k
+\* blocks after the LoE tip that lie in the window.
+TrimLb(p) == Cardinality({i \in 1..Min(K, Len(Suffix(p))) : Suffix(p)[i] < FirstAfter})
 
 \* In English: the chain the node ends up on.
 Adopted == IF Adopt = "Go" THEN cand[GoChoice] ELSE RefAdopted
@@ -281,6 +308,10 @@ GoChoiceLosesOnlyOnTie ==
             /\ Lb(q) = Lb(GoChoice)
             /\ ClipPoint(q) # ClipPoint(GoChoice)
 
+\* In English: on candidates trimmed to the LoE, Preferred picks one with
+\* the most blocks in the window among the trimmed candidates.
+GoTrimmedPicksDensest == \A p \in Peers : TrimLb(p) <= TrimLb(GoTrimChoice)
+
 \* In English: the node never selects more than k blocks past the prefix
 \* every candidate shares [G4].
 LoEBound == Len(Adopted) <= LoELen + K
@@ -310,4 +341,16 @@ ProbeDenserShorter ==
 \* GDD drops a peer that is not idle and has not shown its whole window.
 ProbeDropWhileSending ==
     ~\E p \in RefLosing : ~idle[p] /\ Lb(p) < Ub(p)
+
+\* Two peers' clipped fragments start with the same block but end at
+\* different ones, so GDD does not compare them (needs three peers: two
+\* share a block past the prefix all three share).
+ProbeSameFirstBlock ==
+    ~\E p, q \in Considered :
+        /\ ClipPoint(p) = ClipPoint(q)
+        /\ SubSeq(cand[p], 1, LoELen + ClipLen(p))
+              # SubSeq(cand[q], 1, LoELen + ClipLen(q))
+
+\* Trimming to the LoE changes Preferred's pick.
+ProbeTrimChangesChoice == GoTrimChoice = GoChoice
 =============================================================================
