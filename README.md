@@ -37,9 +37,11 @@ Read these in order. Each one builds on the last.
    negotiation, queries, and simultaneous open.
 9. [Model 06: block-fetch](specs/06-blockfetch/README.md): matching each
    batch to its request, and stopping with ranges outstanding.
-10. [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
+10. [Model 07: tx-submission](specs/07-txsubmission/README.md): the
+    acknowledgement window and the blocking-style rules.
+11. [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
     rules, size limits and timeouts.
-11. [Glossary](docs/glossary.md): keep it open while you read anything else.
+12. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.

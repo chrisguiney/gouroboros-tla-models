@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch peersharing models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -107,6 +107,9 @@ handshake: ## Check the handshake model (every config, Bug ones expected to fail
 
 blockfetch: ## Check the block-fetch model (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/06-blockfetch
+
+txsubmission: ## Check the tx-submission model (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/07-txsubmission
 
 peersharing: ## Check the peer-sharing model (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/08-peersharing
