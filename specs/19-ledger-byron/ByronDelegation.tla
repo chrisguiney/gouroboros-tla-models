@@ -44,8 +44,9 @@
 (*        delegations activated at slot 0.                                 *)
 (*   [G2] Tick 152-180 and ApplyPayloadCbor 220-240: the fold and tick.   *)
 (*   [G3] scheduleCertificate 282-353: the checks of [R1].                 *)
-(*   [G4] activate 355-368, delegateIsActiveForOther 370-381: like [R2],  *)
-(*        but the delegate only has to be free of OTHER delegators.       *)
+(*   [G4] activate and delegateIsActive (PR 3174 head faad03cd): [R2].   *)
+(*        On main (delegateIsActiveForOther) the delegate only had to be  *)
+(*        free of OTHER delegators; Mutation "OwnEntryExempt" is main.    *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets
 
@@ -129,10 +130,14 @@ RefActivate(st, x) ==
     ELSE st
 
 \* In English: the gOuroboros activation: the delegate must not be active
-\* for a different delegator (delegateIsActiveForOther).
+\* for any delegator, the delegator itself included (delegateIsActive).
+\* "OwnEntryExempt" is main before the fix: only other delegators count, so
+\* re-delegating to the current delegate rewrites the activation slot.
 GoActivate(st, x) ==
-    IF /\ (Mutation = "NoInjectivity"
-           \/ ~\E g \in Genesis : g # x.dlg /\ st.dms[g] = x.del)
+    IF /\ CASE Mutation = "NoInjectivity"  -> TRUE
+              [] Mutation = "OwnEntryExempt" ->
+                   ~\E g \in Genesis : g # x.dlg /\ st.dms[g] = x.del
+              [] OTHER -> x.del \notin Range(st.dms)
        /\ (st.dws[x.dlg] < x.at \/ x.at = 0)
     THEN [dms |-> [st.dms EXCEPT ![x.dlg] = x.del],
           dws |-> [st.dws EXCEPT ![x.dlg] = x.at]]
@@ -226,6 +231,9 @@ VerdictsAgree == lastRef = lastGo
 \* In English: gOuroboros' active delegation map is the reference's.
 MapsAgree == gDms = rDms
 
+\* In English: gOuroboros records the same activation slot for every key.
+SlotsAgree == gDws = rDws
+
 \* In English: no two genesis keys share an active delegate, so a delegate
 \* signs for at most one genesis key.
 GoInjective == \A g, h \in Genesis : g # h => gDms[g] # gDms[h]
@@ -254,11 +262,6 @@ ProbeRevoke == ~(rDms[GenesisDeleg] = GenesisDeleg)
 
 \* The genesis outsider moves to the other genesis key.
 ProbeMove == ~(\E g \in Genesis : g # GenesisDeleg /\ rDms[g] = GenesisDel)
-
-\* The two sides record a different activation slot for some key (a
-\* re-delegation to the delegate already active: the reference does
-\* nothing, gOuroboros rewrites the slot). The maps still agree.
-ProbeSlotsDiffer == gDws = rDws
 
 \* A payload is rejected by both.
 ProbeRejected == lastRef

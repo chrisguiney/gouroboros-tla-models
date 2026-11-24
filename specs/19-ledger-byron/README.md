@@ -101,17 +101,18 @@ any key, for any epoch up to two ahead. g1 starts delegated to d1.
 | Once per epoch | `(e, vk) ∉ eks` | `keyEpochDelegations` | `keyEpochDelegations` |
 | Once per slot | `(s+2k, vk) ∉ sds` | same | same |
 | Activation | after 2k slots | same | same |
-| Delegate free | `vk_d ∉ range dms` | `notMemberR` (self included) | free of *other* delegators |
+| Delegate free | `vk_d ∉ range dms` | `notMemberR` (self included) | main: free of *other* delegators; PR 3174: self included |
 | Earlier slot | `s_p < s` | `s_p < s` or `s = 0` | same as reference |
 | Pruning | — | schedules `≥ s+1`, key-epochs `≥ e` | same |
 
-Invariants: `VerdictsAgree`, `MapsAgree`, `GoInjective`, `GoPruned`,
-`OncePerEpoch`, `GoDelayed`.
+Invariants: `VerdictsAgree`, `MapsAgree`, `SlotsAgree`, `GoInjective`,
+`GoPruned`, `OncePerEpoch`, `GoDelayed`.
 
 | Config | States | Result |
 | --- | --- | --- |
-| `ByronDelegation.cfg` (to slot 4) | 35,751 | passes |
-| `ByronDelegationDeep.cfg` (to slot 5) | 95,541 | passes |
+| `ByronDelegation.cfg` (to slot 4) | 21,587 | passes |
+| `ByronDelegationDeep.cfg` (to slot 5) | 49,448 | passes |
+| `ByronDelegationOwnEntryBug.cfg` | main: own entry exempt | `SlotsAgree` |
 | `ByronDelegationWideEpochBug.cfg` | epoch + 2 accepted | `VerdictsAgree` |
 | `ByronDelegationNoDelayBug.cfg` | activates in its own block | `MapsAgree` |
 | `ByronDelegationNoInjectivityBug.cfg` | delegate collision ignored | `GoInjective` |
@@ -119,11 +120,21 @@ Invariants: `VerdictsAgree`, `MapsAgree`, `GoInjective`, `GoPruned`,
 | `ByronDelegationNoKeyEpochBug.cfg` | key-epoch not recorded | `OncePerEpoch` |
 | `ByronDelegationLongDelayBug.cfg` | activation at 2k + 1 | `GoDelayed` |
 
-Probes: `ProbeRevoke`, `ProbeMove`, `ProbeRejected`, and
-`ProbeSlotsDiffer`: on a re-delegation to the delegate already active, the
-reference does nothing and gOuroboros rewrites the activation slot. The maps
-still agree in every state, and the slot is read only by the earlier-slot
-check, which a later schedule always passes; so the difference is benign.
+Probes: `ProbeRevoke`, `ProbeMove`, `ProbeRejected`.
+
+Activation slots (PR 3174 head `faad03cd`). On main, `activate` checked
+only that no *other* delegator held the delegate, so a re-delegation to the
+delegate already active rewrote the activation slot where the reference
+does nothing. The maps agreed in every state and the slot is read only by
+the earlier-slot check, which a later schedule always passes, so the
+difference was harmless; but the model only probed for it
+(`ProbeSlotsDiffer`), and the Go table test required it to happen, which
+would have failed the suite on a fix. Review follow-up: `activate` now
+follows `Activation.hs` (`delegateIsActive`, own entry included), the model's
+gOuroboros side does the same, `SlotsAgree` checks it, and
+`ByronDelegationOwnEntryBug.cfg` reproduces main (`Mutation =
+"OwnEntryExempt"`). The state counts fell because the two sides' slots no
+longer diverge.
 
 The earlier-slot check itself is unreachable while slots increase: two
 schedules of one delegator always have increasing activation slots. The Go
@@ -154,4 +165,6 @@ Branch `test/ledger-byron-model`:
   `ByronDelegation.cfg` chains (2,779 states, about 48,000 blocks) comparing
   verdicts, maps, schedules and key-epochs with a transcription of the
   reference. Mutations of the epoch window, key-epoch, same-slot, genesis,
-  injectivity, 2k delay and both prunes are each caught.
+  injectivity, 2k delay and both prunes are each caught. Since PR 3174 head
+  `faad03cd` it also compares activation slots (`require.Equal`), which
+  fails on main's `activate`.
