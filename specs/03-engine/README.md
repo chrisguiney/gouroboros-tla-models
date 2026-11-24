@@ -105,10 +105,17 @@ message, a later one joins only if the state allows pipelining and lists its
 type, and otherwise waits for the next agency window.
 
 The existing gOuroboros tests (`protocol/message_scanner_test.go`) cover
-refusal outside agency and many pipelined cases. A direct test of the two
-rules above for a protocol that does not pipeline - drift of one accepted
-after a peer-agency state, drift of one refused after a local-agency state,
-drift of two refused - is not among them.
+refusal outside agency and many pipelined cases. Mutating the code found
+which parts of these rules they pin down: removing the one-generation
+allowance, or accepting any drift, fails existing tests, but removing the
+allowance's condition that the snapshot's state gave the peer agency fails
+none. Without that condition, a message that started arriving while we held
+agency would be admitted once our own send handed agency to the peer, instead
+of being refused as sent out of turn. Reported as gOuroboros issue #3089;
+pull request #3090 (in review) adds `TestInboundAdmissionGenerationDrift`, a
+table of drift zero, one after a peer-agency snapshot, one after a
+local-agency snapshot, and two, each row shown to fail under the mutation it
+guards.
 
 ### Not in this slice
 

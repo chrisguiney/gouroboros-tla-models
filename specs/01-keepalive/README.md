@@ -313,8 +313,8 @@ nothing is left running once the muxer stops. Model 02 put bytes and the
 connection around it and showed the harm: the restarted instance can handle a
 message, running application callbacks, after `stopProtocols`. A Go test then
 reproduced it with chain-sync on gOuroboros's `main`, 10 times out of 10.
-Reported as gOuroboros issue #3085; pull request #3087, in review, fixes
-it: each restarting server has its own guarded `Stop`, and `stopProtocols`
+Reported as gOuroboros issue #3085 and fixed by pull request #3087 (merged):
+each restarting server has its own guarded `Stop`, and `stopProtocols`
 calls it.
 The constant `ShutdownStopsServer` switches between the two behaviors.
 
@@ -354,8 +354,8 @@ limit.
   [The restart lifecycle](#the-restart-lifecycle-keepalivelifecycletla).
 - **A shutdown bug in every restarting server**: during a connection close, a
   restart could start an instance after the old one was stopped, and serve a
-  message. Reproduced in Go, reported as gOuroboros issue #3085; the fix,
-  pull request #3087, is in review. Same section, and
+  message. Reproduced in Go, reported as gOuroboros issue #3085, fixed by
+  pull request #3087 (merged). Same section, and
   [Model 02, part 2](../02-connection/README.md#part-2-stop-and-shutdown-during-a-restart-muxhandovertla).
 - **gOuroboros follows the specification** on every within-run cell,
   including cookies and size limits.
