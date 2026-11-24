@@ -39,9 +39,11 @@
 (*        mini-protocol, and the connection is torn down.                  *)
 (*   [R9] Server.hs 42-44: MsgAcceptVersion carries encodeData of the      *)
 (*        agreed data, the result of acceptableVersion local remote.       *)
-(*   [R10] Codec.hs 210-240 (decodeVersions): the keys of a version table  *)
-(*        must be distinct and ascending, or decoding fails ("unordered    *)
-(*        version"); the codec encodes them ascending (encodeVersions).    *)
+(*   [R10] Codec.hs 210-241 (decodeVersions): a key the version codec     *)
+(*        does not recognise is skipped (235); each recognised key must be *)
+(*        greater than the previous recognised key, or decoding fails      *)
+(*        ("unordered version", 237-240). The codec encodes keys ascending *)
+(*        (encodeVersions, 197-207).                                       *)
 (*   [S7] miniprotocols.tex 572-573: "the negotiated version data is sent  *)
 (*        back using MsgAcceptVersion"; 653-656: the version numbers in    *)
 (*        the table "are unique and appear in ascending order".            *)
@@ -71,8 +73,8 @@ CONSTANTS
     StrictQueryReply,   \* TRUE: gOuroboros, a client refuses MsgQueryReply it did not ask for
     HandleReplyVersions,\* TRUE: the reference, a client in StConfirm takes MsgProposeVersions as MsgReplyVersions
     AcceptOwnData,      \* TRUE: gOuroboros main, MsgAcceptVersion carries the server's own data, not the agreed data
-    CheckKeyOrder,      \* TRUE: the reference, a version table whose keys are not ascending fails to decode
-    UnorderedKeys,      \* TRUE: the client may send its version table with the keys out of order
+    KeyOrderRule,       \* "Recognised": the reference, recognised keys must ascend; "Every": every key must; "None": gOuroboros main
+    ClientKeyOrders,    \* the wire orders the client may use: "Ascending", "UnknownAnywhere", or "Any"
     Mutation            \* "None", or a safeguard switched off to prove an invariant can fail
 
 Roles    == {"Client", "Server"}
@@ -123,26 +125,53 @@ Min(S) == CHOOSE x \in S : \A y \in S : x <= y
 \* A message is a record; fields a type does not use hold placeholders.
 \* `vmap` is the table of MsgProposeVersions and MsgQueryReply; `v` and `p`
 \* the version and data of MsgAcceptVersion; `reason` that of MsgRefuse;
-\* `big` marks a message over the state's size limit [S3]; `asc` says the
-\* keys of `vmap` arrived in ascending order [S7][R10].
-MsgA(t, vm, v, p, r, big, asc) ==
-    [type |-> t, vmap |-> vm, v |-> v, p |-> p, reason |-> r, big |-> big, asc |-> asc]
+\* `big` marks a message over the state's size limit [S3]; `keys` lists
+\* the table's keys in the order they arrived on the wire [S7][R10].
+MsgK(t, vm, v, p, r, big, keys) ==
+    [type |-> t, vmap |-> vm, v |-> v, p |-> p, reason |-> r, big |-> big, keys |-> keys]
+
+\* A version number no receiver recognises, such as one from a newer
+\* release. It is on the wire only: the reference skips it [R10], so it is
+\* never in `vmap`.
+Unknown == Max(Versions) + 1
+WireKeys == Versions \cup {Unknown}
+
+\* In English: "The elements of S in ascending order, as a sequence."
+AscSeq(S) == [i \in 1..Cardinality(S) |->
+                 CHOOSE x \in S : Cardinality({y \in S : y < x}) = i - 1]
+\* In English: "Every order of the elements of S, as a sequence."
+Perms(S) == {f \in [1..Cardinality(S) -> S] : \A x \in S : \E i \in DOMAIN f : f[i] = x}
+
 \* In English: "A message whose table, if any, is in ascending order", as
 \* every encoder sends it (encodeVersions [R10]; gOuroboros sorts map keys).
-Msg(t, vm, v, p, r, big) == MsgA(t, vm, v, p, r, big, TRUE)
+Msg(t, vm, v, p, r, big) == MsgK(t, vm, v, p, r, big, AscSeq(DOMAIN vm))
 
 Messages == [type : MsgTypes, vmap : Tables(Params), v : Versions \cup {0},
-             p : Params, reason : Reasons, big : BOOLEAN, asc : BOOLEAN]
+             p : Params, reason : Reasons, big : BOOLEAN, keys : Seq(WireKeys)]
 
-\* In English: "The key orders a client may send table t in: ascending,
-\* or, with UnorderedKeys and at least two keys, out of order too."
+\* In English: "The keys in sequence k ascend" (all of them), and "the
+\* recognised keys in k ascend", ignoring any Unknown key [R10].
+AllAscend(k) == \A i, j \in DOMAIN k : i < j => k[i] < k[j]
+RecognisedAscend(k) ==
+    \A i, j \in DOMAIN k : (i < j /\ k[i] \in Versions /\ k[j] \in Versions) => k[i] < k[j]
+
+\* In English: "The wire orders a client may send table t in: ascending;
+\* or (UnknownAnywhere) with or without an Unknown key at any place and the
+\* recognised keys ascending, which the reference accepts; or (Any) every
+\* order, with or without the Unknown key."
 KeyOrders(t) ==
-    IF UnorderedKeys /\ Cardinality(DOMAIN t) >= 2 THEN BOOLEAN ELSE {TRUE}
+    LET plain == Perms(DOMAIN t) \cup Perms(DOMAIN t \cup {Unknown}) IN
+    CASE ClientKeyOrders = "Ascending"       -> {AscSeq(DOMAIN t)}
+    []   ClientKeyOrders = "UnknownAnywhere" -> {k \in plain : RecognisedAscend(k)}
+    []   ClientKeyOrders = "Any"             -> plain
 
 \* In English: "The receiver rejects m's table for its key order: the
-\* reference fails to decode an unordered table [R10]; gOuroboros main does
-\* not look at the order."
-BadKeyOrder(m) == CheckKeyOrder /\ ~m.asc
+\* reference when its recognised keys do not ascend [R10]; the strict
+\* variant when any keys do not ascend; gOuroboros main never."
+BadKeyOrder(m) ==
+    CASE KeyOrderRule = "Recognised" -> ~RecognisedAscend(m.keys)
+    []   KeyOrderRule = "Every"      -> ~AllAscend(m.keys)
+    []   KeyOrderRule = "None"       -> FALSE
 
 \* What a side ends with. `kind` is "None" (not finished), "Accept"
 \* (version v agreed), "Refuse" (the server refused with `reason`),
@@ -340,9 +369,9 @@ ClientPropose ==
     /\ SilentPeer /= "Client"
     /\ view["Client"] = "StPropose"
     /\ view' = [view EXCEPT !["Client"] = "StConfirm"]
-    /\ \E asc \in KeyOrders(table["Client"]) :                \* keys in order, or not
+    /\ \E k \in KeyOrders(table["Client"]) :                  \* the keys' wire order
          inbox' = [inbox EXCEPT !["Server"] =
-                     Append(@, MsgA("MsgProposeVersions", table["Client"], 0, NoParams, "None", FALSE, asc))]
+                     Append(@, MsgK("MsgProposeVersions", table["Client"], 0, NoParams, "None", FALSE, k))]
     /\ UNCHANGED <<table, result, heard, rogueLeft>>
 
 \* In English: "A server in StPropose that is not silent reads the oldest
@@ -403,15 +432,16 @@ Inject(r, m) ==
 
 \* The messages the rogue peer picks from: each kind of the receive table,
 \* plus an accept for every version and data, so the client's checks on
-\* MsgAcceptVersion are all exercised; with UnorderedKeys, also each
-\* table-carrying message with every version, keys out of order.
+\* MsgAcceptVersion are all exercised; with ClientKeyOrders "Any", also
+\* each table-carrying message with every version in every wire order.
 FullTable == [v \in Versions |-> RefParams]
 RogueSet ==
     {KindMsg(k) : k \in Kinds} \cup
     {Msg("MsgAcceptVersion", <<>>, v, p, "None", FALSE) : v \in Versions, p \in Params} \cup
-    {MsgA(t, FullTable, 0, NoParams, "None", FALSE, FALSE) :
-        t \in IF KeyOrders(FullTable) = BOOLEAN
-              THEN {"MsgProposeVersions", "MsgQueryReply"} ELSE {}}
+    {MsgK(t, FullTable, 0, NoParams, "None", FALSE, k) :
+        t \in IF ClientKeyOrders = "Any"
+              THEN {"MsgProposeVersions", "MsgQueryReply"} ELSE {},
+        k \in KeyOrders(FullTable)}
 
 Progress == ClientPropose \/ ServerRecv \/ ClientRecv \/ \E r \in Roles : DoneRecv(r)
 
@@ -536,15 +566,30 @@ AcceptCarriesNegotiatedData ==
       ]_vars
 
 \* In English: "In every step where a side reads a message whose version
-\* table arrived with its keys out of order, that side hangs up [S7][R10]."
-\* A read is the only step that shortens r's inbox.
+\* table arrived with its recognised keys out of order, that side hangs up
+\* [R10]." A read is the only step that shortens r's inbox.
+Reads(r) ==
+    /\ view[r] \in {"StPropose", "StConfirm"}
+    /\ inbox[r] /= <<>>
+    /\ Len(inbox'[r]) < Len(inbox[r])
 UnorderedMapsRejected ==
     [][\A r \in Roles :
-         (/\ view[r] \in {"StPropose", "StConfirm"}
-          /\ inbox[r] /= <<>>
-          /\ Len(inbox'[r]) < Len(inbox[r])
-          /\ ~Head(inbox[r]).asc)
+         (Reads(r) /\ ~RecognisedAscend(Head(inbox[r]).keys))
          => view'[r] = "Violation"
+      ]_vars
+
+\* In English: "In every step where a side reads a table whose recognised
+\* keys ascend, the order of the keys is not why it hangs up": an
+\* unrecognised key anywhere is skipped, as the reference skips it [R10].
+\* Checked as: such a read ends in violation only for a reason other than
+\* the order (too big, or not legal in the state).
+UnknownKeysTolerated ==
+    [][\A r \in Roles :
+         (/\ Reads(r)
+          /\ RecognisedAscend(Head(inbox[r]).keys)
+          /\ ~Head(inbox[r]).big
+          /\ IsLegal(view[r], Head(inbox[r]).type))
+         => view'[r] /= "Violation"
       ]_vars
 
 \* In English: "It is never the case that both sides believe they may send."

@@ -68,7 +68,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N11](#n11) | network | Handshake simultaneous open | Supported: a `MsgProposeVersions` received in `Confirm` is read as `MsgReplyVersions` | main: not supported (a proposal in `Confirm` is an error); PR: supported | Supported | does not conform → conforms | Open PR #3127 |
 | [N12](#n12) | network | Handshake `MsgQueryReply` without a query | Taken as a query result | Error | Silent | conforms (stricter) | Recorded (model 05) |
 | [N13](#n13) | network | Handshake `MsgAcceptVersion` carries the server's own data | Sends the negotiated (agreed) data | Sends its own version data for the chosen version; each side combines the flags itself | The negotiated data is sent back | does not conform | Fixed on local branch `fix/handshake-accept-negotiated-data` (model 05 `AcceptCarriesNegotiatedData`). No wrong outcome: the reference client recomputes the agreement |
-| [N14](#n14) | network | Handshake version keys out of order | Expects keys in ascending order; others fail to decode | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Fixed on local branch `fix/handshake-version-key-order` (model 05 `UnorderedMapsRejected`); checks every key, the reference only recognised ones |
+| [N14](#n14) | network | Handshake version keys out of order | Recognised keys must ascend, else a decode failure; unrecognised keys skipped | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Fixed on local branch `fix/handshake-version-key-order` (model 05 `UnorderedMapsRejected`, `UnknownKeysTolerated`); checks recognised keys only, as the reference does |
 | [N15](#n15) | network | Block-fetch `Stop` with ranges outstanding | Collects every answer, then sends `MsgClientDone`; a demotion that times out closes the connection | main: gives up after 250 ms without `MsgClientDone` and allows `Start`, so a late reply reaches the new run; PR: abandons only when owed, latches, stops the muxer | `MsgClientDone` only from `StIdle` | does not conform → conforms | Open PR #3114 (chain-sync's identical defect was fixed by merged #3092) |
 | [N16](#n16) | network | Block-fetch `RangeDoneFunc` for a request that was never sent | A request's receiver exists only once the request is sent | main: the shutdown drain calls `RangeDoneFunc` for a request whose `RequestRange` returned an error; PR: not | Silent (library API) | conforms | Open PR #3114. Library defect; Dingo works around it |
 | [N17](#n17) | network | Block-fetch `StBusy` timeout default | 60 s | main: `NewConfig` sets `BatchStartTimeout` 5 s; PR: 60 s | 60 s | conforms (stricter) → conforms | Open PR #3114 (Dingo already sets 60 s) |
@@ -299,12 +299,12 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 
 **Handshake version keys out of order** (kind 4: gOuroboros outside the spec)
 
-- **What differs.** Reference: expects keys in ascending order; others fail to decode. gOuroboros: accepts any order; rejects duplicates.
+- **What differs.** Reference: recognised keys must ascend, else the message fails to decode; unrecognised keys are skipped. gOuroboros: accepts any order; rejects duplicates.
 - **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, "Client and Server Implementation" (handshake), lines 655-656: "version numbers ... in the version table are unique and appear in ascending order"
-- **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Codec.hs` 101-102 ("encodes proposed map in ascending order and it expects to receive them in this order")
+- **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Codec.hs` 101-102 ("encodes proposed map in ascending order and it expects to receive them in this order"), 228-241 (`decodeVersions`: an unrecognised key is skipped, a recognised key must exceed the previous recognised key)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/collection_decode.go` 85 (duplicate check only)
 - **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/handshake-version-key-order`; model 05 `HandshakeKeyOrderBug.cfg` reproduces main. The fix checks every key; the reference skips keys it does not recognise
+- **Status.** Fixed on local branch `fix/handshake-version-key-order`; model 05 `HandshakeKeyOrderBug.cfg` reproduces main. The fix follows the reference: only recognised keys must ascend, and an unrecognised key out of order is accepted. A strict every-key check would refuse such a peer (`HandshakeKeyOrderEveryBug.cfg`)
 
 ### N15
 
