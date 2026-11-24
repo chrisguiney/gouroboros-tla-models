@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -39,6 +39,14 @@ keepalive-lifecycle: ## Check the gOuroboros server restart against Stop and con
 	$(KEEPALIVE) -config KeepAliveLifecycleStopBug.cfg KeepAliveLifecycle.tla || true
 	$(KEEPALIVE) -config KeepAliveLifecycleSlotBug.cfg KeepAliveLifecycle.tla || true
 	$(KEEPALIVE) -config KeepAliveLifecycleCloseBug.cfg KeepAliveLifecycle.tla || true
+
+CONNECTION := cd specs/02-connection && ../../bin/tlc
+
+connection: ## Check that messages survive a restart, and why each mechanism matters
+	$(CONNECTION) -config MuxHandover.cfg MuxHandover.tla
+	$(CONNECTION) -config MuxHandoverNoCarryBug.cfg MuxHandover.tla || true
+	$(CONNECTION) -config MuxHandoverAdmitAllBug.cfg MuxHandover.tla || true
+	$(CONNECTION) -config MuxHandoverNoResumeBug.cfg MuxHandover.tla || true
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \
