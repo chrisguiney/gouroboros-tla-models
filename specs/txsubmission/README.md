@@ -92,6 +92,9 @@ Window of 2, 4 fresh ids, 5 requests:
 | `TxSubmissionV16ClampBug.cfg` | reference, V16 | gOuroboros | | **fails** `ClampsOverWindow` |
 | `TxSubmissionV16Clamp.cfg` | reference, V16 | gOuroboros, clamping | 572 | passes, every invariant |
 | `TxSubmissionV16ClampRogue.cfg` | rogue, V16 | fixed, clamping | 2,716 | passes |
+| `TxSubmissionV16ClampBlockingBug.cfg` | rogue, V16 | gOuroboros, clamping, first draft | | **fails** `ClientSendsLegal` |
+| `TxSubmissionV16ClampBlocking.cfg` | rogue, V16 | gOuroboros, clamping | 5,634 | passes the four invariants it lists |
+| `TxSubmissionZeroClampProbeBug.cfg` | reference, V16 | gOuroboros, clamping | | **fails** `ProbeNoZeroClamp` (reachable) |
 
 Three findings:
 
@@ -139,6 +142,41 @@ request the reference refuses and its FIFO stays within the window
 (`TxSubmissionV16ClampRogue.cfg`): clamping replaces only the window check,
 not the acknowledgement or style checks. Before V16 the switch changes
 nothing. Branch `fix/txsubmission-clamp-request-window` makes the change.
+
+**The clamp's first draft sent an empty blocking reply (PR #3195 review).**
+The first draft (`4b7d5262`) clamped every request, blocking or not, and
+checked the callback's reply against the clamped count. A blocking request
+that leaves ids unacknowledged on a full window was clamped to zero and
+answered with an empty `MsgReplyTxIds`, which [S3] forbids and [R2] cannot
+decode. The reference never gets there: [R3] throws `RequestBlocking` (and
+`RequestedNothing`) before it uses the clamped count, so with nothing left
+the clamp is `min(req, maxUnacked)`, which is at least one. A reference or
+reference-following server never sends such a request, so only a server that
+breaks [S3] reaches it.
+
+The model shared the gap. `ClientReplyIds` made an honest client send at
+least one id whenever `b` and `n > 0`, so the clamped bound `hi = 0` left no
+reply step and the client could only send `MsgDone`; the empty reply was
+never generated. `lo` now follows the code: at least one id only when the
+bound the client checks, `hi`, is at least one. With that, mutation
+`clampBlocking` (the first draft) fails `ClientSendsLegal` in three steps:
+fill the window, then a blocking request for one id
+(`TxSubmissionV16ClampBlockingBug.cfg`). The fix (`b2a2f787`): a clamping
+client refuses a blocking request for no ids or one that leaves ids
+unacknowledged, in every version, before it clamps (`blockOK` in
+`ClientAcceptsIds`); `TxSubmissionV16ClampBlocking.cfg` passes against a
+rogue server. This is the blocking half of the style rules the
+`fix/txsubmission-client-request-rules` branch (PR #3128) adds; the two use
+the same refusal messages.
+
+A non-blocking request on a full window is clamped to zero and answered with
+an empty reply, as [R4] says ("can be none for a non-blocking request").
+`ProbeNoZeroClamp` shows the model reaches it against a reference server with
+a larger window. The code still calls `RequestTxIdsFunc` with a count of
+zero there: the callback is how a gOuroboros caller learns the
+acknowledgement (Dingo's `AcknowledgeOffered`), which [R3] applies itself
+(`Seq.drop ackNo`) even when the count is zero. Not modelled; the model has
+no callback.
 
 ### The receive table
 
@@ -234,7 +272,9 @@ request has no timeout, so the test now stops the server itself.
 | --- | --- | --- | --- | --- |
 | Blocking or not? | Blocking iff nothing remains after the ack [S3][S5] | Same; client throws `RequestBlocking`/`RequestNonBlocking` [R3]; server picks by its FIFO [R6] | Client does not check; server lets the caller choose, and never leaves anything | **Defect**, both sides |
 | Request for nothing? | Blocking: req > 0; non-blocking: ack or req non-zero [S3] | `RequestedNothing` [R3] | Not checked by either side | **Defect**, both sides |
-| Over the window | Error before V16, clamp from V16 [S4] | Same, by version [R4] | Always an error | **Differs** from V16; fixed on a branch |
+| Over the window | Error before V16, clamp from V16 [S4] | Same, by version [R4] | PR #3195 head `8f6c6d5b`: error before V16, clamp from V16; a blocking request is refused before clamping when it asks for nothing or leaves ids | Agrees once PR #3195 merges |
+| Blocking request on a full window | Must not be sent; reply non-empty [S3] | `RequestBlocking` before the clamp [R3] | PR #3195 first draft `4b7d5262`: clamped to zero, empty reply; head `8f6c6d5b`: refused | **Defect** in the first draft; fixed at `8f6c6d5b` |
+| Non-blocking request on a full window, from V16 | Reply "with at most as many as fit" [S4] | Clamped to zero, empty reply [R4] | Same; the callback is called with zero to deliver the acknowledgement | Agrees |
 | Empty blocking reply | Not allowed [S3] | Fails to decode [R2] | Client will not send one for req > 0; server refuses it for req > 0 | Agrees once req = 0 is refused |
 | `MsgDone` | Only from `StTxIdsBlocking` [S2][S3] | Same [R1][R5] | Same (`StateMap`, `handleDone`) | Agrees |
 | `MsgRequestTxs` ids | Announced, outstanding, no duplicates, not already asked for [S3] | Distinct and in the FIFO; "already asked for" not checked [R3] | Distinct and in the FIFO | Agrees with the reference |
@@ -284,10 +324,12 @@ cd specs/txsubmission
 ../../bin/tlc -config TxSubmissionV16.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionV16Clamp.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionV16ClampRogue.cfg TxSubmission.tla
+../../bin/tlc -config TxSubmissionV16ClampBlocking.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionTable.cfg TxSubmissionTable.tla | grep '^<<'
 # expected to fail
 for c in GouroborosBug EmptyReplyBug ServerBug ClientBug ClientBlockingBug \
-         RogueClientBug V16Bug V16ClampBug NoWindowBug KeepsAckedBug ProbesBug; do
+         RogueClientBug V16Bug V16ClampBug V16ClampBlockingBug NoWindowBug \
+         KeepsAckedBug ProbesBug ZeroClampProbeBug; do
   ../../bin/tlc -config TxSubmission$c.cfg TxSubmission.tla || true
 done
 ```

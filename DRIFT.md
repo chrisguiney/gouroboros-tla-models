@@ -75,7 +75,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N18](#n18) | network | Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client) | 65,535 bytes | 2,500,000 bytes, because a `MsgBlock` that arrives early is judged against `StBusy` | 65,535 bytes | does not conform | Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives |
 | [N19](#n19) | network | Block-fetch `RangeTimeout` | None | A whole range must finish within about 36 hours by default | Silent | conforms (implementation choice) | gOuroboros addition. Local only: it ends the caller's wait and sends nothing |
 | [N20](#n20) | network | Tx-submission blocking and non-blocking request rules | Client throws `ProtocolErrorRequestBlocking`, `RequestNonBlocking`, `RequestedNothing`; server picks the style from its FIFO | main: the client does not check; `Server.RequestTxIds` lets the caller pick either style; PR: both enforced | Blocking iff nothing stays unacknowledged; ack or request non-zero | does not conform → conforms | Open PR #3128 (Dingo always sends blocking requests for at least one id) |
-| [N21](#n21) | network | Tx-submission request over the window from `NodeToNodeV_16` | From V16 the client clamps the reply to its own window | Always a protocol error | From V16 not an error; reply with as many as fit | does not conform | Fixed on local branch `fix/txsubmission-clamp-request-window` (model `txsubmission` `ClampsOverWindow`) |
+| [N21](#n21) | network | Tx-submission request over the window from `NodeToNodeV_16` | From V16 the client clamps the reply to its own window | Always a protocol error | From V16 not an error; reply with as many as fit | does not conform | Fixed in PR #3195 head `8f6c6d5b` (model `txsubmission` `ClampsOverWindow`; the first draft `4b7d5262` clamped a blocking request to an empty reply, `TxSubmissionV16ClampBlockingBug.cfg`) |
 | [N22](#n22) | network | Tx-submission duplicate ids in one reply | Not checked | Refused | Silent | conforms (stricter) | Recorded; a reference peer never sends duplicates |
 | [N23](#n23) | network | Peer-sharing: how many peers the server sends | `min(10, amount)` | `min(amount, 230)` | At most the amount requested, bounded by the message size | conforms (implementation choice) | Policy choice |
 | [N24](#n24) | network | Peer-sharing request when peer sharing was negotiated off | Mini-protocol not registered; a segment for it is `UnknownMiniProtocol` and tears the connection down | Answers an empty list | Such a node does not run the server | conforms (implementation choice) | Deliberate (documented in the package) |
@@ -385,7 +385,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../TxSubmission/Outbound.hs` 95-104 (`TxOutboundV_2`), 150 (`reqNo0 \`min\` maxReqNo`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/txsubmission/client.go` 331-339
 - **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/txsubmission-clamp-request-window`; model `txsubmission` `TxSubmissionV16ClampBug.cfg` reproduces main. Default windows (10 each side) never trigger it
+- **Status.** Fixed in PR #3195, head `8f6c6d5b`; model `txsubmission` `TxSubmissionV16ClampBug.cfg` reproduces main. Default windows (10 each side) never trigger it. Review: the first draft `4b7d5262` clamped a blocking request on a full window to zero and sent an empty blocking reply (`TxSubmissionV16ClampBlockingBug.cfg`); `8f6c6d5b` refuses a blocking request for nothing or with ids left before clamping, as `Outbound.hs` 182-185 does. A non-blocking request clamped to zero gets an empty reply, as the reference does (`ProbeNoZeroClamp`)
 
 ### N22
 
@@ -1113,7 +1113,7 @@ No pull request yet (decide whether and how to fix):
 - **N13** Handshake `MsgAcceptVersion` carries the server's own data. Fixed on local branch `fix/handshake-accept-negotiated-data`.
 - **N14** Handshake version keys out of order. Fixed on local branch `fix/handshake-version-key-order`.
 - **N18** Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client). Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives.
-- **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed on local branch `fix/txsubmission-clamp-request-window`.
+- **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed in PR #3195 (head `8f6c6d5b`).
 - **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Not fixed; needs a mempool-change signal from the application.
 - **N28** Local-tx-monitor `MsgGetMeasures`. Not fixed; a missing feature.
 - **N32** Other servers that do not restart after `MsgDone`. Not fixed. Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.

@@ -80,7 +80,10 @@ CONSTANTS
     Client,
     \* A mutation that removes one safeguard, to prove an invariant can
     \* fail: "none", "noWindowCheck" (the client forgets the window check),
-    \* or "serverKeepsAcked" (the server forgets to drop acknowledged ids).
+    \* "serverKeepsAcked" (the server forgets to drop acknowledged ids), or
+    \* "clampBlocking" (a clamping gOuroboros client clamps a blocking
+    \* request that leaves ids unacknowledged instead of refusing it first,
+    \* as the clamp's first draft did).
     Mutation
 
 \* In English: "The roles that behave honestly: every role except "rogue"."
@@ -191,20 +194,32 @@ RefAcceptsReply(b, n, k) == k <= n /\ (b => k >= 1)
 \* In English: "Does the client accept MsgRequestTxIds(b, a, n)? gOuroboros
 \* checks the acknowledgement and the window [G2]; the fix adds the style
 \* rules; a rogue client accepts anything. With ClientClamps, from V16 the
-\* window is not a reason to refuse: the reply is clamped instead [R4]."
+\* window is not a reason to refuse: the reply is clamped instead [R4].
+\* A clamping client also refuses, in every version and before it clamps,
+\* a blocking request for no ids (RequestedNothing [R3]) or one that leaves
+\* ids unacknowledged (RequestBlocking [R3]), so a blocking request it
+\* answers is never clamped to zero ids; the mutation "clampBlocking"
+\* removes the second refusal, which the clamp's first draft lacked."
 \* Literally: "ClientAcceptsIds of b, a, n and U is defined as: letting window
 \*   be (Mutation equals "noWindowCheck", or V16 is true and ClientClamps is
 \*   true, or the length of U minus a plus n is less than or equal to
-\*   MaxUnacked), and goOK be (a is less than or equal to the length of U, and
-\*   window): in the case Client equals "reference", RefAcceptsIds of b, a, n
-\*   and U; in the case Client equals "gouroboros", goOK; in the case Client
-\*   equals "fixed", goOK and StyleRules of b, a, n and U; in the case Client
-\*   equals "rogue", TRUE."
+\*   MaxUnacked), blockOK be (if ClientClamps is true, then it is not the case
+\*   that b is true and n equals 0, and if Mutation does not equal
+\*   "clampBlocking", it is not the case that b is true and the length of U
+\*   minus a is greater than 0), and goOK be (a is less than or
+\*   equal to the length of U, and window, and blockOK): in the case Client
+\*   equals "reference", RefAcceptsIds of b, a, n and U; in the case Client
+\*   equals "gouroboros", goOK; in the case Client equals "fixed", goOK and
+\*   StyleRules of b, a, n and U; in the case Client equals "rogue", TRUE."
 ClientAcceptsIds(b, a, n, U) ==
-    LET window == \/ Mutation = "noWindowCheck"
-                  \/ V16 /\ ClientClamps                 \* clamped, not refused [R4]
-                  \/ Len(U) - a + n <= MaxUnacked
-        goOK   == a <= Len(U) /\ window
+    LET window  == \/ Mutation = "noWindowCheck"
+                   \/ V16 /\ ClientClamps                \* clamped, not refused [R4]
+                   \/ Len(U) - a + n <= MaxUnacked
+        blockOK == ClientClamps =>
+                     /\ ~(b /\ n = 0)                     \* RequestedNothing [R3]
+                     /\ Mutation # "clampBlocking"
+                          => ~(b /\ Len(U) - a > 0)        \* RequestBlocking [R3]
+        goOK    == a <= Len(U) /\ window /\ blockOK
     IN CASE Client = "reference"  -> RefAcceptsIds(b, a, n, U)
          [] Client = "gouroboros" -> goOK
          [] Client = "fixed"      -> goOK /\ StyleRules(b, a, n, U)
@@ -355,8 +370,10 @@ ServerRequestTxs ==
     /\ UNCHANGED <<cU, sU, sAck, nextId>>
 
 \* In English: "The client replies with k fresh ids. An honest client sends
-\* at least one to a blocking request for at least one (gOuroboros refuses
-\* to send an empty one [G4]) and no more than it may (with ClientClamps,
+\* at least one to a blocking request when its bound hi is at least one
+\* (gOuroboros refuses to send an empty one for a count of at least one
+\* [G4]; with ClientClamps the count it checks is the clamped one, so a
+\* blocking request clamped to zero gets an empty reply) and no more than it may (with ClientClamps,
 \* the gOuroboros client too sends only what fits from V16 [R4]); a rogue
 \* client sends up to one more than asked. Each side drops the acknowledged ids and
 \* appends the new ones; the gOuroboros server then acknowledges this reply
@@ -366,7 +383,7 @@ ServerRequestTxs ==
 \*   pend's b, a be pend's a, n be pend's n, hi be (if Client equals "rogue"
 \*   then n plus 1, else if Client equals "reference" or ClientClamps is true
 \*   then RefRoom of a, n and cU, else n), and lo be (if Client does not equal
-\*   "rogue" and b is true and n is greater than 0 then 1, else 0): there
+\*   "rogue" and b is true and hi is greater than 0 then 1, else 0): there
 \*   exists a k in lo through Min of hi and (MaxIds plus 1 minus nextId) such
 \*   that, letting reply be Fresh of nextId and k, accepted be
 \*   ServerAcceptsReply of b, a, n and k, and legal be RefAcceptsReply of b, n
@@ -386,7 +403,7 @@ ClientReplyIds ==
            hi == IF Client = "rogue" THEN n + 1
                  ELSE IF Client = "reference" \/ ClientClamps THEN RefRoom(a, n, cU)
                  ELSE n
-           lo == IF Client # "rogue" /\ b /\ n > 0 THEN 1 ELSE 0
+           lo == IF Client # "rogue" /\ b /\ hi > 0 THEN 1 ELSE 0
        IN \E k \in lo..Min(hi, MaxIds + 1 - nextId) :
             LET reply    == Fresh(nextId, k)
                 accepted == ServerAcceptsReply(b, a, n, k)
@@ -559,4 +576,11 @@ ProbeWindowNeverFull == Len(cU) < MaxUnacked
 \*   equals "StTxIdsNonBlocking" and pend's a is greater than 0."
 ProbeNoPartialAck ==
     ~(st = "StTxIdsNonBlocking" /\ pend.a > 0)
+\* In English: "No non-blocking request asking for at least one id is ever
+\* clamped to zero: run against a clamping config (V16, a full window)."
+\* Literally: "ProbeNoZeroClamp is defined as: it is not the case that st
+\*   equals "StTxIdsNonBlocking" and pend's n is greater than 0 and RefRoom of
+\*   pend's a, pend's n and cU equals 0."
+ProbeNoZeroClamp ==
+    ~(st = "StTxIdsNonBlocking" /\ pend.n > 0 /\ RefRoom(pend.a, pend.n, cU) = 0)
 =============================================================================
