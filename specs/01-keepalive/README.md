@@ -258,6 +258,43 @@ implementation where it is silent.
   value the reference's `TODO` asks for, where the specification says 60 s.
   It gives up on a slow server sooner; stricter, not broken.
 
+## The restart lifecycle (`KeepAliveLifecycle.tla`)
+
+`KeepAlive.tla` says *what* must happen after `MsgDone`: a new run. A second,
+smaller module checks *how* gOuroboros does it, one level down: its
+goroutines. Each step is one line, or one locked block, of gOuroboros code, so
+TLC tries every way two goroutines can interleave:
+
+- **The restart**, run by the old instance's receive loop when `MsgDone`
+  arrives (`handleDone` in `protocol/keepalive/server.go`): stop the old
+  instance (`StopForRestart`), install a new one under `protocolMu`, start it.
+- **A stopper**, one of: `Server.Stop()`, which reads the current instance
+  under the lock and stops it; or connection shutdown (`stopProtocols` in
+  `connection.go`), which reads `ProtocolInstance()`, stops it, then stops
+  the muxer.
+
+```sh
+make keepalive-lifecycle
+```
+
+| Config | Checks | Result |
+| --- | --- | --- |
+| `KeepAliveLifecycleStopBug.cfg` | The fix as first written: `Server.Stop()` racing a restart. | **Fails after 5 steps**: the restart stops the old instance; `Stop` reads that same, already stopped, instance and stops it again, which does nothing; the restart installs and starts a new instance. `Stop` returned, and keep-alive is still served. |
+| `KeepAliveLifecycle.cfg` | The same, with `StopGuard`: `Stop` sets a flag under the lock, and the restart checks it before installing. | Passes: 31 distinct states. Never two instances running; `Stop` always wins. |
+| `KeepAliveLifecycleCloseBug.cfg` | Connection shutdown racing a restart, guard on. | **Fails**: shutdown stops the old instance and the muxer while the restart is between its steps; the restart then starts its new instance on a stopped muxer, which fails to register and reports "could not register protocol with muxer" as a protocol error during a clean close. |
+
+The first result changed the gOuroboros fix before it was published: the
+guard was added, with a Go test (`TestServerStopWinsOverRestart`) that calls
+`Stop` from the server's `DoneFunc`, which runs inside the same window. The
+test failed 3 times out of 3 without the guard.
+
+The second result is not specific to keep-alive. Connection shutdown never
+calls a server's `Stop`, so no guard inside the server can see it, and every
+gOuroboros server that restarts after `MsgDone` (chain-sync, block-fetch,
+tx-submission, peer-sharing, and the Leios servers) has the same window. No
+instance is left running, since the muxer has stopped; the cost is a
+spurious error while closing.
+
 ## The Go tests this model drove
 
 `protocol/keepalive/statemap_model_test.go` in gOuroboros holds the same 30
@@ -270,6 +307,7 @@ cells as `make keepalive-table`.
 | `TestDoneCannotBeLeft` | No transition leaves `StDone` within a run; only `MsgDone` in `StClient` enters it. |
 | `TestClientTimesOutWhenServerFallsSilent` | S2's `StServer` timeout: a client whose ping is never answered gives up. |
 | `TestStateMapTimeoutsMatchSpec` | The per-state timeouts are 97 s and 60 s. |
+| `TestServerStopWinsOverRestart` | `KeepAliveLifecycleStopBug.cfg`'s trace: `Stop` during a restart still stops the server. |
 
 Against gOuroboros today, exactly six cells fail, all from the bug: the server
 after `MsgDone` (five kinds), and `MsgDone` followed by a new run. A prototype
@@ -282,7 +320,13 @@ limit.
 ## What the model found
 
 - **A bug**: the keep-alive server does not restart after `MsgDone`. See
-  [The bug](#the-bug).
+  [The bug](#the-bug). Reported as gOuroboros issue #3076, fixed by pull
+  request #3077.
+- **A bug in that fix, caught before publishing**: `Stop` could lose to a
+  restart in progress. See
+  [The restart lifecycle](#the-restart-lifecycle-keepalivelifecycletla).
+- **A shutdown race in every restarting server**: a clean connection close
+  can report a protocol error. Same section.
 - **gOuroboros follows the specification** on every within-run cell,
   including cookies and size limits.
 - **The gOuroboros client never sends `MsgDone`.** The reference client sends

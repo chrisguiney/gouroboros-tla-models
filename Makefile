@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -33,6 +33,11 @@ keepalive-bugs: ## Show the keep-alive counterexamples, including the gOuroboros
 	$(KEEPALIVE) -config KeepAliveGouroborosBug.cfg KeepAlive.tla || true
 	$(KEEPALIVE) -config KeepAliveRogueBug.cfg KeepAlive.tla || true
 	$(KEEPALIVE) -config KeepAliveNoTimeoutBug.cfg KeepAlive.tla || true
+
+keepalive-lifecycle: ## Check the gOuroboros server restart against Stop and connection close
+	$(KEEPALIVE) -config KeepAliveLifecycle.cfg KeepAliveLifecycle.tla
+	$(KEEPALIVE) -config KeepAliveLifecycleStopBug.cfg KeepAliveLifecycle.tla || true
+	$(KEEPALIVE) -config KeepAliveLifecycleCloseBug.cfg KeepAliveLifecycle.tla || true
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \
