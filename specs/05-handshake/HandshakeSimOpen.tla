@@ -19,11 +19,21 @@
 (*        which carries the handshake, reads any segment regardless of its *)
 (*        direction bit, so the peer's proposal reaches the client.        *)
 (*                                                                         *)
-(* gOuroboros: protocol/handshake/handshake.go has no StConfirm transition *)
-(* for MsgProposeVersions, and muxer/muxer.go (readLoop) routes a segment  *)
-(* by its direction bit, so a peer's proposal, sent as an initiator, goes  *)
-(* to the handshake server role, which a dialling connection does not run. *)
-(* HandleReplyVersions = FALSE models either refusal as a violation.       *)
+(* gOuroboros at 61046085: protocol/handshake/handshake.go has no         *)
+(* StConfirm transition for MsgProposeVersions, and muxer/muxer.go         *)
+(* (readLoop) routes a segment by its direction bit, so a peer's proposal, *)
+(* sent as an initiator, goes to the handshake server role, which a        *)
+(* dialling connection does not run. HandleReplyVersions = FALSE models    *)
+(* either refusal as a violation.                                          *)
+(*                                                                         *)
+(* gOuroboros on branch fix/handshake-simultaneous-open: the muxer gives   *)
+(* a handshake segment to whichever role is registered before Start, the   *)
+(* client takes MsgProposeVersions in StConfirm, and Client.Start returns  *)
+(* only once its own proposal has moved it to StConfirm                    *)
+(* (protocol.Protocol.WaitForStateExit). Without that wait the connection  *)
+(* starts reading while the client may still be in StPropose, where it     *)
+(* holds agency and protocol.Protocol rejects any message on arrival.      *)
+(* ReadsBeforeProposing = TRUE models that early read.                     *)
 (*                                                                         *)
 (* The labels "Client" and "Server" from Handshake.tla are kept as names   *)
 (* for the two sides; here both behave as clients.                         *)
@@ -31,6 +41,7 @@
 EXTENDS Handshake
 
 CONSTANT AsymmetricDecode   \* TRUE: a side's data may be undecodable by the other
+CONSTANT ReadsBeforeProposing \* TRUE: a side may read the peer's message while still in StPropose
 
 \* Both sides' data never asks for a query. With AsymmetricDecode the `ok`
 \* flag varies: one side may send data the other cannot decode.
@@ -49,11 +60,11 @@ SimInit ==
 \* In English: "Side r in StPropose sends its table to its peer and moves
 \* to StConfirm."
 SimPropose(r) ==
-    /\ view[r] = "StPropose"
-    /\ view' = [view EXCEPT ![r] = "StConfirm"]
-    /\ inbox' = [inbox EXCEPT ![Peer(r)] =
+    /\ view[r] = "StPropose"                         \* r has not proposed yet
+    /\ view' = [view EXCEPT ![r] = "StConfirm"]      \* r now waits for an answer
+    /\ inbox' = [inbox EXCEPT ![Peer(r)] =           \* the peer receives r's table
                    Append(@, Msg("MsgProposeVersions", table[r], 0, NoParams, "None", FALSE))]
-    /\ UNCHANGED <<table, result, heard, rogueLeft>>
+    /\ UNCHANGED <<table, result, heard, rogueLeft>> \* nothing else changes
 
 \* In English: "Side r in StConfirm reads the peer's proposal. If it is not
 \* legal there (gOuroboros), r hangs up. Otherwise r is done, with the
@@ -70,8 +81,21 @@ SimRecv(r) ==
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]
     /\ UNCHANGED <<table, heard, rogueLeft>>
 
+\* In English: "If reading can start before a side's own proposal has moved
+\* it to StConfirm, side r in StPropose may read the peer's proposal. r
+\* holds agency there, so the message is illegal and r hangs up." The
+\* reference never does this: its client yields MsgProposeVersions before
+\* it awaits anything [R2].
+SimRecvEarly(r) ==
+    /\ ReadsBeforeProposing                          \* only the early-reading variant
+    /\ view[r] = "StPropose"                         \* r has not proposed yet
+    /\ inbox[r] /= <<>>                              \* the peer's proposal has arrived
+    /\ view' = [view EXCEPT ![r] = "Violation"]      \* r rejects it and hangs up
+    /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]        \* the message is consumed
+    /\ UNCHANGED <<table, result, heard, rogueLeft>> \* nothing else changes
+
 SimNext ==
-    \/ \E r \in Roles : SimPropose(r) \/ SimRecv(r)
+    \/ \E r \in Roles : SimPropose(r) \/ SimRecv(r) \/ SimRecvEarly(r)
     \/ Ended /\ UNCHANGED vars
 
 SimSpec == SimInit /\ [][SimNext]_vars
