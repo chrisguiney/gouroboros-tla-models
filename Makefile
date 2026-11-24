@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -59,6 +59,15 @@ connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config MuxIngressSharedBudgetBug.cfg MuxIngress.tla || true
 	$(CONNECTION) -config ConnectionShutdown.cfg ConnectionShutdown.tla
 	$(CONNECTION) -config ConnectionShutdownLateErrorBug.cfg ConnectionShutdown.tla || true
+
+ENGINE := cd specs/03-engine && ../../bin/tlc
+
+engine: ## Check the protocol engine's admission rule, and why each part matters
+	$(ENGINE) -config EngineAdmissionKeepAlive.cfg EngineAdmission.tla
+	$(ENGINE) -config EngineAdmissionChainSync.cfg EngineAdmission.tla
+	$(ENGINE) -config EngineAdmissionBlockFetch.cfg EngineAdmission.tla
+	$(ENGINE) -config EngineAdmissionNoContinueBug.cfg EngineAdmission.tla || true
+	$(ENGINE) -config EngineAdmissionNoReserveBug.cfg EngineAdmission.tla || true
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \

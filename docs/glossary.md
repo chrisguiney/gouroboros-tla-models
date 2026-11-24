@@ -48,6 +48,11 @@ Plain-language definitions, with a Go comparison where one helps.
   are fixed. `view[r]` looks one up. `[Roles -> States]` is the set of all
   such functions, used in type checks.
 
+**Generation** (gOuroboros)
+: A counter the protocol engine bumps on every state change. Comparing the
+  generation when a message started arriving with the generation when it is
+  admitted tells the engine whether the state moved in between.
+
 **Guard**
 : The conditions in an action that mention only current (unprimed)
   variables. The action can only happen when they are true.
