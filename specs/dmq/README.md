@@ -201,6 +201,7 @@ wait on the same channel. One signal wakes one waiter.
 | `LocalMessageNotificationEmptyBlockingBug.cfg`: a server answers a blocking request with nothing; gOuroboros client | | **fails** `NoEmptyBlocking` |
 | `LocalMessageNotificationRogue.cfg`: the same, the client refuses it (the fix) | 89 | passes |
 | `LocalMessageNotificationUnbufferedBug.cfg` (mutation: the channel has no slot) | | **fails** `WakeupNotLost` |
+| `LocalMessageNotificationRestart.cfg` / `...RestartWaitBug.cfg`: see Part 4 | | |
 
 With only the handler waiting, the one-slot channel is enough: a message
 added between the drain and the wait leaves its signal in the slot (the
@@ -264,6 +265,38 @@ a new run. `MaxRuns = 2`; `MaxMsgs` bounds the messages.
 | `DmqRestart*ProbeNoSecondRunBug.cfg` (three): probe, a second run starts | 28-45 | violated, as expected |
 
 The deviation is real for all three. The fixes are below.
+
+### Restart and an application wait (review of PR #3197)
+
+The restart fix's first draft (PR #3197 `656bbcea`) closed the ended run's
+protocol instance, as the restart must, but `WaitForMessage` selected on that
+instance's stop channel. So an application waiting in `WaitForMessage` got
+`ErrProtocolShuttingDown` on every `MsgClientDone`, although the server
+restarts and keeps the queue it waits on. In dmq-node nothing like that
+happens: `MsgClientDone` runs only the run's `mdone`
+(`DMQ/NodeToClient/LocalMsgNotification.hs` 93-94), and the mempool a reader
+waits on belongs to the node.
+
+`DmqRestart.tla` has no application, and `LocalMessageNotification.tla` had
+no restart, so neither could see it. `LocalMessageNotification.tla` now has
+`ServerRestarts` (MsgClientDone returns to StIdle for a new run) and
+`RestartReleasesWaiters` (the first draft), and the invariant
+`AppWaitOutlivesRun`:
+
+| Config | States | Result |
+| --- | --- | --- |
+| `LocalMessageNotificationRestartWaitBug.cfg`: restart, first draft | | **fails** `AppWaitOutlivesRun` in three states (wait, then MsgClientDone) |
+| `LocalMessageNotificationRestart.cfg`: restart, the fix, broadcast wakeup | 179 | passes `WakeupNotLost`, `NoEmptyBlocking`, `AppWaitOutlivesRun` |
+
+The fix (`c107bb53`): `WaitForMessage` watches only the server's `Stop` and
+the connection; the blocking request handler still watches its own run's
+stop channel, since it belongs to that run (and the client cannot send
+`MsgClientDone` while that request holds agency). Go:
+`TestWaitForMessageOutlivesRestart` (fails 4 runs of 5 before the fix,
+"MsgClientDone ended a WaitForMessage"; the other run starts waiting after
+the restart). The other five restarting servers have no exported wait; the
+Peras await is per request and answers on its own run's instance, which is
+right.
 
 ## Go tests and fixes
 

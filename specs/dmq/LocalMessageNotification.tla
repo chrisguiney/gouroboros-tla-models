@@ -24,6 +24,10 @@
 (*                   queued always has a signal coming. (If not, the       *)
 (*                   client's blocking request is never answered.)         *)
 (*   NoEmptyBlocking the client never accepts an empty blocking reply.     *)
+(*   AppWaitOutlivesRun an application WaitForMessage is never ended by    *)
+(*                   the client ending a run: the server restarts and      *)
+(*                   keeps its queue, so the wait still has a message to   *)
+(*                   wait for. Only Stop (not modelled) ends it.           *)
 (*                                                                         *)
 (* Sources:                                                                *)
 (*   CIP-0137 (cardano-foundation/CIPs 03387471), CIP-0137/README.md:      *)
@@ -42,6 +46,10 @@
 (*   [R3] dmq-node/src/DMQ/NodeToClient/LocalMsgNotification.hs 69-91: the *)
 (*        server blocks in STM until the mempool has a message (an STM     *)
 (*        retry is woken by every change it read, so no wakeup is lost).   *)
+(*        93-94: MsgClientDone ends only the run (mdone); the mempool the  *)
+(*        server reads belongs to the node and outlives it.                *)
+(*   [S2] docs/network-spec/connection-manager.tex 492-496: the server     *)
+(*        side "should be restarted in its initial state".                 *)
 (*   gOuroboros, blinklabs-io/gouroboros 61046085:                         *)
 (*   [G1] protocol/localmessagenotification/server.go: AddMessage,         *)
 (*        WaitForMessage, handleBlockingRequest,                           *)
@@ -71,7 +79,17 @@ CONSTANTS
     RogueServer,
     \* FALSE in gOuroboros. TRUE: the client refuses an empty blocking
     \* reply, as the reference codec does [R2].
-    ClientRefusesEmpty
+    ClientRefusesEmpty,
+    \* FALSE: MsgClientDone ends the protocol for good (gOuroboros before
+    \* the restart fix). TRUE: the server restarts in StIdle and the client
+    \* may start a new run [S2].
+    ServerRestarts,
+    \* With ServerRestarts. TRUE: the restart closes the ended run's stop
+    \* channel, which WaitForMessage also watched, so an application wait
+    \* returns a shutdown error (the restart fix's first draft). FALSE:
+    \* WaitForMessage watches only the server's own Stop and the
+    \* connection, and survives the restart.
+    RestartReleasesWaiters
 
 VARIABLES
     cs,       \* the protocol state: "Idle", "BusyBlocking",
@@ -82,7 +100,8 @@ VARIABLES
     signal,   \* TRUE while newMessageSignal's slot holds a signal
     hpc,      \* the server's handler: "idle", "check", "unlocked" (found
               \* nothing, released the lock), "wait" (in WaitForMessage)
-    aw,       \* the application's WaitForMessage: "no", "wait", "done"
+    aw,       \* the application's WaitForMessage: "no", "wait", "done",
+              \* or "failed" (returned a shutdown error)
     reply,    \* the reply in flight: "none", or its size and kind
     emptyBlockingAccepted, \* TRUE once the client accepted one
     refused   \* TRUE once the client refused a reply [S1]
@@ -129,14 +148,22 @@ Request ==
     /\ sent' = sent + 1
     /\ UNCHANGED <<q, adds, signal, aw, reply, emptyBlockingAccepted, refused>>
 
-\* In English: "The client ends the run from StIdle."
+\* In English: "The client ends the run from StIdle. Without a restart the
+\* protocol is done. With one, the server is back in StIdle for the next
+\* run, with its queue as it was; an application wait is ended with an
+\* error only if the restart closes a channel the wait watches."
 \* Literally: "ClientDone is defined as: cs equals "Idle" and refused is not
-\*   true, and cs in the next state equals "Done", and sent, q, adds, signal,
-\*   hpc, aw, reply, emptyBlockingAccepted and refused are unchanged."
+\*   true, and cs in the next state equals (if ServerRestarts then "Idle",
+\*   else "Done"), and aw in the next state equals (if ServerRestarts is true
+\*   and RestartReleasesWaiters is true and aw equals "wait", then "failed",
+\*   else aw), and sent, q, adds, signal, hpc, reply, emptyBlockingAccepted
+\*   and refused are unchanged."
 ClientDone ==
     /\ cs = "Idle" /\ ~refused
-    /\ cs' = "Done"
-    /\ UNCHANGED <<sent, q, adds, signal, hpc, aw, reply,
+    /\ cs' = IF ServerRestarts THEN "Idle" ELSE "Done"
+    /\ aw' = IF ServerRestarts /\ RestartReleasesWaiters /\ aw = "wait"
+              THEN "failed" ELSE aw
+    /\ UNCHANGED <<sent, q, adds, signal, hpc, reply,
                    emptyBlockingAccepted, refused>>
 
 \* In English: "A reply arrives and the client is back in StIdle. An empty
@@ -321,6 +348,13 @@ Spec == Init /\ [][Next]_vars
 \* Literally: "WakeupNotLost is defined as: if hpc equals "wait" and q is
 \*   greater than 0, then signal is true."
 WakeupNotLost == (hpc = "wait" /\ q > 0) => signal
+
+\* In English: "An application's WaitForMessage never returns a shutdown
+\* error while the server is running: ending a run restarts the server
+\* and keeps the queue it waits on [S2][R3]."
+\* Literally: "AppWaitOutlivesRun is defined as: aw does not equal
+\*   "failed"."
+AppWaitOutlivesRun == aw /= "failed"
 
 \* In English: "The client never accepts an empty blocking reply [C1][R2]."
 \* Literally: "NoEmptyBlocking is defined as: emptyBlockingAccepted is not
