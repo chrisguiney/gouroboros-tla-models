@@ -53,31 +53,30 @@ closes. A PR can draw on more than one model.
 | `ledger-conway-dijkstra` | #3218 (table tests) | #3217 | open |
 | `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | open |
 | `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | open |
+| `dmq` (`LocalMessageSubmissionOwnAnswer`) | #3231 (`SubmitMessage` returns its own answer; breaking; merge 9 of 12) | #3225 | open |
+| none (goleak, CONCURRENCY C8) | #3232 (a finished range's delivery stops when its caller leaves; merge 10 of 12) | #3226 | open |
+| `pipeline-cbor` (`PipelineLifecycle`) | #3233 (`Stop(ctx)`, ApplyFunc may stop or drain, parent-cancel teardown; folds `fix/pipeline-callback-stop`, `fix/pipeline-cancel-cleanup`, `test/pipeline-lifecycle-model`; breaking; merge 11 of 12; #3161 first) | #3227, #3228 | open |
+| `ledger-hash-cache` | #3234 (scoped-memo panic retried; folds `test/ledger-hash-cache-model`; merge 12 of 12) | #3229 | open |
 
-## Local branches, not yet published
+## Held: merges 1 to 8 of 12 (not published)
 
-| Model | gOuroboros branch | Contents |
-| --- | --- | --- |
-| `pipeline-cbor` (`PipelineLifecycle`) | `test/pipeline-lifecycle-model` | Stop releases and joins after a parent cancel, waits for ApplyFunc |
-| `ledger-hash-cache` | `fix/ledger-scoped-memo-panic` | a panicking scoped-memo build is retried, not published as nil |
-| `ledger-hash-cache` | `test/ledger-hash-cache-model` | hash cache waiters, panic hand-over, single compute |
-| `pipeline-cbor` (`PipelineLifecycle`) | `fix/pipeline-callback-stop` | Stop(ctx) API change; ApplyFunc may stop or drain its own pipeline |
-| `pipeline-cbor` (`PipelineLifecycle`) | `fix/pipeline-cancel-cleanup` | parent cancel tears the pipeline down without Stop |
+Held because the open issue #3187 (Stop returns before started goroutines
+exit) already covers A3, A6 and A8; these branches do not finish it (the
+chainsync pipeline stop watcher is still unjoined, and `Muxer.Stop` stays
+signal-only). Each branch builds on the one before it; all were rebased on
+2026-11-24 and pass build, vet, gofmt, golangci-lint and `-race` on their
+packages and root.
 
-## Being published
-
-| Model | gOuroboros branch | Contents |
-| --- | --- | --- |
-| none (race detector, CONCURRENCY B4) | `fix/blockfetch-client-protocol-race` | `GetBlockRange`/`GetBlock` read the instance under `protocolMu` |
-| none (race detector, CONCURRENCY B5, B8-B10) | `fix/server-restart-protocol-race` | four restarting servers stop embedding the protocol instance (breaking) |
-| none (goleak, CONCURRENCY C8) | `fix/leiosfetch-range-delivery-leak` | a finished range's delivery stops when its caller leaves |
-| none (race detector, CONCURRENCY C9, C12, C20) | `fix/leios-server-protocol-race` | three leios servers stop embedding the protocol instance (breaking) |
-| none (CONCURRENCY C13, C14, C15) | `fix/perasvotes-op-lock-and-await-panic` | `Done` and requests honour their context during `Sync`; a call from `VoteFunc` fails at once; `AwaitObjectIDsFunc` panics are contained |
-| `dmq` (`LocalMessageSubmissionOwnAnswer`) | `fix/localmessagesubmission-own-answer` | `SubmitMessage` returns its own answer (breaking) |
-| none (CONCURRENCY C19, overturned) | `test/leiosnotify-request-order` | pipelined requests answered one at a time, in order |
-| `connection` (`ConnectionTeardown`), `engine` (`EngineLifecycle`), CONCURRENCY A6, A11, C11, C18, C21 | `fix/protocol-callback-context` (`d84adf86`, `a1324a8b`, `861f349b`; publish after `fix/connection-teardown-joins`) | every `Stop` and `Close` take a context (breaking), the callback marker in all sixteen mini-protocols, `RunLoop` goroutines joined, the muxer joined at `Close`, the keep-alive timer |
-| `engine` (`EngineLifecycle`) | `fix/blockfetch-stop-callbacks-context` (`7523db86`; publish after `fix/protocol-callback-context`; replaces `fix/blockfetch-stop-callbacks-unlocked`) | block-fetch `Stop` callbacks unlocked and client goroutines joined, with the shared marker |
-| none (race detector, CONCURRENCY A9) | `fix/protocol-send-before-start` (`4cca4329`) | a message sent before `Start` is queued, not blocked |
+| Merge | Model | gOuroboros branch (head) | Contents |
+| --- | --- | --- | --- |
+| 1 | `connection` (`ConnectionTeardown`), `engine` (`EngineLifecycle`) | `fix/connection-teardown-joins` (`c164be91`) | A1, A2, A3, A8, A4 |
+| 2 | `engine`, `connection`; CONCURRENCY A6, A11, C11, C18, C21 | `fix/protocol-callback-context` (`6eb52624`; folds `test/protocol-lifecycle`) | `Stop(ctx)`/`Close(ctx)` (breaking), callback marker, `RunLoop` join |
+| 3 | `blockfetch` (`BlockFetchBusyDelivery`) | `fix/blockfetch-stop-callbacks-context` (`0386c143`; replaces `fix/blockfetch-stop-callbacks-unlocked`) | B1, B3, self-stop |
+| 4 | none (race detector, B4) | `fix/blockfetch-client-protocol-race` (`96a2d807`) | fetches read the instance under `protocolMu` |
+| 5 | none (race detector, B5, B8-B10) | `fix/server-restart-protocol-race` (`24eaed49`) | six servers stop embedding the instance (breaking) |
+| 6 | none (race detector, C9, C12, C20; C19 overturned) | `fix/leios-server-protocol-race` (`926fa66a`; folds `test/leiosnotify-request-order`) | three leios servers stop embedding the instance (breaking) |
+| 7 | none (A9) | `fix/protocol-send-before-start` (`f8480abc`) | a message sent before `Start` is queued |
+| 8 | none (C13, C14, C15) | `fix/perasvotes-op-lock-and-await-panic` (`feb4da4b`) | `Sync` honours callers' contexts, `VoteFunc` re-entry fails, await panics contained |
 
 ## Not yet attributed
 
