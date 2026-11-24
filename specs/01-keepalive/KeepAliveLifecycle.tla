@@ -190,6 +190,9 @@ StopIsEffective ==
     (stopper = "done" /\ restart = "idle" /\ muxer = "running") =>
         Running = {}
 
-\* Closing a connection cleanly never makes a restart report an error.
-NoErrorFromClose == ~lateError
+\* A restart never starts an instance after the connection stopped the muxer.
+\* The error it then raises is dropped: the connection stops reading protocol
+\* errors before it stops the muxer (connection.go). The model shows the
+\* window; whether it matters needs the connection in the model.
+NoStartAfterClose == ~lateError
 =============================================================================
