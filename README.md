@@ -45,7 +45,9 @@ Read these in order. Each one builds on the last.
     acquiring, querying, releasing, and the client's concurrent calls.
 13. [Model 11: message queue](specs/11-dmq/README.md): message
     submission (CIP-0137), local submission and notification.
-14. [Glossary](docs/glossary.md): keep it open while you read anything else.
+14. [Model 12: Leios and Peras](specs/12-leios-peras/README.md): the
+    experimental notify, fetch and vote protocols.
+15. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
