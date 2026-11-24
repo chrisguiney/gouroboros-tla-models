@@ -64,6 +64,13 @@ closes. A PR can draw on more than one model.
 | `pipeline-cbor` (`PipelineLifecycle`) | `fix/pipeline-callback-stop` | Stop(ctx) API change; ApplyFunc may stop or drain its own pipeline |
 | `pipeline-cbor` (`PipelineLifecycle`) | `fix/pipeline-cancel-cleanup` | parent cancel tears the pipeline down without Stop |
 
+## Being published
+
+| Model | gOuroboros branch | Contents |
+| --- | --- | --- |
+| none (race detector, CONCURRENCY B4) | `fix/blockfetch-client-protocol-race` | `GetBlockRange`/`GetBlock` read the instance under `protocolMu` |
+| none (race detector, CONCURRENCY B5, B8-B10) | `fix/server-restart-protocol-race` | four restarting servers shadow promoted methods with locked reads |
+
 ## Not yet attributed
 
 #3082 (null native script child lists), #3083 (MaxKesEvolutions before apply)

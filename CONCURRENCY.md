@@ -1911,6 +1911,55 @@ runs only after `DoneChan`, which cannot close while a handler is running.
 Totals: 59 hazards (K1-K3, A1-A11, B1-B13, C1-C26, D1-D5, X1). Known: K1,
 K2, K3 and C1, C2, C16, C17, C24, C25, C26 (10). New: 49.
 
+### Status: B4-B13
+
+Re-checked on gOuroboros `origin/main` `5c4f31c1` (2026-11-24). One line per
+hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
+
+- **B4: race, fixed.** Still present: `GetBlockRange`/`GetBlock` read
+  `c.Protocol` at `protocol/blockfetch/client.go:572`, `:586`, `:613`, `:622`
+  without `protocolMu`; `Start` writes it in `initProtocol` `:255`. Not touched
+  by #3114 or `fix/blockfetch-stop-callbacks-unlocked`.
+  `TestFetchDuringRestartReadsProtocolUnderLock` (each call held in its first
+  log record by a lock-free handler) reports the race deterministically under
+  `-race`. Fix: read through `ProtocolInstance` and wait on
+  `req.protocol.DoneChan()`, the instance the request went out on. Branch
+  `fix/blockfetch-client-protocol-race` `33c31219`. Promoted methods on a
+  restarting *client* race the same way, but there the caller drives both
+  `Start` and the call, so it can order them; not changed.
+- **B5, B8, B9, B10: race, fixed.** Confirmed at `blockfetch/server.go:78`,
+  `chainsync/server.go:125`, `txsubmission/server.go:106`,
+  `peersharing/server.go:71`. #3197 does not touch these four servers.
+  `TestServerMethodsDuringRestart` in each package holds the done handler
+  (`internal/test/restartwindow`), calls the promoted `DoneChan` from a
+  goroutine started before the release, and fails under `-race -count=3` in
+  all four. Fix: each server shadows every promoted `*protocol.Protocol`
+  method with one that goes through `ProtocolInstance` (the pattern
+  `txsubmission.Server.Start` already used). The exported `Protocol` field
+  itself stays racy for direct readers; hiding it is an API break. Branch
+  `fix/server-restart-protocol-race` `853eea67`. C9, C12, C20 and the
+  servers #3197 makes restart are the same class.
+- **B6: covered by #3094.** On main the `GetCurrentTip` worker waits on
+  `busyMutex` (`chainsync/client.go:625`) and the caller can return a tip that
+  answered someone else's request. #3094 removes the worker and the borrowed
+  answer; the call holds the operation lock and waits for its own
+  `MsgIntersectFound`/`NotFound`. Waiting behind the current holder is by
+  design: `MsgFindIntersect` needs `StIdle`, which only the holder's reply
+  restores.
+- **B7: bounded.** The drain goroutine (`chainsync/client.go:1950`) calls the
+  concrete `*pipeline.BlockPipeline.WaitForDrain`, which returns on `ctx`
+  (`pipeline/pipeline.go:1072`, `lockSubmit` `:465`, `Fence` `:893`). The
+  handler's deferred `drainCancel` cancels that `ctx` on return and
+  `drainDone` has one slot, so the goroutine exits promptly after the handler.
+- **B11: covered by #3140.** `Stop` closes `stopRequested` before taking
+  `busyMutex`; a waiting `SubmitTx` returns `ErrProtocolShuttingDown` and
+  `Stop` stops the protocol without `MsgDone` (no client agency in Busy).
+- **B12: covered by #3154.** Same `stopRequested`/`abandoned` scheme for
+  `HasTxForEra`, `NextTx`, `GetSizes` and `Acquire`.
+- **B13: covered by #3154.** `deliverResult` gains a `stopRequested` arm,
+  which can fire on `recvLoop`. The `DoneChan` arm stays dead and the comment
+  still credits it; a wording fix for that PR.
+
 ## 7. Model plan
 
 ### What the existing models already cover
