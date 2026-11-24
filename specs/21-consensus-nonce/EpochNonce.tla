@@ -11,11 +11,19 @@
 (*      from scratch from the chain (RefFold). A rollback is free here:   *)
 (*      the state is a function of the chain.                              *)
 (*   2. A caller of gOuroboros. gOuroboros keeps no chain state; it offers *)
-(*      CalculateRollingNonce and CalculateEpochNonce and leaves the rest *)
-(*      to the caller (Dingo). The caller keeps the nonces, ticks at each  *)
-(*      epoch change, freezes the candidate, keeps one snapshot per block  *)
-(*      and restores a snapshot on rollback. The model checks that what    *)
-(*      the caller holds is always what the reference holds.              *)
+(*      nonce functions and leaves the rest to the caller (Dingo). The    *)
+(*      caller keeps the nonces, ticks at each epoch change, freezes the  *)
+(*      candidate, keeps one snapshot per block and restores a snapshot   *)
+(*      on rollback. The model checks that what the caller holds is       *)
+(*      always what the reference holds.                                   *)
+(*   gOuroboros has two sets of nonce functions, chosen by GoApi:          *)
+(*     "Bytes": the deprecated []byte functions (CalculateRollingNonce,    *)
+(*       CalculateEpochNonce, MkInputVrf, MkSeedTPraos), which have no     *)
+(*       spelling for NeutralNonce;                                        *)
+(*     "Nonce": the common.Nonce functions (NonceFromTPraosVRF,            *)
+(*       NonceFromPraosVRF, CombineNonces, EpochNonceFromNonces,           *)
+(*       MkInputVrfFromNonce, MkSeedTPraosFromNonce), where NeutralNonce   *)
+(*       is a type of its own.                                             *)
 (*                                                                         *)
 (* Hashing is symbolic. A nonce is a term; Hash(x) is blake2b_256 of x,   *)
 (* and two terms are equal only if they were built the same way, so the   *)
@@ -66,12 +74,19 @@
 (*   [R9] Praos/VRF.hs 64-78 and TPraos/BlockHeader.hs 422-435: the VRF   *)
 (*        input omits a NeutralNonce epoch nonce (slot bytes only).       *)
 (*                                                                         *)
-(* The gOuroboros code it is compared with (commit d0b95845):              *)
+(* The gOuroboros code it is compared with. "Bytes" (commit d0b95845):    *)
 (*   [G1] ledger/common/nonce.go CalculateRollingNonce 92-150              *)
 (*   [G2] ledger/common/nonce.go CalculateEpochNonce 152-187               *)
 (*   [G3] vrf/vrf.go MkInputVrf 245-267, MkSeedTPraos 313-345;             *)
 (*        consensus/block.go ComputeVRFInput 523-544;                      *)
 (*        ledger/verify_block.go verifyNonceVrf 775-793                    *)
+(* "Nonce" (main 756a9a89 and branch fix/nonce-neutral-epoch-and-vrf-input):*)
+(*   [G4] ledger/common/nonce.go NonceFromTPraosVRF 96, NonceFromPraosVRF *)
+(*        110, CombineNonces 128-149 (main 756a9a89)                       *)
+(*   [G5] ledger/common/nonce.go EpochNonceFromNonces 188-194;             *)
+(*        vrf/vrf.go MkInputVrfFromNonce 278-292, MkSeedTPraosFromNonce    *)
+(*        385-403; consensus/block.go ComputeVRFInputFromNonce 557         *)
+(*        (branch commit da43d778)                                         *)
 (*   The caller is Dingo (ledger/eras/*.go, ledger/extra_entropy.go        *)
 (*   assembleEpochNonce, ledger/epoch_lab_nonce.go).                       *)
 (*                                                                         *)
@@ -104,9 +119,17 @@ CONSTANTS
     Operand,        \* what the caller passes CalculateRollingNonce:
                     \*  "Nonce": the block's 32-byte nonce [R2]
                     \*  "Raw": the 64-byte VRF output
-    GoFix,          \* gOuroboros fixes in force, a subset of
-                    \*  {"Neutral", "RawOperand"}; {} is main
-    Mutation        \* "none", or one deliberate mistake (see below)
+    GoFix,          \* gOuroboros fixes in force on the "Bytes" path, a
+                    \*  subset of {"Neutral", "RawOperand"}; {} is d0b95845
+    GoApi,          \* which gOuroboros functions the caller uses:
+                    \*  "Bytes": the []byte functions [G1][G2][G3];
+                    \*  "Nonce": the common.Nonce functions [G4][G5].
+                    \*  Caller, Operand and GoFix matter only for "Bytes".
+    Mutation        \* "none", or one deliberate mistake (see below); on
+                    \*  the "Nonce" path, "NewNoIdentity" (the epoch
+                    \*  function hashes a neutral operand in) and
+                    \*  "NewVrfAppend" (the VRF input appends a neutral
+                    \*  epoch nonce as zero bytes)
 
 -----------------------------------------------------------------------------
 (* Symbolic values.                                                         *)
@@ -395,12 +418,66 @@ RefVrfInput(n) == IF n = Neutral THEN Hash(<<"slotOnly">>) ELSE Hash(<<"slotAnd"
 GoVrfInput(x)  == Hash(<<"slotAnd", x>>)
 
 -----------------------------------------------------------------------------
+(* gOuroboros' common.Nonce functions ("Nonce" path) [G4][G5].             *)
+
+\* In English: how the caller holds a nonce. With the []byte functions it
+\* holds bytes, NeutralNonce as 32 zero bytes; with the common.Nonce
+\* functions it holds the typed nonce itself, so NeutralNonce stays neutral.
+\* Literally: "Hold of n is defined as: if GoApi equals "Nonce" then n, else
+\*   Enc of n."
+Hold(n) == IF GoApi = "Nonce" THEN n ELSE Enc(n)
+
+\* In English: CombineNonces(a, b) [G4]. A NonceTypeNeutral operand on
+\* either side gives back the other; two NonceTypeNonce values hash their
+\* concatenation. This is the reference's * [R1].
+\* Literally: "GoCombine of a and b is defined as: in the case a equals
+\*   Neutral, b; in the case b equals Neutral, a; in every other case, Cat of a
+\*   and b."
+GoCombine(a, b) == CASE a = Neutral -> b
+                     [] b = Neutral -> a
+                     [] OTHER       -> Cat(a, b)
+
+\* In English: EpochNonceFromNonces(c, l, ee) [G5]: CombineNonces twice,
+\* c * l * ee, as the reference's tick does [R4]. The "NewNoIdentity"
+\* mutation hashes every operand in, neutral or not, as the []byte
+\* function does.
+\* Literally: "GoEpochNonce of c, l and ee is defined as: if Mutation equals
+\*   "NewNoIdentity" then Cat of Cat of c and l, and ee; else GoCombine of
+\*   GoCombine of c and l, and ee."
+GoEpochNonce(c, l, ee) ==
+    IF Mutation = "NewNoIdentity"
+    THEN Cat(Cat(c, l), ee)                       \* mutation: no identity
+    ELSE GoCombine(GoCombine(c, l), ee)           \* c * l * ee
+
+\* In English: MkInputVrfFromNonce and MkSeedTPraosFromNonce [G5],
+\* abstracting the slot: a NonceTypeNeutral epoch nonce adds no bytes, as
+\* in the reference [R9]. The "NewVrfAppend" mutation appends it as 32
+\* zero bytes, as the []byte functions do.
+\* Literally: "GoVrfInputNonce of n is defined as: if n equals Neutral and
+\*   Mutation does not equal "NewVrfAppend" then Hash of the tuple of
+\*   "slotOnly", else Hash of the tuple of "slotAnd" and Enc of n."
+GoVrfInputNonce(n) ==
+    IF n = Neutral /\ Mutation # "NewVrfAppend"
+    THEN Hash(<<"slotOnly">>)                     \* slot bytes only
+    ELSE Hash(<<"slotAnd", Enc(n)>>)              \* slot bytes || eta0
+
+\* In English: the VRF input gOuroboros builds from the epoch nonce the
+\* caller holds, through whichever functions it uses.
+\* Literally: "GoVrfInputOf of x is defined as: if GoApi equals "Nonce" then
+\*   GoVrfInputNonce of x, else GoVrfInput of x."
+GoVrfInputOf(x) == IF GoApi = "Nonce" THEN GoVrfInputNonce(x) ELSE GoVrfInput(x)
+
+-----------------------------------------------------------------------------
 (* The caller.                                                              *)
 
 \* In English: the epoch nonce the caller computes at a tick into epoch e,
-\* from its candidate c and etaH l.
-\* Literally: "CallerEpochNonce of c, l and e is defined as: in the case Caller
-\*   equals "Direct", GoEpoch of c, l and EEBytes of e; in the case Caller
+\* from its candidate c and etaH l. With the common.Nonce functions every
+\* caller passes the typed nonces to EpochNonceFromNonces, extra entropy
+\* included (NeutralNonce when unset). With the []byte functions it depends
+\* on the caller.
+\* Literally: "CallerEpochNonce of c, l and e is defined as: in the case GoApi
+\*   equals "Nonce", GoEpochNonce of c, l and ExtraEntropy of e; in the case
+\*   Caller equals "Direct", GoEpoch of c, l and EEBytes of e; in the case Caller
 \*   equals "Dingo", if l equals Zero then (if EEBytes of e equals Empty then c,
 \*   else if c equals Zero then EEBytes of e, else Cat of c and EEBytes of e),
 \*   else GoEpoch of c, l and EEBytes of e; in the case Caller equals
@@ -408,7 +485,9 @@ GoVrfInput(x)  == Hash(<<"slotAnd", x>>)
 \*   member of GoFix then Enc of Op of Op of Dec of c and Dec of l, and
 \*   ExtraEntropy of e; else GoEpoch of c, l and EEBytes of e."
 CallerEpochNonce(c, l, e) ==
-    CASE Caller = "Direct" ->
+    CASE GoApi = "Nonce" ->                        \* EpochNonceFromNonces
+            GoEpochNonce(c, l, ExtraEntropy(e))
+      [] Caller = "Direct" ->
             GoEpoch(c, l, EEBytes(e))
       [] Caller = "Dingo" ->                       \* assembleEpochNonce
             IF l = Zero
@@ -422,14 +501,20 @@ CallerEpochNonce(c, l, e) ==
             ELSE GoEpoch(c, l, EEBytes(e))
 
 \* In English: the evolving nonce the caller computes from prev and block b.
+\* With the common.Nonce functions the caller derives the block nonce from
+\* the raw VRF output with NonceFromTPraosVRF or NonceFromPraosVRF, which
+\* compute BlockNonce [G4], and folds it in with CombineNonces.
 \* Literally: "CallerRolling of prev and b is defined as: letting x be: if
-\*   Operand equals "Raw" then RawVrf of b, else BlockNonce of b: if Caller
+\*   Operand equals "Raw" then RawVrf of b, else BlockNonce of b: if GoApi
+\*   equals "Nonce" then GoCombine of prev and BlockNonce of b, else if Caller
 \*   equals "Contract" and prev equals Zero and "Neutral" is not a member of
 \*   GoFix then Enc of Op of Neutral and BlockNonce of b, else GoRolling of prev
 \*   and x."
 CallerRolling(prev, b) ==
     LET x == IF Operand = "Raw" THEN RawVrf(b) ELSE BlockNonce(b)
-    IN IF Caller = "Contract" /\ prev = Zero /\ "Neutral" \notin GoFix
+    IN IF GoApi = "Nonce"
+       THEN GoCombine(prev, BlockNonce(b))    \* NonceFrom*VRF, CombineNonces
+       ELSE IF Caller = "Contract" /\ prev = Zero /\ "Neutral" \notin GoFix
        THEN Enc(Op(Neutral, BlockNonce(b)))   \* * by hand
        ELSE GoRolling(prev, x)
 
@@ -447,13 +532,15 @@ CallerBeforeFreeze(s) ==
       [] Mutation = "OtherWindow" -> s + Window + 1 < FirstSlot(EpochOf(s) + 1)
       [] OTHER                    -> BeforeFreeze(s)
 
-\* In English: the caller's state before any block, in bytes.
-\* Literally: "CallerInit is defined as the record whose field ev is Enc of
-\*   InitialNonce, field cand is Enc of InitialNonce, field eta0 is Enc of
-\*   InitialNonce, field lab is Zero, field leb is Zero, and field last is 0."
-CallerInit == [ev |-> Enc(InitialNonce), cand |-> Enc(InitialNonce),
-               eta0 |-> Enc(InitialNonce), lab |-> Zero, leb |-> Zero,
-               last |-> 0]
+\* In English: the caller's state before any block, as the caller holds it
+\* (bytes, or typed nonces).
+\* Literally: "CallerInit is defined as the record whose field ev is Hold of
+\*   InitialNonce, field cand is Hold of InitialNonce, field eta0 is Hold of
+\*   InitialNonce, field lab is Hold of Neutral, field leb is Hold of Neutral,
+\*   and field last is 0."
+CallerInit == [ev |-> Hold(InitialNonce), cand |-> Hold(InitialNonce),
+               eta0 |-> Hold(InitialNonce), lab |-> Hold(Neutral),
+               leb |-> Hold(Neutral), last |-> 0]
 
 \* In English: the caller's tick, as the reference's but through
 \* CallerEpochNonce.
@@ -471,7 +558,7 @@ CallerTick(st, e) ==
 \*   CallerTick of st and EpochOf of blk's slot, and ev2 be CallerRolling of t's
 \*   ev and blk's id: t except that its ev is ev2, its cand is (if
 \*   CallerBeforeFreeze of blk's slot then ev2, else t's cand), its lab is (if
-\*   Mutation equals "SpecLab" then HeaderHash of blk's id, else Enc of
+\*   Mutation equals "SpecLab" then HeaderHash of blk's id, else Hold of
 \*   PrevHashToNonce of prev), and its last is EpochOf of blk's slot."
 CallerApply(st, blk, prev) ==
     LET t   == CallerTick(st, EpochOf(blk.slot))
@@ -481,17 +568,17 @@ CallerApply(st, blk, prev) ==
           !.cand = IF CallerBeforeFreeze(blk.slot) THEN ev2 ELSE t.cand,
           !.lab  = IF Mutation = "SpecLab"
                    THEN HeaderHash(blk.id)              \* the block's own hash
-                   ELSE Enc(PrevHashToNonce(prev)),     \* its predecessor's
+                   ELSE Hold(PrevHashToNonce(prev)),    \* its predecessor's
           !.last = EpochOf(blk.slot)]
 
-\* In English: the reference state written in the caller's bytes.
-\* Literally: "EncState of st is defined as the record whose field ev is Enc of
-\*   st's ev, field cand is Enc of st's cand, field eta0 is Enc of st's eta0,
-\*   field lab is Enc of st's lab, field leb is Enc of st's leb, and field last
-\*   is st's last."
-EncState(st) == [ev |-> Enc(st.ev), cand |-> Enc(st.cand),
-                 eta0 |-> Enc(st.eta0), lab |-> Enc(st.lab),
-                 leb |-> Enc(st.leb), last |-> st.last]
+\* In English: the reference state written as the caller holds it.
+\* Literally: "EncState of st is defined as the record whose field ev is Hold
+\*   of st's ev, field cand is Hold of st's cand, field eta0 is Hold of st's
+\*   eta0, field lab is Hold of st's lab, field leb is Hold of st's leb, and
+\*   field last is st's last."
+EncState(st) == [ev |-> Hold(st.ev), cand |-> Hold(st.cand),
+                 eta0 |-> Hold(st.eta0), lab |-> Hold(st.lab),
+                 leb |-> Hold(st.leb), last |-> st.last]
 
 -----------------------------------------------------------------------------
 
@@ -611,15 +698,15 @@ StateAgrees == cs = EncState(RefFold(chain))
 
 \* In English: the caller's epoch nonce, the one VRF checks use, is the
 \* reference's.
-\* Literally: "EpochNonceAgrees is defined as: cs's eta0 equals Enc of RefFold
-\*   of chain's eta0."
-EpochNonceAgrees == cs.eta0 = Enc(RefFold(chain).eta0)
+\* Literally: "EpochNonceAgrees is defined as: cs's eta0 equals Hold of
+\*   RefFold of chain's eta0."
+EpochNonceAgrees == cs.eta0 = Hold(RefFold(chain).eta0)
 
 \* In English: the VRF input gOuroboros builds from the caller's epoch nonce
-\* is the reference's [R9][G3].
-\* Literally: "VrfInputAgrees is defined as: GoVrfInput of cs's eta0 equals
+\* is the reference's [R9][G3][G5].
+\* Literally: "VrfInputAgrees is defined as: GoVrfInputOf of cs's eta0 equals
 \*   RefVrfInput of RefFold of chain's eta0."
-VrfInputAgrees == GoVrfInput(cs.eta0) = RefVrfInput(RefFold(chain).eta0)
+VrfInputAgrees == GoVrfInputOf(cs.eta0) = RefVrfInput(RefFold(chain).eta0)
 
 \* In English: the reference's candidate depends only on the blocks up to
 \* the last one before a freeze point.
