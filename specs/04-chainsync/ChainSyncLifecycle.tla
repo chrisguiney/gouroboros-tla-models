@@ -55,8 +55,8 @@ CONSTANTS
     MaxStarts,     \* how many times the client may be restarted
     UseStop,       \* TRUE: the application may call Stop
     UseDrain,      \* TRUE: the application may call StopAfterDrain
-    \* FALSE in gOuroboros. TRUE: Start refuses to restart after a Stop
-    \* that left requests unanswered, so the connection must be closed.
+    \* TRUE with the fix in review (stoppedWithoutDone): Start refuses to
+    \* restart after a Stop that left requests unanswered.
     StartRefusesAbandoned,
     \* TRUE with the fix in review (ErrStoppedWithoutDone): a Stop that
     \* could not deliver MsgDone reports an error, and the connection is

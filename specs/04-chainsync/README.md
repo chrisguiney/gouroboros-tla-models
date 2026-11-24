@@ -183,7 +183,8 @@ later. After `MsgDone` it restarts in `StIdle`.
 | `ChainSyncLifecycleDrain.cfg`: only `StopAfterDrain` | 374 | passes |
 | `ChainSyncLifecycleStopBug.cfg`: `Stop` too, as in gOuroboros today | | **fails** |
 | `ChainSyncLifecycleRefuse.cfg`: `Start` refuses after a `Stop` that left requests unanswered | 677 | passes |
-| `ChainSyncLifecycleClose.cfg`: the fix in review; an abandoning `Stop` closes the connection | 9,943 | passes `NoViolationOnLiveConnection` |
+| `ChainSyncLifecycleCloseOnlyBug.cfg`: an abandoning `Stop` closes the connection, nothing more | | **fails** `NoViolation` (passes `NoViolationOnLiveConnection`, 9,943 states) |
+| `ChainSyncLifecycleClose.cfg`: the fix in review; close the connection **and** refuse `Start` | 821 | passes `NoViolation` |
 
 The failing trace is short. Sync, one `MsgRequestNext` unanswered at the tip,
 `Stop` times out, `Start`. The server's late roll reaches the new instance,
@@ -192,8 +193,8 @@ happens even if the application never calls `Sync` again. A probe
 (`ProbeNoRollViolation`) shows the roll path is reachable, not just the rarer
 `Stop` during `MsgFindIntersect`.
 
-The `Refuse` config is not a proposed fix. It shows that the violation comes
-only from restarting after an abandoned run.
+The `Refuse` config shows that the violation comes only from restarting
+after an abandoned run.
 
 ### Reproduced in Go
 
@@ -233,14 +234,23 @@ The reference never leaves chain-sync half-finished on a connection it keeps:
 
 Pull request #3092 (in review) does the same. When `Stop` cannot deliver
 `MsgDone`, the client reports `ErrStoppedWithoutDone` and the connection
-closes. `ChainSyncLifecycleClose.cfg` checks it.
+closes.
 
-The connection handles the error on its own goroutine, so the close is not
-immediate. A `Start` in that gap can still meet the late reply, which raises a
-second protocol error on a connection that is already closing. The model
-shows exactly this: plain `NoViolation` still fails with the fix, while
-`NoViolationOnLiveConnection` holds. That invariant says no violation ever
-happens on a connection that stays open.
+Closing alone was not enough, and the model showed why
+(`ChainSyncLifecycleCloseOnlyBug.cfg`). The connection handles the error on
+its own goroutine, so the close is not immediate. A `Start` in that gap could
+still meet the late reply. On a connection that is already closing, that is
+only a second error (`NoViolationOnLiveConnection` holds). But a client built
+directly on a muxer has no connection to close it. If its owner drops the
+error, nothing ever closes the muxer. So the client also remembers the
+abandoned stop (`stoppedWithoutDone`): `Start` leaves it stopped, and `Sync`
+returns `ErrProtocolShuttingDown`. That matches the reference, where a peer
+whose demotion timed out is never promoted on the same connection.
+`ChainSyncLifecycleClose.cfg` checks the two together against plain
+`NoViolation`.
+
+On the Go side, a test that calls `Stop` then `Start` back to back, then
+releases the late reply, failed with the close alone and passes with both.
 
 ### Spec, reference, and gOuroboros
 
@@ -248,7 +258,7 @@ happens on a connection that stays open.
 | --- | --- | --- | --- |
 | Can a client end chain-sync with requests outstanding? | No: `MsgDone` only from `StIdle` [C1] | No: `SendMsgDone` is typed at `Z` (`ClientPipelined.hs` lines 81-83) [R2] | `StopAfterDrain`: no. `Stop`: yes, by abandoning the protocol without `MsgDone` |
 | What happens to a message the state does not allow? | The connection is aborted (`miniprotocols.tex` lines 27-36) | Same | Same: the protocol reports an error |
-| Restart on the same connection? | After `MsgDone`, the server restarts (spec 5.7) | Same, for responders | After `StopAfterDrain`: works. After an abandoning `Stop`: the late reply breaks the new run; with the fix in review, the connection is closed instead, as in the reference |
+| Restart on the same connection? | After `MsgDone`, the server restarts (spec 5.7) | Same, for responders | After `StopAfterDrain`: works. After an abandoning `Stop`: the late reply breaks the new run; with the fix in review, the connection is closed and the client is not restarted, as in the reference |
 
 ## Running it
 
