@@ -56,9 +56,13 @@ CONSTANTS
     EarlyDeferredCallback,  \* snd resolves before handing the token back
     SenderIgnoresDeferred,  \* snd never resolves a request a drain deferred
     \* Follow-up fixes, each FALSE on origin/main:
-    SelfStop,               \* TRUE: a Stop called from inside a client
-                            \* callback requests shutdown and returns without
-                            \* waiting for recvLoop, joining or draining
+    CbStopCtx,              \* the context a callback passes when it stops
+                            \* the client: "none" (plain Stop), "own"
+                            \* (StopContext with the context of its own
+                            \* CallbackContext, which carries this client's
+                            \* marker) or "other" (another client's). Only
+                            \* "own" makes Stop return without waiting for
+                            \* recvLoop, joining or draining.
     JoinWatchers            \* TRUE: a waiting Stop also waits for the shutdown
                             \* and deadline watchers to exit
 
@@ -83,11 +87,13 @@ R == {1, 2, 3}
 \* Literally: "Owner is defined as G union the set containing "none"."
 Owner == G \cup {"none"}
 
-\* In English: "A new frame starts at label l with nothing to drain."
-\* Literally: "Frame of l is defined as the record whose pc is l, pend is the
-\*   empty sequence, withD is FALSE, ret is "done", cbReq is 0 and cbRet is
-\*   "done"."
-Frame(l) == [pc |-> l, pend |-> <<>>, withD |-> FALSE, ret |-> "done",
+\* In English: "A new frame starts at label l with nothing to drain. A Stop
+\* frame records the context it was called with in ctx; every other frame
+\* has "none"."
+\* Literally: "Frame of l is defined as the record whose pc is l, ctx is
+\*   "none", pend is the empty sequence, withD is FALSE, ret is "done", cbReq
+\*   is 0 and cbRet is "done"."
+Frame(l) == [pc |-> l, ctx |-> "none", pend |-> <<>>, withD |-> FALSE, ret |-> "done",
              cbReq |-> 0, cbRet |-> "done"]
 
 \* In English: "The innermost frame of goroutine g."
@@ -97,6 +103,12 @@ Top(g) == stk[g][Len(stk[g])]
 \* In English: "Goroutine g's current label."
 \* Literally: "Pc of g is defined as the pc field of Top of g."
 Pc(g) == Top(g).pc
+
+\* In English: "Goroutine g's current Stop was called with a context carrying
+\* this client's callback marker: the identity check StopContext makes."
+\* Literally: "OwnStop of g is defined as: the ctx field of Top of g equals
+\*   "own"."
+OwnStop(g) == Top(g).ctx = "own"
 
 \* In English: "The set of the elements of sequence s."
 \* Literally: "Elems of s is defined as the set of s of i for i in 1 to Len
@@ -223,16 +235,16 @@ StopLock(g) ==
 \* In English: "The switch on lifecycleState (:477). Running: go on to the
 \* normal stop. Stopped: on main, failOutstanding runs with lifecycleMutex
 \* still held (:486); with the fix, the lock is released first and each
-\* request is resolved behind its deliveryMu. With SelfStop, a Stop inside
-\* a client callback drains nothing: its goroutine may hold the deliveryMu
-\* (BlockFunc) or be the watcher that is draining. With JoinWatchers, any
-\* other Stopped Stop waits, like the running path, for recvLoop and the
-\* watchers before it drains."
+\* request is resolved behind its deliveryMu. A Stop given this client's
+\* callback marker (OwnStop) drains nothing: its goroutine may hold the
+\* deliveryMu (BlockFunc) or be the watcher that is draining. With
+\* JoinWatchers, any other Stopped Stop waits, like the running path, for
+\* recvLoop and the watchers before it drains."
 \* Literally: "StopBranch of g is defined as: Pc of g equals "stop_branch",
 \*   and if st.lstate equals "running" then Goto of g and "stop_send" and st
 \*   is unchanged; else if Fixed then st.L in the next state is "none" and
-\*   (in case SelfStop and Len of stk of g is greater than 1, Goto of g and
-\*   "stop_end"; in case JoinWatchers, Goto of g and "stop_wait"; otherwise
+\*   (in case OwnStop of g, Goto of g and "stop_end"; in case JoinWatchers,
+\*   Goto of g and "stop_wait"; otherwise
 \*   Drain of g from "dr_lockq" with an empty list, withD TRUE, back to
 \*   "stop_end"); else st is unchanged and
 \*   Drain of g from "dr_lockq", withD FALSE, back to "stop_unlock_end"; and
@@ -243,7 +255,7 @@ StopBranch(g) ==
          THEN Goto(g, "stop_send") /\ UNCHANGED st
          ELSE IF Fixed
            THEN /\ st' = [st EXCEPT !.L = "none"]
-                /\ CASE SelfStop /\ Len(stk[g]) > 1 -> Goto(g, "stop_end")
+                /\ CASE OwnStop(g) -> Goto(g, "stop_end")
                      [] JoinWatchers -> Goto(g, "stop_wait")
                      [] OTHER -> Drain(g, "dr_lockq", <<>>, TRUE, "stop_end")
            ELSE /\ UNCHANGED st
@@ -261,19 +273,17 @@ StopSend(g) ==
     /\ st' = [st EXCEPT !.proto = "stopping", !.lstate = "stopped"]
     /\ Goto(g, "stop_unlock") /\ UNCHANGED cbHeld
 
-\* In English: "c.lifecycleMutex.Unlock() before waiting (:535). With
-\* SelfStop, a Stop called from inside a client callback (a nested frame)
-\* does not wait: the goroutine it would wait for may be its own, so it
-\* goes straight to re-taking the lock and leaves the drain to the
-\* watchers."
+\* In English: "c.lifecycleMutex.Unlock() before waiting (:535). A Stop
+\* given this client's callback marker (OwnStop) does not wait: the
+\* goroutine it would wait for may be its own, so it goes straight to
+\* re-taking the lock and leaves the drain to the watchers."
 \* Literally: "StopUnlock of g is defined as: Pc of g equals "stop_unlock",
 \*   and st.L in the next state is "none", and Goto of g and "stop_relock"
-\*   if SelfStop and Len of stk of g is greater than 1, else "stop_wait",
-\*   and cbHeld is unchanged."
+\*   if OwnStop of g, else "stop_wait", and cbHeld is unchanged."
 StopUnlock(g) ==
     /\ Pc(g) = "stop_unlock"
     /\ st' = [st EXCEPT !.L = "none"]
-    /\ Goto(g, IF SelfStop /\ Len(stk[g]) > 1 THEN "stop_relock" ELSE "stop_wait")
+    /\ Goto(g, IF OwnStop(g) THEN "stop_relock" ELSE "stop_wait")
     /\ UNCHANGED cbHeld
 
 \* In English: "<-doneChan (:536): DoneChan closes only after recvLoop exits.
@@ -451,18 +461,20 @@ DrUnlockD(g) ==
 \*   of g, and st is unchanged."
 CbReturn(g) == Pc(g) = "cb" /\ LeaveCb(g) /\ UNCHANGED st
 
-\* In English: "The callback calls client.Stop(): when it returns, the
+\* In English: "The callback stops the client, with plain Stop or with
+\* StopContext and the context CbStopCtx names: when that returns, the
 \* callback returns too."
 \* Literally: "CbCallStop of g is defined as: Pc of g equals "cb", and g is
 \*   in CbStop, and Len of stk of g is less than MaxDepth, and stk of g in
 \*   the next state is (with s the stack of g) s with its innermost frame
-\*   moved to that frame's cbRet,
-\*   followed by a new frame at "stop"; and st and cbHeld are unchanged."
+\*   moved to that frame's cbRet, followed by a new frame at "stop" whose
+\*   ctx is CbStopCtx; and st and cbHeld are unchanged."
 CbCallStop(g) ==
     /\ Pc(g) = "cb" /\ g \in CbStop /\ Len(stk[g]) < MaxDepth
     /\ LET s == stk[g]
            back == [s EXCEPT ![Len(s)].pc = s[Len(s)].cbRet]
-       IN stk' = [stk EXCEPT ![g] = Append(back, Frame("stop"))]
+       IN stk' = [stk EXCEPT ![g] =
+                    Append(back, [Frame("stop") EXCEPT !.ctx = CbStopCtx])]
     /\ UNCHANGED <<st, cbHeld>>
 
 \* In English: "The callback calls RequestRange: it takes the send token
