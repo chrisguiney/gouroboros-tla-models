@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor ledger-utxo models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -137,6 +137,9 @@ ledger-governance: ## Check the Conway governance model
 
 pipeline-cbor: ## Check the block pipeline model
 	@scripts/run-model.sh specs/16-pipeline-cbor
+
+ledger-utxo: ## Check the UTXO rule model (Shelley to Babbage)
+	@scripts/run-model.sh specs/17-ledger-utxo
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done
