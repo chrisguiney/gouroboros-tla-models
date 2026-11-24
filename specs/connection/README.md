@@ -15,6 +15,7 @@ first.
 | 2 | `MuxHandover.tla`, with a stopper | Does `Stop` or a connection shutdown during a restart leave anything behind? |
 | 3 | `MuxIngress.tla` | What happens when several mini-protocols share one demultiplexer? |
 | 4 | `ConnectionShutdown.tla` | Can errors and shutdown race into a panic or a hang? |
+| 5 | `ConnectionTeardown.tla` | Can `Close` during `Dial` leak the muxer, or a late `waitGroup.Go` panic? |
 
 `make connection` runs all of them.
 
@@ -231,6 +232,55 @@ at any time and found the panic; reading the code removed that path. Any
 change that lets a protocol fail between the handshake and
 `lockProtocolSetup` would make it reachable.
 
+**Overturned by part 5.** Two of those premises do not hold: a protocol in
+its `Done` state does report read errors (an oversized message or the
+read-buffer budget, `protocol/protocol.go:1946`, `:2073`, `:2109`, all
+before the terminal-message check at `:2117`), and `SendError` checks
+`stopChan` and then sends, so a protocol stopped by `stopProtocols` between
+the two still queues its error. Part 5 shows the panic.
+
+## Part 5: teardown while Dial runs (`ConnectionTeardown.tla`)
+
+Part 4 starts after `doneChan` exists. This part starts at the top of
+`setupConnection` (gOuroboros `5c4f31c1`, `connection.go:670`) and adds what
+part 4 abstracts: the creation of `doneChan` (`:684`) and of the muxer
+(`:701`) with its cleanup goroutine, a `Close` from another goroutine
+(`:258`, a no-op while `doneChan` is nil), the WaitGroup at Go's rule (an
+`Add` from zero must happen before `Wait`), the handshake's `SendError` as
+two steps, and one mini-protocol callback. A fix is a constant: `fence`
+(start a tracked goroutine under a mutex after checking `doneChan`; shutdown
+takes the mutex before `Wait`, as `muxer.fenceRegistrations` does at
+`muxer/muxer.go:1340`) and `muxerGuard` (create the muxer under a mutex
+after checking `doneChan`; shutdown reads `c.muxer` under it).
+
+Three-way comparison: the specification is silent; the reference's
+connection handler runs the mux in `withJobPool` and every thread it starts
+is waited for before `run` returns (`network-mux/src/Network/Mux.hs:280-287`
+at `5f356486ab3e`), so there is no window where a thread starts after the
+wait; gOuroboros starts goroutines with `waitGroup.Go` at `:704` and `:844`
+without checking whether shutdown has begun.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ConnectionTeardown.cfg` (gOuroboros, `Close` after `Dial`, no late error) | 1,020 | passes `NoPanic`, `CloseWaitsForShutdown`, `MuxerStoppedWhenClosed` |
+| `ConnectionTeardownFixed.cfg` (both fixes, concurrent `Close`, late error) | 9,004 | passes those and `NoAddAfterWaitBegan` |
+| `ConnectionTeardownWaitGroupBug.cfg` (gOuroboros) | | `NoAddAfterWaitBegan` violated, with no concurrent `Close`: a muxer error closes `doneChan` after the handshake select |
+| `ConnectionTeardownLateErrorPanicBug.cfg` (gOuroboros) | | `NoPanic` violated: the late forwarder sends the handshake's queued error on the closed `errorChan` |
+| `ConnectionTeardownCloseDuringDialBug.cfg` (gOuroboros) | | `MuxerStoppedWhenClosed` violated: shutdown saw no muxer, setup then made one |
+| `ConnectionTeardownFenceOnlyBug.cfg`, `GuardOnlyBug.cfg` | | each fix alone leaves the other defect |
+| `ConnectionTeardownCallbackAfterCloseBug.cfg` | | `NoCallbackAfterClose` violated even with both fixes (inventory A3; decision) |
+| `ConnectionTeardownProbe*Bug.cfg` (two) | | probes reached: the handshake finishes after setup gave up (A4); `Close` before the muxer exists |
+
+Go: `fix/connection-close-during-dial` (`2ed2f1f3`,
+`TestCloseBeforeMuxerCreatedClosesConn`: without the fix the conn stays
+open and goleak lists the muxer and handshake goroutines) and
+`fix/connection-late-forwarder` (`264dc5be`,
+`TestNoForwarderStartedAfterShutdown`: without the fix, 20 runs gave 11
+"forwarder took the queued error" failures and 9 `panic: send on closed
+channel`). The test queues the error by hand at the point the handshake's
+`SendError` would; the end-to-end path from peer bytes was not reproduced.
+The two branches conflict trivially in the `Connection` struct.
+
 ## What model `connection` found
 
 - **Messages survive restarts.** Carrying the read buffer, admitting one
@@ -245,12 +295,16 @@ change that lets a protocol fail between the handshake and
   here (`MuxHandoverClose.cfg`).
 - **A backpressure hazard** for applications whose block-fetch callbacks wait
   on another protocol (part 3).
-- **A latent panic** in the shutdown order, unreachable today (part 4).
+- **A panic in the shutdown order**, which part 4 judged unreachable and
+  part 5 reaches: a forwarder started after shutdown's `Wait` sends a
+  stopped protocol's queued error on the closed `errorChan`.
+- **A leaked muxer and conn** when `Close` runs during `Dial` (part 5).
 - Negative results, also worth knowing: the connection budget cannot be hit
   by honest traffic (part 3), and `Close` always returns after shutdown
   (part 4).
 
 ## Not modelled yet
 
-Byte sizes beyond "fits or not", timeouts, the egress side of the muxer, and
-whether protocol goroutines can outlive `Close`.
+Byte sizes beyond "fits or not", timeouts, and the egress side of the
+muxer. Protocol goroutines outliving `Close` is modelled (part 5) but not
+fixed: it needs a decision on where the join belongs.

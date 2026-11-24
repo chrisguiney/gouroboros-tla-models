@@ -14,6 +14,8 @@ closes. A PR can draw on more than one model.
 | `connection` | #3087 (stop servers restarting after MsgDone) | #3085 | merged |
 | `engine` | #3090 (admission generation drift tests) | #3089 | merged |
 | `engine` | #3159 (time only the receiver; no default node-to-client timeouts) | #3145, #3146 | open |
+| `connection` (`ConnectionTeardown`) | local branches `fix/connection-close-during-dial` (`2ed2f1f3`), `fix/connection-late-forwarder` (`264dc5be`), not yet published | | local |
+| `engine` (`EngineLifecycle`) | local branch `test/protocol-lifecycle` (`c5ab084c`), not yet published | | local |
 | `chainsync` | #3092 (close the connection when Stop cannot send MsgDone) | #3091 | merged |
 | `chainsync` | #3094 (GetCurrentTip waits for its own answer) | #3093 | open |
 | `chainsync` | #3112 (MustReply timeout, node-to-node message size, state map tests) | #3096, #3097, #3101 | open |
