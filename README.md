@@ -41,6 +41,8 @@ Read these in order. Each one builds on the last.
     acknowledgement window and the blocking-style rules.
 11. [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
     rules, size limits and timeouts.
+12. [Model 09: local tx](specs/09-localtx/README.md): local tx submission
+    and the local tx monitor's acquire, query and release.
 12. [Model 10: local-state-query](specs/10-localstatequery/README.md):
     acquiring, querying, releasing, and the client's concurrent calls.
 13. [Model 11: message queue](specs/11-dmq/README.md): message

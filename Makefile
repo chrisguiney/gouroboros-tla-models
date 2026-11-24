@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -113,6 +113,9 @@ txsubmission: ## Check the tx-submission model (every config, Bug ones expected 
 
 peersharing: ## Check the peer-sharing model (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/08-peersharing
+
+localtx: ## Check the local tx submission and monitor models (every config, Bug ones expected to fail)
+	@scripts/run-model.sh specs/09-localtx
 
 localstatequery: ## Check the local-state-query model (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/10-localstatequery
