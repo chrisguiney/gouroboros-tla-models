@@ -54,7 +54,13 @@ CONSTANTS
     NoOnce,                 \* resolve without resolveOnce
     DeadlineResolvesQueued, \* the deadline watcher resolves before removing
     EarlyDeferredCallback,  \* snd resolves before handing the token back
-    SenderIgnoresDeferred   \* snd never resolves a request a drain deferred
+    SenderIgnoresDeferred,  \* snd never resolves a request a drain deferred
+    \* Follow-up fixes, each FALSE on origin/main:
+    SelfStop,               \* TRUE: a Stop called from inside a client
+                            \* callback requests shutdown and returns without
+                            \* waiting for recvLoop, joining or draining
+    JoinWatchers            \* TRUE: a waiting Stop also waits for the shutdown
+                            \* and deadline watchers to exit
 
 VARIABLES
     st,     \* the shared state, one record (fields below)
@@ -217,20 +223,29 @@ StopLock(g) ==
 \* In English: "The switch on lifecycleState (:477). Running: go on to the
 \* normal stop. Stopped: on main, failOutstanding runs with lifecycleMutex
 \* still held (:486); with the fix, the lock is released first and each
-\* request is resolved behind its deliveryMu."
+\* request is resolved behind its deliveryMu. With SelfStop, a Stop inside
+\* a client callback drains nothing: its goroutine may hold the deliveryMu
+\* (BlockFunc) or be the watcher that is draining. With JoinWatchers, any
+\* other Stopped Stop waits, like the running path, for recvLoop and the
+\* watchers before it drains."
 \* Literally: "StopBranch of g is defined as: Pc of g equals "stop_branch",
 \*   and if st.lstate equals "running" then Goto of g and "stop_send" and st
 \*   is unchanged; else if Fixed then st.L in the next state is "none" and
+\*   (in case SelfStop and Len of stk of g is greater than 1, Goto of g and
+\*   "stop_end"; in case JoinWatchers, Goto of g and "stop_wait"; otherwise
 \*   Drain of g from "dr_lockq" with an empty list, withD TRUE, back to
-\*   "stop_end"; else st is unchanged and Drain of g from "dr_lockq", withD
-\*   FALSE, back to "stop_unlock_end"; and cbHeld is unchanged."
+\*   "stop_end"); else st is unchanged and
+\*   Drain of g from "dr_lockq", withD FALSE, back to "stop_unlock_end"; and
+\*   cbHeld is unchanged."
 StopBranch(g) ==
     /\ Pc(g) = "stop_branch"
     /\ IF st.lstate = "running"
          THEN Goto(g, "stop_send") /\ UNCHANGED st
          ELSE IF Fixed
            THEN /\ st' = [st EXCEPT !.L = "none"]
-                /\ Drain(g, "dr_lockq", <<>>, TRUE, "stop_end")
+                /\ CASE SelfStop /\ Len(stk[g]) > 1 -> Goto(g, "stop_end")
+                     [] JoinWatchers -> Goto(g, "stop_wait")
+                     [] OTHER -> Drain(g, "dr_lockq", <<>>, TRUE, "stop_end")
            ELSE /\ UNCHANGED st
                 /\ Drain(g, "dr_lockq", <<>>, FALSE, "stop_unlock_end")
     /\ UNCHANGED cbHeld
@@ -246,22 +261,42 @@ StopSend(g) ==
     /\ st' = [st EXCEPT !.proto = "stopping", !.lstate = "stopped"]
     /\ Goto(g, "stop_unlock") /\ UNCHANGED cbHeld
 
-\* In English: "c.lifecycleMutex.Unlock() before waiting (:535)."
+\* In English: "c.lifecycleMutex.Unlock() before waiting (:535). With
+\* SelfStop, a Stop called from inside a client callback (a nested frame)
+\* does not wait: the goroutine it would wait for may be its own, so it
+\* goes straight to re-taking the lock and leaves the drain to the
+\* watchers."
 \* Literally: "StopUnlock of g is defined as: Pc of g equals "stop_unlock",
-\*   and st.L in the next state is "none", and Goto of g and "stop_wait",
+\*   and st.L in the next state is "none", and Goto of g and "stop_relock"
+\*   if SelfStop and Len of stk of g is greater than 1, else "stop_wait",
 \*   and cbHeld is unchanged."
 StopUnlock(g) ==
     /\ Pc(g) = "stop_unlock"
     /\ st' = [st EXCEPT !.L = "none"]
-    /\ Goto(g, "stop_wait") /\ UNCHANGED cbHeld
+    /\ Goto(g, IF SelfStop /\ Len(stk[g]) > 1 THEN "stop_relock" ELSE "stop_wait")
+    /\ UNCHANGED cbHeld
 
 \* In English: "<-doneChan (:536): DoneChan closes only after recvLoop exits.
-\* Then failOutstanding (:540)."
+\* Then, with JoinWatchers, wait for the watchers; else failOutstanding
+\* (:540)."
 \* Literally: "StopWait of g is defined as: Pc of g equals "stop_wait", and
-\*   st.recvExited is true, and Drain of g from "dr_lockq", withD FALSE, back
-\*   to "stop_relock", and st and cbHeld are unchanged."
+\*   st.recvExited is true, and if JoinWatchers then Goto of g and
+\*   "stop_join", else Drain of g from "dr_lockq", withD FALSE, back to
+\*   "stop_relock"; and st and cbHeld are unchanged."
 StopWait(g) ==
     /\ Pc(g) = "stop_wait" /\ st.recvExited
+    /\ IF JoinWatchers THEN Goto(g, "stop_join")
+                        ELSE Drain(g, "dr_lockq", <<>>, FALSE, "stop_relock")
+    /\ UNCHANGED <<st, cbHeld>>
+
+\* In English: "The join: wait until the shutdown watcher and the deadline
+\* watcher have both returned, then failOutstanding."
+\* Literally: "StopJoin of g is defined as: Pc of g equals "stop_join", and
+\*   Pc of "sw" equals "done", and Pc of "dl" equals "done", and Drain of g
+\*   from "dr_lockq", withD FALSE, back to "stop_relock", and st and cbHeld
+\*   are unchanged."
+StopJoin(g) ==
+    /\ Pc(g) = "stop_join" /\ Pc("sw") = "done" /\ Pc("dl") = "done"
     /\ Drain(g, "dr_lockq", <<>>, FALSE, "stop_relock")
     /\ UNCHANGED <<st, cbHeld>>
 
@@ -810,7 +845,7 @@ SnUnTok(g) ==
 \*   above applied to g."
 Step(g) ==
     \/ StopLock(g) \/ StopBranch(g) \/ StopSend(g) \/ StopUnlock(g)
-    \/ StopWait(g) \/ StopRelock(g) \/ StopUnlockEnd(g) \/ StopEnd(g)
+    \/ StopWait(g) \/ StopJoin(g) \/ StopRelock(g) \/ StopUnlockEnd(g) \/ StopEnd(g)
     \/ DrLockQ(g) \/ DrTake(g) \/ DrUnlockQ(g) \/ DrNext(g) \/ DrLockD(g)
     \/ DrResolve(g) \/ DrResDone(g) \/ DrAfter(g) \/ DrUnlockD(g)
     \/ CbReturn(g) \/ CbCallStop(g) \/ CbRequest(g) \/ CbTok(g) \/ CbQ(g)
@@ -859,17 +894,23 @@ Wants(g) ==
 OwnerOf(n) == IF n[1] = "D" THEN st.D[n[2]] ELSE st[n[1]]
 
 \* In English: "The goroutines g is blocked on: the owner of a lock it
-\* wants, recvLoop while Stop waits for DoneChan, or another goroutine still
-\* inside resolveOnce for the request g is resolving."
+\* wants, recvLoop while Stop waits for DoneChan, the shutdown watcher (or,
+\* once it is done, the deadline watcher) while Stop joins them, or another
+\* goroutine still inside resolveOnce for the request g is resolving."
 \* Literally: "BlockedOn of g is defined as: the set of h in G such that
-\*   element 1 of Wants of g is not "none" and OwnerOf of it equals h, or Pc of g equals
-\*   "stop_wait" and st.recvExited is false and h equals "recv", or Pc of g
+\*   element 1 of Wants of g is not "none" and OwnerOf of it equals h, or
+\*   Pc of g equals "stop_wait" and st.recvExited is false and h equals
+\*   "recv", or Pc of g equals "stop_join" and Pc of "sw" is not "done" and
+\*   h equals "sw", or Pc of g equals "stop_join" and Pc of "sw" equals
+\*   "done" and Pc of "dl" is not "done" and h equals "dl", or Pc of g
 \*   equals "dr_resolve" and NoOnce is false and once of the head of pend
 \*   equals h."
 BlockedOn(g) ==
     {h \in G :
         \/ Wants(g)[1] /= "none" /\ OwnerOf(Wants(g)) = h
         \/ Pc(g) = "stop_wait" /\ ~st.recvExited /\ h = "recv"
+        \/ Pc(g) = "stop_join" /\ Pc("sw") /= "done" /\ h = "sw"
+        \/ Pc(g) = "stop_join" /\ Pc("sw") = "done" /\ Pc("dl") /= "done" /\ h = "dl"
         \/ Pc(g) = "dr_resolve" /\ ~NoOnce /\ st.once[Head(Top(g).pend)] = h}
 
 \* In English: "The goroutine g is blocked on, or "none". There is at most
@@ -955,12 +996,14 @@ AllResolvedAtEnd ==
                /\ \A r \in {1, 2} \cup (IF st.sendOk THEN {3} ELSE {}) :
                     st.cbRuns[r] >= 1
 
-\* In English: "When the first Stop has returned, the shutdown watcher has
-\* finished too: no callback of this generation can run after Stop (hazard
-\* B3). Expected to fail: nothing joins the watcher."
-\* Literally: "StopJoinsWatcher is defined as: if Pc of "s1" equals "done"
-\*   and "s1" is in Stoppers, then Pc of "sw" equals "done"."
-StopJoinsWatcher == ("s1" \in Stoppers /\ Pc("s1") = "done") => Pc("sw") = "done"
+\* In English: "When the first Stop has returned, the shutdown and deadline
+\* watchers have finished too: no callback of this generation can run after
+\* Stop (hazard B3). Fails on origin/main: nothing joins them."
+\* Literally: "StopJoinsWatcher is defined as: if "s1" is in Stoppers and
+\*   Pc of "s1" equals "done", then Pc of "sw" equals "done" and Pc of "dl"
+\*   equals "done"."
+StopJoinsWatcher ==
+    ("s1" \in Stoppers /\ Pc("s1") = "done") => (Pc("sw") = "done" /\ Pc("dl") = "done")
 
 \* In English: "Probe: a callback's Stop never runs to completion. Expected
 \* to be violated: it can."
