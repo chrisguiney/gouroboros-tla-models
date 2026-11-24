@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -75,6 +75,18 @@ engine: ## Check the protocol engine: admission and pipelining
 engine-deep: ## Check pipelining with two requests in flight (a few minutes)
 	$(ENGINE) -workers auto -config EnginePipeliningBlockFetchDeep.cfg EnginePipelining.tla
 	$(ENGINE) -workers auto -config EnginePipeliningChainSyncDeep.cfg EnginePipelining.tla
+
+CHAINSYNC := cd specs/04-chainsync && ../../bin/tlc
+
+chainsync: ## Check the chain-sync client's window and Reintersect
+	$(CHAINSYNC) -config ChainSyncClient.cfg ChainSyncClient.tla
+	$(CHAINSYNC) -config ChainSyncClientStop.cfg ChainSyncClient.tla
+	$(CHAINSYNC) -config ChainSyncClientTopUpBug.cfg ChainSyncClient.tla || true
+	$(CHAINSYNC) -config ChainSyncClientNoDrainBug.cfg ChainSyncClient.tla || true
+	$(CHAINSYNC) -config ChainSyncClientNoDiscardBug.cfg ChainSyncClient.tla || true
+
+chainsync-deep: ## Check the chain-sync client with a window of three
+	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \

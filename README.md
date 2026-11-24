@@ -30,7 +30,9 @@ Read these in order. Each one builds on the last.
    multiplexer, and messages surviving a restart.
 6. [Model 03: the protocol engine](specs/03-engine/README.md): the code every
    mini-protocol runs on, starting with how it admits incoming messages.
-7. [Glossary](docs/glossary.md): keep it open while you read anything else.
+7. [Model 04: the chain-sync client](specs/04-chainsync/README.md): the
+   sync window, and changing course with `Reintersect`.
+8. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 ## What is in the repository
 
