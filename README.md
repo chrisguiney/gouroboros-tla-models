@@ -89,6 +89,9 @@ protocol.
   to Babbage.
 - [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
   UTxO rule, fees and heavyweight delegation.
+- [Model 24: Conway and Dijkstra](specs/24-ledger-conway-dijkstra/README.md):
+  treasury values, reference-script fees, deposits, delegated
+  withdrawals, and Dijkstra's sub-transactions and direct deposits.
 - [Model 15: Conway governance](specs/15-ledger-governance/README.md):
   proposals, voting, ratification, enactment and refunds.
 - [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
