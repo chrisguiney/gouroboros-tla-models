@@ -221,6 +221,102 @@ fix: `TestStopWithRangeOutstandingReportsError` and
 `TestStartAfterStopWithoutDoneStaysStopped` fail before the change and pass
 after it; removing only the `Start` refusal fails the second test again.
 
+## Slice 3: locks, callbacks and Stop (`BlockFetchBusyDelivery.tla`)
+
+Item 4 of [`CONCURRENCY.md`](../../CONCURRENCY.md)'s top five: hazards B1,
+B3 and X1, the only lock cycle in the inventory. Written against gOuroboros
+`origin/main` `f9ba2d3c`; every `client.go` line the inventory cites for
+block-fetch was re-read there and still matches.
+
+### What the code does
+
+One step per lock acquire or release, channel wait, `sync.Once` entry and
+exit, in the goroutine style of
+[`ConnectionShutdown.tla`](../connection/ConnectionShutdown.tla). Six
+goroutines: two `Stop` callers; `recvLoop` running `handleBlock`
+(`queueMutex`, then `deliveryMu` hand over hand, `pipelineContext` ->
+`lifecycleMutex`, `recordBlock` under `queueMutex`, `BlockFunc` under
+`deliveryMu`) and `handleBatchDone`; `watchRangeDeadline`; the shutdown
+watcher; and PR #3114's `sendRequestRange` (`sending` mark, token back before
+a deferred `RangeDoneFunc`). Each goroutine is a stack of frames, so a user
+callback can call `Stop` (a new frame) or `RequestRange` (the token and
+`queueMutex`) exactly as Go code can.
+
+Deadlock is checked two ways: TLC's own check, and `NoWaitCycle`, which
+follows who-waits-for-whom (a lock's owner, `recvLoop` for a `Stop` waiting
+on `DoneChan`, the goroutine inside a `resolveOnce`) and fails on any cycle,
+including a goroutine re-taking a lock it holds.
+
+### The answers
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchBusyDelivery.cfg`: main, one `Stop`, callbacks return or call `RequestRange` | 22,569 | passes all eight invariants |
+| `BlockFetchBusyDeliveryX1.cfg`: main, two `Stop`s, **every** callback may call `Stop` | 356,880 | passes `NoX1Shape`: **X1 is unreachable** |
+| `BlockFetchBusyDeliveryFixed.cfg`: the fix, two `Stop`s, callbacks off `recvLoop` may call `Stop` or `RequestRange` | 531,003 | passes all eight |
+| `BlockFetchBusyDeliverySender.cfg`: the fix composed with PR #3114's sender | 1,873,292 | passes all eight |
+| `BlockFetchBusyDeliveryNoOnceAlone.cfg`: `resolveOnce` removed | 22,569 | passes `RangeDoneOnce` |
+| `...StopLockBug.cfg` (main, two `Stop`s) | | **fails** `NoCallbackUnderLifecycle`: B1 |
+| `...OrderBug.cfg` (main, two `Stop`s) | | **fails** `NoResolveDuringDelivery`: new |
+| `...ReenterBug.cfg` (main, callback calls `Stop`) | | **fails** `NoWaitCycle`: B1 deadlocks |
+| `...RecvStopBug.cfg` (fix, `recvLoop` callback calls `Stop`) | | **fails** `NoWaitCycle`: new, not fixed |
+| `...StopJoinBug.cfg` | | **fails** `StopJoinsWatcher`: B3 |
+| `...X1ReachableBug.cfg` (deadline resolves before removing) | | **fails** `NoX1Shape` |
+| `...QueueCallbackBug.cfg` (resolve under `queueMutex`) | | **fails** `NoCallbackUnderQueue` |
+| `...TokenCallbackBug.cfg`, `...TokenDeadlockBug.cfg` (#3114 resolving before the token is back) | | **fail** `NoCallbackUnderToken`, `NoWaitCycle` |
+| `...NoOnceBug.cfg` (no `resolveOnce` and deadline resolves before removing) | | **fails** `RangeDoneOnce` |
+| `...DropDeferredBug.cfg` (#3114 sender ignores a deferred drain) | | **fails** `AllResolvedAtEnd` |
+| `...Probe{ReentrantStop,Deferred,Deadline}Bug.cfg` | | violated: a callback's `Stop` returns, #3114's deferred resolve and the deadline's resolve are all reached |
+
+- **X1 cannot happen, even with reentrant callbacks.** The cycle needs
+  `recvLoop` holding `queueMutex` and waiting for a `deliveryMu` that the
+  deadline watcher holds. The watcher takes its requests out of the queue
+  under `queueMutex` before it takes any `deliveryMu`, and `recvLoop` only
+  locks the `deliveryMu` of the queue head, so it never waits for one the
+  watcher holds. `X1ReachableBug` reverses that order and finds the
+  three-goroutine cycle. The inventory's X1 row is overturned; its "Ruled out"
+  reasoning was right.
+- **B1 is real, and worse than listed.** A second `Stop` (or any `Stop` in
+  the New or Starting state) runs `RangeDoneFunc` under `lifecycleMutex`; a
+  callback that calls `Stop` or `Start` deadlocks on its own goroutine. The
+  same `Stop` also resolves a range while `recvLoop` is still in that range's
+  `BlockFunc`, without the `deliveryMu` that a range deadline uses for exactly
+  this: completion is reported ahead of a block.
+- **`resolveOnce` is not what gives exactly-once.** Every resolver removes the
+  request under `queueMutex` first; that alone keeps `RangeDoneFunc` to one
+  call. `resolveOnce` is a second guard.
+- **A callback on `recvLoop` must not call `Stop`.** `Stop` waits for
+  `DoneChan`, which closes only when `recvLoop` returns, so a `BlockFunc`, or a
+  `RangeDoneFunc` from `handleBatchDone` or `handleNoBlocks`, that calls
+  `Stop` waits for itself. This is engine-wide and the fix does not change it;
+  a Go test confirmed it hangs. Needs a decision: document it, or have `Stop`
+  not wait when called from a handler.
+- **B3 stands:** nothing joins the shutdown watcher, so `Stop` can return
+  before its `RangeDoneFunc` calls.
+
+### The fix (gOuroboros branch `fix/blockfetch-stop-callbacks-unlocked`)
+
+`Stop` in a not-running state now releases `lifecycleMutex` before resolving,
+fails only the stopped protocol's requests (a concurrent `Start` may install a
+new one once the lock is free), and resolves each behind its `deliveryMu`, as
+`watchRangeDeadline` does. This follows the reference, which hands blocks to
+the consumer with no client lock held. `TestStopNotRunningCallbackMayCallStop`
+(New and Stopped) and `TestStopNotRunningWaitsForActiveDelivery` fail on
+`origin/main` (a `Stop` from `RangeDoneFunc` never returns; `RangeDoneFunc`
+runs while the block callback is active) and pass with it. It conflicts
+textually with PR #3114 in `Stop`'s doc comment (keep both paragraphs) and in
+`failOutstandingForProtocol`: the merged `takeOutstandingForProtocol` must take
+`err` and apply #3114's `resolvableLocked` before returning, which is the
+composition `BlockFetchBusyDeliverySender.cfg` checks.
+
+### Not modelled in this slice
+
+The `busyMutex`/`busyStateMutex` handoff and the :606 releaser, `Start` and a
+second generation, `Pipeline.Submit` blocking (it ends when `Stop` cancels the
+pipeline context), `failRequest` from `handleBlock` (a resolve on `recvLoop`
+under its own `deliveryMu`, the same shape as `BlockFunc`), the 250 ms
+`MsgClientDone` write (one non-blocking step: it is bounded), and the server.
+
 ## Spec, reference, and gOuroboros
 
 | Question | Specification | Reference | gOuroboros | Verdict |
@@ -238,6 +334,7 @@ after it; removing only the `Start` refusal fails the second test again.
 | Who is timed? | "how much time the receiver side can wait" [B1] | Only `recvMessage` arms the timer [R5] | The engine arms it in every state with agency, so a **server** whose `RequestRangeFunc` takes longer than `BatchStartTimeout` times itself out (checked: "timeout waiting on transition from protocol state Busy" on the server) | Deviation, engine-wide; reported, not fixed |
 | Server reading a pipelined `MsgRequestRange` | The server follows its state machine, unaware of pipelining [P1] | Read when back in `StIdle` | Admitted at once (`PipelinedMessageTypes`), served after the current range | Agree in effect |
 | Total time for one range | Not stated | Not stated | `RangeTimeout`, default about 36 hours | gOuroboros extra |
+| Callbacks and client locks | Not stated | No completion callback; blocks go to `addFetchedBlock` on the protocol thread with no client lock [R4] | `Stop` in a not-running state ran `RangeDoneFunc` under `lifecycleMutex` and ahead of an active `BlockFunc` | Fixed on branch `fix/blockfetch-stop-callbacks-unlocked` to match the reference |
 
 ## Go tests (`test/blockfetch-state-model`)
 
@@ -304,6 +401,10 @@ cd specs/blockfetch
 ../../bin/tlc -config BlockFetchLifecycleRefuse.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleCloseOnlyLive.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleClose.cfg BlockFetchLifecycle.tla
+../../bin/tlc -config BlockFetchBusyDelivery.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchBusyDeliveryX1.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchBusyDeliveryFixed.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchBusyDeliverySender.cfg BlockFetchBusyDelivery.tla
 # expected to fail
 ../../bin/tlc -config BlockFetchQueueRefusedBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueNoTokenBug.cfg BlockFetchQueue.tla
@@ -316,4 +417,10 @@ cd specs/blockfetch
 ../../bin/tlc -config BlockFetchQueueProbeFailsWhileUpBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchLifecycleStopBug.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleCloseOnlyBug.cfg BlockFetchLifecycle.tla
+../../bin/tlc -config BlockFetchBusyDeliveryStopLockBug.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchBusyDeliveryOrderBug.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchBusyDeliveryRecvStopBug.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchBusyDeliveryX1ReachableBug.cfg BlockFetchBusyDelivery.tla
 ```
+
+The rest of slice 3's `*Bug.cfg` configs are listed in its table; `make blockfetch` runs every config.

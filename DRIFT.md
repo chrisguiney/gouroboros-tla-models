@@ -122,7 +122,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129. Dingo's view already satisfies the contract |
 | [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: a pure function, covered by Go tests |
 | [L3](#l3) | ledger | Conway CC vote with a nil voter key | Not representable | main: `UtxoValidateCCVotingRestrictions` panics; PR: skips it as the sibling rules do | n/a (unreachable from decoded CBOR) | conforms | Open PR #3155. Library defect, hand-built transactions only |
-| [L4](#l4) | ledger | BadInputs covers only spent inputs | Alonzo: spent and collateral inputs; Babbage: reference inputs too | Spent inputs only; missing collateral and reference inputs are caught by the witness rules instead | All of them must exist | conforms | Same accept/reject on every modelled cell (model `ledger-utxo`); the failure reason differs, and acceptance depends on the witness rules continuing to resolve inputs. Needs a decision |
+| [L4](#l4) | ledger | BadInputs covers only spent inputs | Alonzo: spent and collateral inputs; Babbage: reference inputs too | main: spent inputs only; missing collateral and reference inputs are caught by the witness rules instead; PR: the reference's set, with BadInputs first in each rule list | All of them must exist | conforms | Open PR #3193 at `efd0b081` (model `ledger-utxo` `GoBadInputsComplete`, `GoMissingInputIsBadInputs`) |
 | [L5](#l5) | ledger | Byron transaction with no inputs or no outputs | Cannot be decoded (`NonEmpty`) | main: accepted; a no-input, zero-output transaction pays no fee (it counts as redeem-only) | Inputs and outputs non-empty | does not conform | Fixed on a local branch, no PR yet |
 | [L6](#l6) | ledger | Byron `maxTxSize` | `TxValidationTxTooLarge` | No check anywhere | `txSize tx ≤ maxTxSize` | does not conform | Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`) |
 | [L7](#l7) | ledger | Byron minimum fee rounding | Summand rounded to a whole lovelace when decoded, then the per-byte part rounded up | The whole sum rounded up | `a + b·txSize ≤ fee`, exact | conforms | Since the fee is a whole number, rounding the sum up is exactly the spec's check; the reference can accept a fee half a lovelace short. Differs only for a fractional summand, which no network has |
@@ -907,12 +907,12 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 
 **BadInputs covers only spent inputs** (kind 2: differs; both within the spec)
 
-- **What differs.** Reference: alonzo: spent and collateral inputs; Babbage: reference inputs too. gOuroboros: spent inputs only; missing collateral and reference inputs are caught by the witness rules instead.
+- **What differs.** Reference: alonzo: spent and collateral inputs; Babbage: reference inputs too. gOuroboros: main: spent inputs only; missing collateral and reference inputs are caught by the witness rules instead; PR: the reference's set, and BadInputs runs first so a missing input is reported as BadInputs.
 - **Spec.** cardano-ledger `1210d37fe6bd` `eras/alonzo/formal-spec/utxo.tex` line 644: "txins txb ∪ collateral txb ⊆ dom utxo"
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Rules/Utxo.hs` 540
-- **gOuroboros.** gOuroboros `d0b95845` `ledger/shelley/rules.go` 270, `ledger/alonzo/rules.go` 740, `ledger/babbage/rules.go` 724
+- **gOuroboros.** gOuroboros `d0b95845` `ledger/shelley/rules.go` 270, `ledger/alonzo/rules.go` 740, `ledger/babbage/rules.go` 724; PR #3193 head `efd0b081` `ledger/shelley/rules.go` `ValidateBadInputs`, and the rule lists in `ledger/{alonzo,babbage,conway,dijkstra}/rules.go`
 - **Verdict.** conforms
-- **Status.** Same accept/reject on every modelled cell (model `ledger-utxo`); the failure reason differs, and acceptance depends on the witness rules continuing to resolve inputs. Needs a decision
+- **Status.** Open PR #3193 at `efd0b081`. Same accept/reject on every modelled cell (model `ledger-utxo`); the failure is now BadInputs, as in the reference
 
 ### L5
 
@@ -1149,4 +1149,4 @@ Fixed by an open pull request (decide by reviewing and merging it):
 - **L2** Transaction id of a body without stored CBOR. Open PR #3141. Decoded bodies were always right; bodies built in code were wrong.
 - **L13** Conway vote naming an enacted purpose root. Open PR #3155; Dingo must stop returning the root.
 
-Also needing a decision, though they conform: **N37**, because PR #3130 follows dmq-node and so departs from the CIP-0137 text; and **L4**, where acceptance depends on other rules resolving inputs.
+Also needing a decision, though it conforms: **N37**, because PR #3130 follows dmq-node and so departs from the CIP-0137 text. **L4** is decided by PR #3193: BadInputs checks the reference's set and runs first.

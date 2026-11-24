@@ -77,6 +77,10 @@
 (*        ValidateCollateralVKeyWitnesses (ledger/common/witness.go       *)
 (*        99-178) resolves every collateral input of every transaction,  *)
 (*        and the script-witness rules resolve every reference input.     *)
+(*   [G10] PR #3193 at efd0b081: every Alonzo-on rule list (and Conway's *)
+(*        and Dijkstra's) runs BadInputs first; before, the [G7] rules and *)
+(*        the collateral balance rules ran ahead of it, and the list stops *)
+(*        at its first failure.                                            *)
 (*   [G8] ledger/alonzo/alonzo.go 1167-1194, ledger/babbage/babbage.go    *)
 (*        1540-1577 Consumed/Produced; ledger/common/block_state.go       *)
 (*        185-200 ApplyTransaction.                                        *)
@@ -84,7 +88,7 @@
 (* HOW TO READ THE SYMBOLS: see specs/keepalive/KeepAlive.tla and      *)
 (* specs/ledger-shelley/CertLifecycle.tla.                              *)
 (***************************************************************************)
-EXTENDS Integers, FiniteSets
+EXTENDS Integers, FiniteSets, Sequences
 
 CONSTANTS
     Era,          \* "Shelley", "Allegra", "Mary", "Alonzo" or "Babbage"
@@ -635,6 +639,66 @@ GoAgrees == \A tx \in Checked : GoAccepts(tx) = SpecAccepts(tx)
 \*   subset of Live)."
 GoBadInputsComplete ==
     \A tx \in Checked : (GoBadInputs(tx) \subseteq Live) = (SpecReadInputs(tx) \subseteq Live)
+
+\* In English: the rules of gOuroboros' rule list that look an input up, in
+\* the order the list runs them [G10]. BadInputs runs first. The mutation
+\* "GoBadInputsLate" puts back the old order: the collateral-vkey-witnesses
+\* rule, the script-witness rules and the collateral balance rules ahead of
+\* BadInputs [G7].
+\* Literally: "GoOrder is defined as: if Mutation equals "GoBadInputsLate"
+\*   then the sequence "CollWitness", "RefWitness", "CollBalance",
+\*   "BadInputs", else the sequence "BadInputs", "CollWitness", "RefWitness",
+\*   "CollBalance"."
+GoOrder ==
+    IF Mutation = "GoBadInputsLate"
+    THEN <<"CollWitness", "RefWitness", "CollBalance", "BadInputs">>
+    ELSE <<"BadInputs", "CollWitness", "RefWitness", "CollBalance">>
+
+\* In English: rule r fails on tx because an input it looks up is missing.
+\* The witness rules look up every collateral input (from Alonzo) and every
+\* reference input (from Babbage) [G7]; the collateral balance rules look
+\* the collateral up only when there are redeemers.
+\* Literally: "GoLookupFails of r and tx is defined as: in the case r equals
+\*   "BadInputs", GoBadInputs of tx is not a subset of Live; in the case r
+\*   equals "CollWitness", AtLeast of "Alonzo" and GoNoCollLookup is not true
+\*   and tx's coll is not a subset of Live; in the case r equals
+\*   "RefWitness", AtLeast of "Babbage" and GoNoRefLookup is not true and
+\*   tx's refs is not a subset of Live; in the case r equals "CollBalance",
+\*   AtLeast of "Alonzo" and tx's rdmrs and tx's coll is not a subset of
+\*   Live."
+GoLookupFails(r, tx) ==
+    CASE r = "BadInputs"   -> ~(GoBadInputs(tx) \subseteq Live)
+      [] r = "CollWitness" -> AtLeast("Alonzo") /\ ~GoNoCollLookup
+                              /\ ~(tx.coll \subseteq Live)
+      [] r = "RefWitness"  -> AtLeast("Babbage") /\ ~GoNoRefLookup
+                              /\ ~(tx.refs \subseteq Live)
+      [] r = "CollBalance" -> AtLeast("Alonzo") /\ tx.rdmrs
+                              /\ ~(tx.coll \subseteq Live)
+
+\* In English: the first rule in GoOrder that fails on tx for a missing
+\* input, or "none". The rule list stops at its first failure, so this is
+\* the error gOuroboros reports for the missing input.
+\* Literally: "GoFirstLookupFailure of tx is defined as: let Fails be the set
+\*   of every k in 1 through the length of GoOrder such that GoLookupFails of
+\*   GoOrder's k-th element and tx; then if Fails equals the empty set,
+\*   "none", else GoOrder's element at the k in Fails such that k is less
+\*   than or equal to every j in Fails."
+GoFirstLookupFailure(tx) ==
+    LET Fails == {k \in 1..Len(GoOrder) : GoLookupFails(GoOrder[k], tx)}
+    IN IF Fails = {} THEN "none"
+       ELSE GoOrder[CHOOSE k \in Fails : \A j \in Fails : k <= j]
+
+\* In English: whenever the reference rejects a transaction for a missing
+\* spent, collateral or reference input, gOuroboros reports it as BadInputs.
+\* The reference accumulates every failure, so its list always holds
+\* BadInputsUTxO; gOuroboros reports one, and no rule that looks the input
+\* up in its own terms may come first.
+\* Literally: "GoMissingInputIsBadInputs is defined as: for all tx in
+\*   Checked, if SpecReadInputs of tx is not a subset of Live, then
+\*   GoFirstLookupFailure of tx equals "BadInputs"."
+GoMissingInputIsBadInputs ==
+    \A tx \in Checked :
+        ~(SpecReadInputs(tx) \subseteq Live) => GoFirstLookupFailure(tx) = "BadInputs"
 
 -----------------------------------------------------------------------------
 (* TableSpec: every small UTxO, slot and credential state; nothing moves.   *)
