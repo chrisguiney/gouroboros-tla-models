@@ -51,7 +51,7 @@ Smallest and most self-contained first, so we learn the method before the hard
 protocols:
 
 1. keep-alive: three states. Done:
-   [`specs/01-keepalive`](../specs/01-keepalive/README.md).
+   [`specs/keepalive`](../specs/keepalive/README.md).
 2. handshake: version negotiation, still small.
 3. chain-sync: pipelining and rollbacks; where real bugs are likely.
 4. block-fetch and tx-submission: batching and flow control.

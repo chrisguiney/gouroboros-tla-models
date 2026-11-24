@@ -1088,7 +1088,7 @@ No cycle: every edge points away from `mu`/`submitGate` toward the leaf locks.
 
 #### Hazards
 
-1. apply_stage.go:620/628, pipeline.go:701 — Stop waits on peer **(known: 16-pipeline-cbor `BlockPipelineNoConsumerBug`)**. G1 calls `Submit` then `Fence` repeatedly and never reads `Results`; the runner fills `resultsQueue`, `forwardResults` blocks on the unbuffered `resultsChan`, the runner blocks on `resultsQueue`, so `completedSequence` stops advancing and G1's next `Fence` (or `Submit`'s capacity wait at 790, or its raw-budget wait at 399-405, since budget is returned only at hand-off 705) never returns without a context deadline.
+1. apply_stage.go:620/628, pipeline.go:701 — Stop waits on peer **(known: pipeline-cbor `BlockPipelineNoConsumerBug`)**. G1 calls `Submit` then `Fence` repeatedly and never reads `Results`; the runner fills `resultsQueue`, `forwardResults` blocks on the unbuffered `resultsChan`, the runner blocks on `resultsQueue`, so `completedSequence` stops advancing and G1's next `Fence` (or `Submit`'s capacity wait at 790, or its raw-budget wait at 399-405, since budget is returned only at hand-off 705) never returns without a context deadline.
 2. pipeline.go:1080 — other **(known: `BlockPipelineDrainStopBug`)**. G1 calls `Stop`, which cancels `ctx` while the runner is inside `ApplyFunc` (cancellation does not interrupt it); G2's `WaitForDrain` sees `stopping` and returns nil; G2 rolls back; the runner's `ApplyFunc` then commits a block from before the boundary.
 3. apply_stage.go:554 — Stop waits on peer (same family as 1, documented in the comment at 549-551). On a fatal error the runner sends the committed prefix with no `ctx` case; with no `Results` reader and no `Stop`, the runner goroutine blocks forever.
 4. pipeline.go:673, 697 — unjoined goroutine. The parent context passed to `Start` is cancelled and `Stop` is never called: workers, runner and `metricsCollector` exit on `ctx.Done`, but `forwardResults` waits on `resultsQueue`, which only `Stop` closes; it and every item left in the inter-stage channels (still in `activeItems`, still holding raw budget) are retained until `Stop`.
@@ -1288,7 +1288,7 @@ No cycle: every edge points away from `mu`/`submitGate` toward the leaf locks.
 
 #### Hazards
 
-1. client.go:168-177 vs 97-98 — other (check-then-act race) **(known: 12-leios-peras `LeiosNotifyQuitRaceBug`, fix on `fix/leiosnotify-request-after-quit`, not on this SHA)**. The loop loads `quitting == false`; `Stop` stores true and queues `MsgQuit`; the loop's refill requests are queued after `MsgQuit`.
+1. client.go:168-177 vs 97-98 — other (check-then-act race) **(known: leios-peras `LeiosNotifyQuitRaceBug`, fix on `fix/leiosnotify-request-after-quit`, not on this SHA)**. The loop loads `quitting == false`; `Stop` stores true and queues `MsgQuit`; the loop's refill requests are queued after `MsgQuit`.
 2. client.go:215-217 — other **(known: `LeiosNotifyRogueCancelBug`)**. A `MsgCanceled` before `MsgQuit` is ignored, so the loop waits for a notification that will not come.
 3. server.go:210, 252 — unjoined goroutine. A `RequestNextFunc` that ignores `QuitChan` keeps goroutine 210, and goroutine 252 waiting on its result, alive after the protocol stops; `ResponseSentFunc` may then run long after `Stop`.
 4. server.go:141, 211 — other (callback concurrency). Each pipelined request runs on its own goroutine, so `RequestNextFunc` is called concurrently, up to the pipeline depth, and replies go out in completion order, not request order.
@@ -1376,7 +1376,7 @@ None new. (Known, not concurrency: the server does not restart after `MsgDone`, 
 
 1. client.go:281-323 — lock across user callback. `validateAndReserve` holds the `Config`-wide `messageReplayState.mu` while `PrepareMessages` calls the node's `CurrentSlot`, stake and opcert lookups; one slow lookup stalls reply handling on every connection sharing the `Config`, and a lookup that re-enters this client's reply path would self-deadlock.
 2. server.go:94, 330 — unjoined goroutine. A `Server` constructed and never stopped, with a nil `ConnectionDoneChan` and no muxer, keeps the cleaner goroutine and its ticker forever: only `stop()` or a protocol stop ends it, and `NewServer` starts it before `Start`.
-3. server.go:300-309 — other **(known: 11-dmq `DmqRestartLocalNotificationNoRestartBug`)**. `MsgClientDone` runs `stop()` and the server never restarts, so a later run's blocking request returns `ErrProtocolShuttingDown`.
+3. server.go:300-309 — other **(known: dmq `DmqRestartLocalNotificationNoRestartBug`)**. `MsgClientDone` runs `stop()` and the server never restarts, so a later run's blocking request returns `ErrProtocolShuttingDown`.
 
 **Ruled out**
 - Lost wakeup between drain and wait (the `LocalMessageNotificationAppWaitBug` pattern): `messageAdded` is a broadcast channel captured under `lock` (187, 277) and closed under it (147), the fix the model checks in `LocalMessageNotificationBroadcast.cfg`.
@@ -1411,7 +1411,7 @@ None.
 
 #### Hazards
 
-1. client.go:99 — other **(known: 11-dmq `LocalMessageSubmissionConcurrentBug`)**. Two concurrent `SubmitMessage` calls queue A then B and return B then A; the node answers A then B; `AcceptMessageFunc`/`RejectMessageFunc` get no message or id, so an application pairing answers with calls by return order attributes A's rejection to B.
+1. client.go:99 — other **(known: dmq `LocalMessageSubmissionConcurrentBug`)**. Two concurrent `SubmitMessage` calls queue A then B and return B then A; the node answers A then B; `AcceptMessageFunc`/`RejectMessageFunc` get no message or id, so an application pairing answers with calls by return order attributes A's rejection to B.
 2. server.go:315-323 — other **(known: `DmqRestartLocalSubmissionNoRestartBug`)**. The server does not restart after `MsgDone`.
 
 **Ruled out**
@@ -1479,7 +1479,7 @@ point into one log, and only the state whose `end == len(entries)` appends in
 place (`pbft.go:603-605`, `:650-672`); the others copy. `window()` and
 `size()` read `start`/`end`, which are per-value and need no lock.
 `validate()` (`:581`) calls `size()` without the lock, which is safe for the
-same reason. The model `specs/13-consensus/PBFTWindow.tla` already covers the
+same reason. The model `specs/consensus/PBFTWindow.tla` already covers the
 in-place-versus-copy rule (its `AlwaysInPlaceBug` and `ProbeCopyBug`
 configurations).
 
@@ -1844,7 +1844,7 @@ runs only after `DoneChan`, which cannot close while a handler is running.
 | ID | Detail | Status at `d8f5bc2a` |
 | --- | --- | --- |
 | K1 | localtxmonitor hazard 1 | **Confirmed.** `Acquire` takes `busyMutex` (`protocol/localtxmonitor/client.go:127-129`) and holds it through the wait at `:328-333`; `Stop` takes `busyMutex` at `:108` before it calls `Protocol.Stop`, so `DoneChan` cannot close to release the waiter. G1 `Acquire` waits for `MsgAcquired`; G2 `Stop` blocks until the node answers or the Acquiring timeout stops the protocol (unbounded with a zero timeout). |
-| K2 | blockfetch hazard 1 | **Not as described.** The `rangeSendToken` is returned by a `defer` (`protocol/blockfetch/client.go:1041-1043`), which runs after `removeLocked` (`:1051-1053`), so no other sender sees a refused request. The real window is from the append (`:1033`) to the send result (`:1044`): G1 appends request B and blocks in `SendMessageContext`; G2 (shutdown watcher `:460`, `watchRangeDeadline`, or `Stop` `:540`) drains B and runs `RangeDoneFunc(B.id)`; G1's send fails and `RequestRange` returns an error, so the caller got a completion for an id it was never given. `specs/06-blockfetch/BlockFetchQueueRefusedBug.cfg` reproduces it. |
+| K2 | blockfetch hazard 1 | **Not as described.** The `rangeSendToken` is returned by a `defer` (`protocol/blockfetch/client.go:1041-1043`), which runs after `removeLocked` (`:1051-1053`), so no other sender sees a refused request. The real window is from the append (`:1033`) to the send result (`:1044`): G1 appends request B and blocks in `SendMessageContext`; G2 (shutdown watcher `:460`, `watchRangeDeadline`, or `Stop` `:540`) drains B and runs `RangeDoneFunc(B.id)`; G1's send fails and `RequestRange` returns an error, so the caller got a completion for an id it was never given. `specs/blockfetch/BlockFetchQueueRefusedBug.cfg` reproduces it. |
 | K3 | engine hazard 1 | **Confirmed.** recvLoop applies the transition (`protocol/protocol.go:2240`), stateLoop's `setState` arms the new state's timer (`:2361`), and only then does recvLoop call `MessageHandlerFunc` (`:2260`). G1 (recvLoop) runs a slow handler for the message that entered state S; G2 (stateLoop) fires S's timeout while the handler, or the reply the handler was about to send, is still pending. The timer-or-transition `select` (`:2376`) also picks at random when both are ready. The handshake `Confirm` timer is one instance. |
 
 ### Everything else
@@ -1923,22 +1923,22 @@ concurrency (as inventoried above) is covered.
 
 | Component | Covered by | Concurrency covered | Concurrency not covered |
 | --- | --- | --- | --- |
-| connection | `02-connection/ConnectionShutdown.tla`, `01-keepalive/KeepAliveLifecycle.tla` | `onceClose`, forwarders vs close, shutdown order, late `waitGroup.Go` in logical form | Close during Dial (A1), the WaitGroup rule (A2), goroutines outliving `Close` (A3), handshake timer (A4) |
-| muxer | `02-connection/MuxIngress.tla`, `MuxHandover.tla` | ingress limits, budget, backpressure, suspend/resume, carry | `sync.Cond` (checked by hand: no lost wakeup), receiver stop vs metrics callbacks, registration fence, egress, start gate (A5), cleanup goroutine (A6) |
-| engine | `03-engine/EngineAdmission.tla`, `EnginePipelining.tla` | admission snapshot, pipelined reply reservations, send token | **every timer** (K3), `lifecycleMu` Start/Stop ordering, loop joining (A7, A8), pre-`Start` send (A9) |
-| handshake | `05-handshake` | negotiation, a silent peer as an abstract give-up | engine timer racing the handler (K3), `FinishedFunc` after timeout (A4) |
-| keepalive | `01-keepalive/KeepAliveLifecycle.tla` | server `protocolMu`, restart vs stop | the client's `AfterFunc` timer, `timerMutex`, `cookieMutex` (A11) |
-| blockfetch | `06-blockfetch/BlockFetchQueue.tla`, `BlockFetchLifecycle.tla` | queue order, send token, drain once, K2 (`BlockFetchQueueRefusedBug`) | `busyMutex`/`busyStateMutex` handoff, `deliveryMu`, callbacks under `lifecycleMutex` (B1, X1), watcher outliving `Stop` (B3), in-flight byte bound |
-| chainsync | `04-chainsync/ChainSyncClient.tla`, `ChainSyncLifecycle.tla`, `ChainSyncQueries.tla` | ready-signal budget under `lifecycleMutex`, stop/drain/start, query routing | `GetCurrentTip` worker and `busyMutex` (B6), `Stop`'s 5 s `TryLock`, drain goroutine (B7) |
-| txsubmission | `07-txsubmission` | window and acknowledgement rules | all three server locks, the one-slot result handoff, restart vs `Stop` |
-| peersharing | `08-peersharing` | amount rules, server restart | `exchangeLock` with concurrent `GetPeers`, unbuffered reply handoff |
-| localtxsubmission, localtxmonitor | `09-localtx` | `busyMutex` serialization, `Stop` release-then-done, timeouts | `Stop` blocked behind `busyMutex` across a reply wait (K1, B11, B12), dead guard (B13) |
-| localstatequery | `10-localstatequery/LocalStateQueryClient.tla` | `busyMutex`, unbuffered handoff, `Stop` -> `DoneChan` -> closer | nothing material |
-| messagesubmission | `11-dmq` | window rules, restart | lock structure is leaf-only; nothing to find |
-| localmessagenotification, localmessagesubmission | `11-dmq` | wakeup (fixed form), restart (C24, C26), concurrent-call attribution (C25) | `Config`-wide replay lock across connections and callbacks (C22), cleaner goroutine (C23), replay reserve/release tokens |
-| leiosfetch, leiosvotes, leiosnotify, perasvotes | `12-leios-peras` | request slot answers, vote loop vs `RequestNext`, client quit race (C16), early cancel (C17) | range delivery goroutine (C8), `busyMutex` and loop joins (C10, C11, C21), `opMu` (C13, C14), server goroutines (C15, C18, C19) |
-| pipeline | `16-pipeline-cbor/BlockPipeline.tla` | ordered exactly-once apply, no apply after failure, pending bound, C1, C2 | `submitGate`, raw budget and `activeItems`, parent cancel without `Stop` (C4), `Stop` under `mu` behind `ApplyFunc` (C5), close ordering |
-| consensus | `13-consensus/PBFTWindow.tla` | the shared log's in-place-versus-copy rule (as a sequential rule) | nothing material: `pbftLog.mu` is a leaf |
+| connection | `connection/ConnectionShutdown.tla`, `keepalive/KeepAliveLifecycle.tla` | `onceClose`, forwarders vs close, shutdown order, late `waitGroup.Go` in logical form | Close during Dial (A1), the WaitGroup rule (A2), goroutines outliving `Close` (A3), handshake timer (A4) |
+| muxer | `connection/MuxIngress.tla`, `MuxHandover.tla` | ingress limits, budget, backpressure, suspend/resume, carry | `sync.Cond` (checked by hand: no lost wakeup), receiver stop vs metrics callbacks, registration fence, egress, start gate (A5), cleanup goroutine (A6) |
+| engine | `engine/EngineAdmission.tla`, `EnginePipelining.tla` | admission snapshot, pipelined reply reservations, send token | **every timer** (K3), `lifecycleMu` Start/Stop ordering, loop joining (A7, A8), pre-`Start` send (A9) |
+| handshake | `handshake` | negotiation, a silent peer as an abstract give-up | engine timer racing the handler (K3), `FinishedFunc` after timeout (A4) |
+| keepalive | `keepalive/KeepAliveLifecycle.tla` | server `protocolMu`, restart vs stop | the client's `AfterFunc` timer, `timerMutex`, `cookieMutex` (A11) |
+| blockfetch | `blockfetch/BlockFetchQueue.tla`, `BlockFetchLifecycle.tla` | queue order, send token, drain once, K2 (`BlockFetchQueueRefusedBug`) | `busyMutex`/`busyStateMutex` handoff, `deliveryMu`, callbacks under `lifecycleMutex` (B1, X1), watcher outliving `Stop` (B3), in-flight byte bound |
+| chainsync | `chainsync/ChainSyncClient.tla`, `ChainSyncLifecycle.tla`, `ChainSyncQueries.tla` | ready-signal budget under `lifecycleMutex`, stop/drain/start, query routing | `GetCurrentTip` worker and `busyMutex` (B6), `Stop`'s 5 s `TryLock`, drain goroutine (B7) |
+| txsubmission | `txsubmission` | window and acknowledgement rules | all three server locks, the one-slot result handoff, restart vs `Stop` |
+| peersharing | `peersharing` | amount rules, server restart | `exchangeLock` with concurrent `GetPeers`, unbuffered reply handoff |
+| localtxsubmission, localtxmonitor | `localtx` | `busyMutex` serialization, `Stop` release-then-done, timeouts | `Stop` blocked behind `busyMutex` across a reply wait (K1, B11, B12), dead guard (B13) |
+| localstatequery | `localstatequery/LocalStateQueryClient.tla` | `busyMutex`, unbuffered handoff, `Stop` -> `DoneChan` -> closer | nothing material |
+| messagesubmission | `dmq` | window rules, restart | lock structure is leaf-only; nothing to find |
+| localmessagenotification, localmessagesubmission | `dmq` | wakeup (fixed form), restart (C24, C26), concurrent-call attribution (C25) | `Config`-wide replay lock across connections and callbacks (C22), cleaner goroutine (C23), replay reserve/release tokens |
+| leiosfetch, leiosvotes, leiosnotify, perasvotes | `leios-peras` | request slot answers, vote loop vs `RequestNext`, client quit race (C16), early cancel (C17) | range delivery goroutine (C8), `busyMutex` and loop joins (C10, C11, C21), `opMu` (C13, C14), server goroutines (C15, C18, C19) |
+| pipeline | `pipeline-cbor/BlockPipeline.tla` | ordered exactly-once apply, no apply after failure, pending bound, C1, C2 | `submitGate`, raw budget and `activeItems`, parent cancel without `Stop` (C4), `Stop` under `mu` behind `ApplyFunc` (C5), close ordering |
+| consensus | `consensus/PBFTWindow.tla` | the shared log's in-place-versus-copy rule (as a sequential rule) | nothing material: `pbftLog.mu` is a leaf |
 | `ledger/common`, hash cache | none | | the CAS state machine (D3-D5), the scoped memo's panic path (D1, D2) |
 | `ledger/leios`, cbor | none | | nothing material: leaf locks over pure caches |
 
@@ -1988,7 +1988,7 @@ convention it goes in a `*Bug.cfg`.
 
 The top five in full:
 
-1. **`EngineTimeout.tla`** (`specs/03-engine`). Processes: stateLoop
+1. **`EngineTimeout.tla`** (`specs/engine`). Processes: stateLoop
    (`setState` arms and stops the timer; `select` over the timer and the
    transition channel), recvLoop (transition, then a handler that lasts k
    ticks), readLoop admission, and a peer that replies within its deadline; a
@@ -1997,14 +1997,14 @@ The top five in full:
    to fail, K3), `NoTimeoutWhileLocalHandlerRuns` (a timeout in state S never
    fires while recvLoop is in the handler that entered S; expected to fail,
    K3), `TimerStoppedOnLeave` (leaving S stops S's timer).
-2. **`EngineLifecycle.tla`** (`specs/03-engine`). `Start`, `Stop`,
+2. **`EngineLifecycle.tla`** (`specs/engine`). `Start`, `Stop`,
    `StopForRestart` and `EnsureRegistered` under `lifecycleMu`; `onceStop`,
    `doneOnce`, the done watcher; the four loops with their exit edges; a
    `MessageReceivedFunc` that may block. Invariants:
    `DoneImpliesRecvSendExited`, `NoLoopAfterStopStart` (a `Start` after
    `Stop` starts nothing), `StopForRestartTerminates` (expected to fail when
    the callback blocks, A7), `DoneClosedOnce`.
-3. **`ConnectionTeardown.tla`** (`specs/02-connection`). Processes: setup
+3. **`ConnectionTeardown.tla`** (`specs/connection`). Processes: setup
    (make `doneChan` `connection.go:678`, create muxer `:695`, set handshake
    `:803`, `StartOnce` `:809`, the select at `:813`, `waitGroup.Go` `:838`),
    closer (`Close`), `shutdown`, the muxer cleanup goroutine, one protocol
@@ -2013,7 +2013,7 @@ The top five in full:
    stopped and conn closed; expected to fail, A1), `NoAddDuringZeroWait`
    (expected to fail, A2), `NoCallbackAfterClose` (expected to fail, A3),
    `FinishedChanClosedOnce`.
-4. **`BlockFetchBusyDelivery.tla`** (`specs/06-blockfetch`). Processes: a
+4. **`BlockFetchBusyDelivery.tla`** (`specs/blockfetch`). Processes: a
    caller (`acquireBusy`, send, wait for start), the handler (`StartBatch`,
    `Block` under `deliveryMu`, `BatchDone`), `watchRangeDeadline`, the
    shutdown watcher, two `Stop` calls, and a callback that may re-enter
@@ -2024,7 +2024,7 @@ The top five in full:
    fail, B1), `NoResolveDuringDelivery`, `NoOldGenCallbackAfterStart`
    (expected to fail, B3), and deadlock checking on (TLC reports a state with
    no enabled step; expected to find X1 when the callback re-enters).
-5. **`PipelineLifecycle.tla`** (`specs/16-pipeline-cbor`). N submitters
+5. **`PipelineLifecycle.tla`** (`specs/pipeline-cbor`). N submitters
    (`rawBudgetMu` reserve or wait, take `submitGate`, capacity check, send to
    `submitChan`, release the gate), one worker per stage (receive, send), the
    runner (receive, `ApplyFunc` start, `ApplyFunc` end, send to
@@ -2067,7 +2067,7 @@ The notes below come from the component review. Each table says what the existin
 
 #### Connection, muxer, engine, handshake, keep-alive
 
-Models read: 01-keepalive/KeepAliveLifecycle.tla; 02-connection/{ConnectionShutdown,MuxHandover,MuxIngress}.tla; 03-engine/{EngineAdmission,EnginePipelining}.tla; 05-handshake (README). The 02-connection README lists as not yet modelled "timeouts, the egress side of the muxer, and whether protocol goroutines can outlive `Close`". 01-keepalive lists "real time".
+Models read: keepalive/KeepAliveLifecycle.tla; connection/{ConnectionShutdown,MuxHandover,MuxIngress}.tla; engine/{EngineAdmission,EnginePipelining}.tla; handshake (README). The connection README lists as not yet modelled "timeouts, the egress side of the muxer, and whether protocol goroutines can outlive `Close`". keepalive lists "real time".
 
 | component | abstracted by existing models | not abstracted |
 | --- | --- | --- |
@@ -2080,13 +2080,13 @@ Models read: 01-keepalive/KeepAliveLifecycle.tla; 02-connection/{ConnectionShutd
 
 Proposed models. Each step is one lock acquire or release, or one channel operation.
 
-- **`ConnectionTeardown.tla`** (02-connection). Processes: `setup` (make `doneChan` :678, create muxer :695, set handshake :803, `StartOnce` :809, select :813, `waitGroup.Go` :838, lock/unlock/Start), `closer` (Close), `shutdown`, muxer `cleanup`, one protocol whose loops are `running`/`exited` and one user callback `idle`/`running`. Invariants: `MuxerStoppedWhenClosed` (quiescent ∧ `doneChan` closed ⇒ muxer stopped ∧ conn closed; expected to fail for hazard 1), `NoAddDuringZeroWait` (`wgWaiting` ∧ counter = 0 ⇒ no `Go`; hazard 2), `NoCallbackAfterClose` (Close returned ⇒ no callback running; expected to fail, hazard 3), `FinishedChanClosedOnce`.
-- **`MuxReceiverStop.tla`** (02-connection). Processes: muxer readLoop (enqueue, then the deferred sweep under `protocolReceiversMutex`), `forward` (`cond` Wait as release-and-block, dequeue, send on `ch` with `done`), one metrics callback on either goroutine, `UnregisterProtocol`, `RegisterProtocol` with fence and cleanup. Invariants: `NoSendOnClosedCh`, `CondNoLostWakeup` (forward blocked in Wait ⇒ queue = ⟨⟩ ∧ ¬closed), `StopReturnsOnlyWhenForwarderDoneOrCallbackActive`, `NoWaitGroupAddAfterWait`.
-- **`MuxEgress.tla`** (02-connection). N Praos and Leios senders, `acquire`/`release`/`remove` with `done`. Invariants: `AtMostOneHolder`, `NoLostTurn` (busy ⇒ a holder exists or a granted waiter will become one), `LeiosWaitBounded` (`praosRun` ≤ `praosBurst`), `NoHolderAfterDoneQuiescent`.
-- **`MuxStartGate.tla`** (small, 02-connection). `startChan` with capacity 1, `StartOnce`, `Start`, the readLoop gate. Invariant: `StartedEventuallyReads` (`Start` called ⇒ the loop does not block on `startChan` again); expected to fail for Start-before-consume (hazard 1), and to pass under the Connection ordering.
-- **`EngineTimeout.tla`** (03-engine). A discrete clock with bounded ticks; stateLoop (setState arms and stops the timer, select over timer or `ch`), recvLoop (transition, then a handler lasting k ticks), readLoop admission, a peer replying within its deadline. Invariants: `NoTimeoutWhilePeerReplied` (timeout fired ⇒ no admitted unapplied message), `NoTimeoutWhileLocalHandlerRuns` (timeout in state S ⇒ recvLoop not in the handler that entered S); both are expected to fail (known hazard 1). `TimerStoppedOnLeave`.
-- **`EngineLifecycle.tla`** (03-engine). `Start`, `Stop`, `StopForRestart`, `EnsureRegistered` under `lifecycleMu`; `onceStop`, `doneOnce`, done watcher; four loops with exit edges; `MessageReceivedFunc` that may block. Invariants: `DoneImpliesRecvSendExited`, `NoLoopAfterStopStart` (Start after Stop starts nothing), `StopForRestartTerminates` (fails when the callback blocks; hazard 2), `DoneClosedOnce`.
-- **`KeepAliveClientTimer.tla`** (01-keepalive). AfterFunc callback (`sendKeepAlive` steps), `Client.Stop` (lock, `timer.Stop`, nil, unlock, `Protocol.Stop`), done watcher, response handler. Invariants: `AtMostOneInFlight`, `NoTimerAfterDoneQuiescent`, `ExtraFiresAfterStopAtMostOne` (hazard 1 is bounded), `NoSendSucceedsAfterStop`.
+- **`ConnectionTeardown.tla`** (connection). Processes: `setup` (make `doneChan` :678, create muxer :695, set handshake :803, `StartOnce` :809, select :813, `waitGroup.Go` :838, lock/unlock/Start), `closer` (Close), `shutdown`, muxer `cleanup`, one protocol whose loops are `running`/`exited` and one user callback `idle`/`running`. Invariants: `MuxerStoppedWhenClosed` (quiescent ∧ `doneChan` closed ⇒ muxer stopped ∧ conn closed; expected to fail for hazard 1), `NoAddDuringZeroWait` (`wgWaiting` ∧ counter = 0 ⇒ no `Go`; hazard 2), `NoCallbackAfterClose` (Close returned ⇒ no callback running; expected to fail, hazard 3), `FinishedChanClosedOnce`.
+- **`MuxReceiverStop.tla`** (connection). Processes: muxer readLoop (enqueue, then the deferred sweep under `protocolReceiversMutex`), `forward` (`cond` Wait as release-and-block, dequeue, send on `ch` with `done`), one metrics callback on either goroutine, `UnregisterProtocol`, `RegisterProtocol` with fence and cleanup. Invariants: `NoSendOnClosedCh`, `CondNoLostWakeup` (forward blocked in Wait ⇒ queue = ⟨⟩ ∧ ¬closed), `StopReturnsOnlyWhenForwarderDoneOrCallbackActive`, `NoWaitGroupAddAfterWait`.
+- **`MuxEgress.tla`** (connection). N Praos and Leios senders, `acquire`/`release`/`remove` with `done`. Invariants: `AtMostOneHolder`, `NoLostTurn` (busy ⇒ a holder exists or a granted waiter will become one), `LeiosWaitBounded` (`praosRun` ≤ `praosBurst`), `NoHolderAfterDoneQuiescent`.
+- **`MuxStartGate.tla`** (small, connection). `startChan` with capacity 1, `StartOnce`, `Start`, the readLoop gate. Invariant: `StartedEventuallyReads` (`Start` called ⇒ the loop does not block on `startChan` again); expected to fail for Start-before-consume (hazard 1), and to pass under the Connection ordering.
+- **`EngineTimeout.tla`** (engine). A discrete clock with bounded ticks; stateLoop (setState arms and stops the timer, select over timer or `ch`), recvLoop (transition, then a handler lasting k ticks), readLoop admission, a peer replying within its deadline. Invariants: `NoTimeoutWhilePeerReplied` (timeout fired ⇒ no admitted unapplied message), `NoTimeoutWhileLocalHandlerRuns` (timeout in state S ⇒ recvLoop not in the handler that entered S); both are expected to fail (known hazard 1). `TimerStoppedOnLeave`.
+- **`EngineLifecycle.tla`** (engine). `Start`, `Stop`, `StopForRestart`, `EnsureRegistered` under `lifecycleMu`; `onceStop`, `doneOnce`, done watcher; four loops with exit edges; `MessageReceivedFunc` that may block. Invariants: `DoneImpliesRecvSendExited`, `NoLoopAfterStopStart` (Start after Stop starts nothing), `StopForRestartTerminates` (fails when the callback blocks; hazard 2), `DoneClosedOnce`.
+- **`KeepAliveClientTimer.tla`** (keepalive). AfterFunc callback (`sendKeepAlive` steps), `Client.Stop` (lock, `timer.Stop`, nil, unlock, `Protocol.Stop`), done watcher, response handler. Invariants: `AtMostOneInFlight`, `NoTimerAfterDoneQuiescent`, `ExtraFiresAfterStopAtMostOne` (hazard 1 is bounded), `NoSendSucceedsAfterStop`.
 - **`AuthOpCertCache.tla`** (optional, low priority). Two `PrepareMessages` batches with snapshot and commit, plus a single verify. Invariants: `IssueNumberMonotonic`, `CommitNeverLowers`.
 
 #### Node-to-node and node-to-client clients and servers
@@ -2098,7 +2098,7 @@ Models: `specs/` in this repository.
 | blockfetch | `BlockFetchQueue.tla`: FIFO head matching, the send token (`NoTokenBug`), drain and `RangeDoneFunc` once, **hazard 1** (`BlockFetchQueueRefusedBug.cfg` fails; the fix passes as `DeferSending`). `BlockFetchLifecycle.tla`: `Stop`/`Start` without `MsgClientDone` | the `busyMutex`/`busyStateMutex` handoff and the :606 releaser; `deliveryMu` vs `watchRangeDeadline` vs the handler; `Stop`'s callbacks under `lifecycleMutex` (hazard 2); the shutdown watcher outliving `Stop` (hazard 4); the `bytesFreed` broadcast and in-flight bound; ingress allowance ordering |
 | chainsync | `ChainSyncClient.tla`: the ready-signal budget under `lifecycleMutex` (`SignalsFit`), `Reintersect` quiesce. `ChainSyncLifecycle.tla`: `Stop`, `StopAfterDrain`, `Start`, `stoppedWithoutDone`. `ChainSyncQueries.tla`: `GetCurrentTip`/`Jump` answer routing | the `GetCurrentTip` worker's join and its `busyMutex` wait (hazard 1); `stopRunning`'s 5 s `TryLock`; `GetAvailableBlockRange` (excluded in slice 1's "Not in this slice"); the pipeline watcher and drain goroutines (hazard 2) |
 | txsubmission | `TxSubmission.tla`/`Table`: window and ack semantics only. The README's "Not modelled" lists the restart race and client `Stop`/`Start` | all three server locks (`requestMu`, `protocolMu`, `stateMu`); the one-slot result handoff and the `DoneChan`/`stopping` path; `handleDone`'s restart vs `Stop`; the client lifecycle |
-| peersharing | `PeerSharing.tla`: amount and size rules, server restart through Model 01's stop guard | `exchangeLock` with concurrent `GetPeers` and the `requestedAmount` handoff to the handler; the unbuffered reply handoff |
+| peersharing | `PeerSharing.tla`: amount and size rules, server restart through Model `keepalive`'s stop guard | `exchangeLock` with concurrent `GetPeers` and the `requestedAmount` handoff to the handler; the unbuffered reply handoff |
 | localtxsubmission / localtxmonitor | `LocalTxSubmission.tla`, `LocalTxMonitor.tla`: `busyMutex` serialization (`NoMutexBug`), `Stop` release-then-done (`StopBug`), timeouts, restart | `Stop` blocked on `busyMutex` across a reply wait (localtxmonitor hazards 1-2, localtxsubmission hazard 1); the dead `DoneChan` arm in `deliverResult`; the closer goroutine vs handler send |
 | localstatequery | `LocalStateQueryClient.tla` (slice 2): `busyMutex`, unbuffered handoff, `Stop` -> `DoneChan` -> the closer goroutine, `acquired` flag | nothing material for concurrency; the `currentEra` happens-before is a Go memory-model point, not a TLA+ one |
 
@@ -2154,8 +2154,8 @@ Models: `specs/` in this repository.
 
 #### Pipeline, Leios/Peras and DMQ
 
-Models: `specs/16-pipeline-cbor/BlockPipeline.tla`, `specs/11-dmq/*.tla`,
-`specs/12-leios-peras/*.tla` (gouroboros-tla-models).
+Models: `specs/pipeline-cbor/BlockPipeline.tla`, `specs/dmq/*.tla`,
+`specs/leios-peras/*.tla` (gouroboros-tla-models).
 
 | Package | Modelled | Not modelled |
 |---|---|---|
