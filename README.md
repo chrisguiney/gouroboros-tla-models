@@ -62,7 +62,10 @@ Read these in order. Each one builds on the last.
     Eagerness.
 20. [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
     UTxO rule, fees and heavyweight delegation.
-21. [Glossary](docs/glossary.md): keep it open while you read anything else.
+21. [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
+    certification, endorser-block application, rollback and the
+    certificate's committee.
+22. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
