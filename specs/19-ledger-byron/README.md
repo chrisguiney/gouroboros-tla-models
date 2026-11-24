@@ -136,6 +136,13 @@ gOuroboros side does the same, `SlotsAgree` checks it, and
 "OwnEntryExempt"`). The state counts fell because the two sides' slots no
 longer diverge.
 
+A second review follow-up changes only the Go test, not the model:
+`TestPBFTDelegationModelTable` compared the activation slots by looking up
+the genesis keys, so a missing entry read as slot 0 and an extra entry went
+unseen. It now compares the whole map, as `SlotsAgree` (`gDws = rDws`)
+always did; a code mutation dropping a genesis zero-slot entry fails the new
+check and passed the old one.
+
 The earlier-slot check itself is unreachable while slots increase: two
 schedules of one delegator always have increasing activation slots. The Go
 model test confirms it (a mutation removing it survives).
