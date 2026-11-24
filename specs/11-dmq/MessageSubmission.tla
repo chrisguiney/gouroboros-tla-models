@@ -17,7 +17,16 @@
 (* Bodies may be asked only for ids in the window, each at most once.      *)
 (*                                                                         *)
 (* In gOuroboros (protocol/messagesubmission) the OUTBOUND side is the     *)
-(* Client and the INBOUND side is the Server, in both versions. Both sides *)
+(* Client and the INBOUND side is the Server, in both versions. Which of   *)
+(* them is the connection's initiator depends on the version: in V1 the    *)
+(* outbound (tx-submission's client) and in V2 the inbound, as dmq-node    *)
+(* runs them [R6]. Before the wire fix gOuroboros made the outbound the    *)
+(* initiator in V2 too, so against dmq-node both ends ran the outbound and *)
+(* neither could leave StIdle (RolesMatch = FALSE). In V2 the outbound may *)
+(* answer a blocking request with MsgReplyNoSigIds [R1][R5], which         *)
+(* dmq-node's outbound does after 17 s; the requester gives up after 20 s. *)
+(* gOuroboros had no such message before the fix (NoIdsReply = FALSE).    *)
+(* Both sides *)
 (* check a request with validateMessageIDRequest and a reply with          *)
 (* reconcileMessageIDs (validation.go): the Server before it sends         *)
 (* (requestMessageIDs, RequestMessages), the Client when it receives       *)
@@ -33,6 +42,9 @@
 (*   HonestNeverRefused  the outbound refuses only a peer that broke the   *)
 (*                   rules: the gOuroboros Server's own checks keep it     *)
 (*                   inside what the outbound accepts.                     *)
+(*   Deadlock        only Quiet may stand still: in V2 a blocking request  *)
+(*                   must be answered, because the requester gives up      *)
+(*                   after 20 s, and someone must run the inbound side.    *)
 (*                                                                         *)
 (* Sources:                                                                *)
 (*   CIP-0137 (cardano-foundation/CIPs 03387471), CIP-0137/README.md:      *)
@@ -55,6 +67,16 @@
 (*   [R2] dmq-node/src/DMQ/SigSubmissionV2/Outbound.hs 90-211: the V2      *)
 (*        outbound's checks, including ProtocolErrorDuplicateRequest for   *)
 (*        an id already delivered (196-211).                               *)
+(*   [R5] dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs 91: the V2    *)
+(*        blocking time limit, 20 s; 139-180: the V2 tags, MsgReplyNoSigIds *)
+(*        is [3]. DMQ/Protocol/SigSubmissionV2/Inbound.hs 99-100: the       *)
+(*        inbound treats it as an empty reply. Outbound.hs 103, 129-153:    *)
+(*        the acknowledgement still applies, the answer comes after 17 s.  *)
+(*   [R6] dmq-node/src/DMQ/NodeToNode.hs 242-308: the initiator runs the   *)
+(*        V2 inbound and the V1 outbound; 311-357: the responder runs the  *)
+(*        V2 outbound and the V1 inbound.                                  *)
+(*   [R7] dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs 68-78: V1 time *)
+(*        limits; a blocking request may wait forever.                     *)
 (*   [R3] IntersectMBO/ouroboros-network 4646039f (ouroboros-network       *)
 (*        2.0.0.0, the version dmq-node builds against),                   *)
 (*        ouroboros-network/lib/Ouroboros/Network/TxSubmission/Outbound.hs *)
@@ -69,7 +91,10 @@
 (*   [G3] protocol/messagesubmission/server.go: requestMessageIDs,         *)
 (*        RequestMessages, handleReplyMessageIds, Done (V2 MsgDone).       *)
 (*   [G4] protocol/messagesubmission/messagesubmission.go: stateMapV1,     *)
-(*        stateMapV2.                                                      *)
+(*        stateMapV2, roleFor (which side is the initiator).               *)
+(*   [G5] gOuroboros branch fix/messagesubmission-reference-wire:          *)
+(*        Client.ReplyNoMessageIds, Server.handleReplyNoMessageIds,        *)
+(*        acknowledgeMessageIDs (validation.go).                           *)
 (*                                                                         *)
 (* Message exchange is modelled as one step per message: the sender's      *)
 (* check and the receiver's check happen together. Strict alternation      *)
@@ -96,6 +121,16 @@ CONSTANTS
     \* FALSE in gOuroboros. TRUE: the inbound (Server) RequestMessages
     \* refuses to name an id it already asked for.
     InRefusesRepeat,
+    \* TRUE: in V2 the two ends run complementary sides, the initiator the
+    \* inbound and the responder the outbound, as dmq-node does [R6] and
+    \* gOuroboros does after the wire fix [G4]. FALSE: gOuroboros before the
+    \* fix, connected to dmq-node, where both ends run the outbound in V2.
+    \* V1 is unaffected: there both put the outbound on the initiator.
+    RolesMatch,
+    \* TRUE: in V2 the outbound can answer a blocking request with
+    \* MsgReplyNoSigIds, as dmq-node does and gOuroboros does after the fix
+    \* [G5]. FALSE: gOuroboros before the fix, which had no such message.
+    NoIdsReply,
     \* "none", or a check removed from the outbound to prove an invariant
     \* can fail: "noWindow" (the MaxUnacked limit), "noBlockRule" (blocking
     \* iff nothing is left).
@@ -154,6 +189,11 @@ Init ==
     /\ refused = "none"
     /\ servedTwice = FALSE
 
+\* In English: "Some end of the connection runs the inbound side, the one
+\* that asks. In V1 it always does; in V2 only when the two ends agree that
+\* the initiator asks [R6]."
+InboundRuns == Version = 1 \/ RolesMatch
+
 -----------------------------------------------------------------------------
 (* Version 1 only: the outbound opens with MsgInit [C2].                   *)
 
@@ -174,6 +214,7 @@ SendInit ==
 \* own window: it accepts and moves to the blocking or non-blocking state,
 \* or refuses, which ends the connection [S1]."
 RequestIds ==
+    /\ InboundRuns
     /\ st = "Idle" /\ refused = "none"
     /\ \E blocking \in BOOLEAN, ack \in 0..(Len(inQ) + 1),
           n \in 0..(MaxUnacked + 1) :
@@ -206,6 +247,23 @@ ReplyIds ==
     /\ st' = "Idle" /\ req' = NoReq
     /\ UNCHANGED <<refused, servedTwice>>
 
+\* In English: "In V2, when the outbound can say so, it answers a blocking
+\* request with no ids: both sides drop the ack oldest ids (all of them,
+\* since a blocking request acknowledges the whole window) and add none
+\* [R5][G5]. Bodies served or asked for among the dropped ids are forgotten
+\* with them. The reference does this when 17 s pass without a new id; the
+\* model lets it happen at any time, which covers that."
+ReplyNoIds ==
+    /\ Version = 2 /\ NoIdsReply
+    /\ st = "IdsBlocking"
+    /\ LET dropped == Range(Front(outQ, req.ack))
+       IN /\ outQ' = Rest(outQ, req.ack)
+          /\ inQ' = Rest(inQ, req.ack)
+          /\ outServed' = outServed \ dropped
+          /\ inAsked' = inAsked \ dropped
+    /\ st' = "Idle" /\ req' = NoReq
+    /\ UNCHANGED <<nextId, refused, servedTwice>>
+
 -----------------------------------------------------------------------------
 (* Bodies.                                                                 *)
 
@@ -216,6 +274,7 @@ ReplyIds ==
 \* and, with OutRefusesRepeat, ids it already served [R2]. Otherwise it
 \* moves to StMessages, noting any id served a second time."
 RequestBodies ==
+    /\ InboundRuns
     /\ st = "Idle" /\ refused = "none"
     /\ \E ids \in SUBSET (Range(inQ) \cup {Unannounced}) :
         /\ Rogue \/ /\ ids \subseteq Range(inQ)
@@ -251,7 +310,7 @@ ReplyBodies ==
 SendDone ==
     /\ refused = "none"
     /\ \/ Version = 1 /\ st = "IdsBlocking"
-       \/ Version = 2 /\ st = "Idle"
+       \/ Version = 2 /\ st = "Idle" /\ InboundRuns
     /\ st' = "Done"
     /\ UNCHANGED <<req, inQ, outQ, inAsked, outServed, nextId, refused,
                    servedTwice>>
@@ -259,17 +318,20 @@ SendDone ==
 -----------------------------------------------------------------------------
 
 \* In English: "Nothing more happens: the run is over, the connection was
-\* closed by a refusal, or a blocking request waits for ids that will never
-\* come (the queue is finite here; dmq-node's V2 outbound would answer
-\* MsgReplyNoSigIds after 17 s [R1])."
+\* closed by a refusal, or, in V1 only, a blocking request waits for ids
+\* that will never come (the queue is finite here, and V1 lets a blocking
+\* request wait forever [R7]). In V2 a blocking request that is never
+\* answered is not quiet: the requester gives up after 20 s and closes the
+\* connection [R5], so it is reported as a deadlock."
 Quiet ==
     /\ \/ st = "Done"
        \/ refused /= "none"
-       \/ st = "IdsBlocking" /\ nextId > MaxIds
+       \/ Version = 1 /\ st = "IdsBlocking" /\ nextId > MaxIds
     /\ UNCHANGED vars
 
 Next ==
-    \/ SendInit \/ RequestIds \/ ReplyIds \/ RequestBodies \/ ReplyBodies
+    \/ SendInit \/ RequestIds \/ ReplyIds \/ ReplyNoIds
+    \/ RequestBodies \/ ReplyBodies
     \/ SendDone \/ Quiet
 
 Spec == Init /\ [][Next]_vars
