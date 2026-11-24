@@ -14,6 +14,7 @@ The engine is modelled in slices, simplest first:
 | 1 | `EngineAdmission.tla` | Admission for protocols that do not pipeline |
 | 2 | `EnginePipelining.tla` | Pipelined requests end to end: sends, deferred state changes, the agency token, and replies that arrive early |
 | 3 | `EngineTimer.tla` | When a state's timeout is armed: only while this side waits for the peer, never while it holds agency or handles the peer's message |
+| 4 | `EngineLifecycle.tla` | `Start`, `Stop` and `StopForRestart` against the five goroutines `Start` launches, one Go primitive per step |
 
 Read [Model `keepalive`](../keepalive/README.md) first.
 
@@ -279,3 +280,85 @@ cd specs/engine
 ../../bin/tlc -config EngineTimerEveryStateBug.cfg EngineTimer.tla
 ../../bin/tlc -config EngineTimerNeverArmBug.cfg EngineTimer.tla
 ```
+
+## Slice 4: start, stop and restart (`EngineLifecycle.tla`)
+
+`Start` (`protocol/protocol.go:421`) launches five goroutines: `readLoop`,
+`recvLoop`, `sendLoop`, `stateLoop` and a watcher that closes `DoneChan` once
+`recvLoop` and `sendLoop` have exited (`:448-457`). `stop(restart)` (`:496`)
+runs in whichever goroutine calls it: `onceStop.Do`, `lifecycleMu` to set
+`stopped` and read `started`, close `stopChan`, and for `StopForRestart`
+wait on `readDoneChan` (`:521`) so the bytes `readLoop` read but did not
+process can be carried to the server's next instance. Each goroutine is a
+process with its own program counter; one step is one lock acquire or
+release, one channel operation or `select` choice, one `sync.Once` step
+(a second caller blocks until the first call's body returns), or one user
+callback step. Callbacks (`MessageReceivedFunc`, `MessageHandlerFunc`) may
+return, call `Stop`, call `StopForRestart`, wait for `StopChan`, or wait for
+the goroutine calling `Stop` to return. The peer and the muxer act only
+until the user calls `Stop`, so every passing run shows `Stop` finishing
+without their help; TLC's deadlock check is on, and the only state allowed
+to stutter is the one where every goroutine has exited. The timer is the
+one of slice 3, reduced to "may fire once and call `SendError`".
+
+Three-way comparison:
+
+| | Joins the protocol's threads | Restart |
+| --- | --- | --- |
+| Specification | silent: the mini-protocol specification describes messages, not threads | a responder restarts after `MsgDone` (connection-manager chapter) |
+| Reference (ouroboros-network `5f356486ab3e`) | `Mux.stop` does not wait (`network-mux/src/Network/Mux.hs:191-197`), but `run` returns only after `withJobPool` (`:280-287`) has cancelled and waited for every mini-protocol thread (`Control/Concurrent/JobPool.hs:105-109`, `uninterruptibleCancel`). A blocked callback is interrupted by the asynchronous exception. | the responder thread is a new job started on demand |
+| gOuroboros `5c4f31c1` | nothing joins `stateLoop` or `readLoop`; `DoneChan` covers `recvLoop` and `sendLoop` only; `Stop` waits for nothing. Go cannot interrupt a callback, so a join waits for it. | `StopForRestart` on the `MsgDone` handler, then a new `Protocol` |
+
+| Config | States | Result |
+| --- | --- | --- |
+| `EngineLifecycle.cfg` (server, every callback kind, timer, muxer stop) | 191,310 | passes all six invariants, no deadlock |
+| `EngineLifecycleClient.cfg` (client, an undecodable message) | 140,814 | passes |
+| `EngineLifecycleJoin.cfg` (candidate fix: an outside `Stop` waits for every loop) | 186,640 | passes, including `JoinedAfterStop`, while no callback waits on the `Stop` caller |
+| `EngineLifecycleNoJoinBug.cfg` (gOuroboros) | | `JoinedAfterStop` violated: `Stop` returns while loops and callbacks run |
+| `EngineLifecycleJoinCallerBug.cfg` | | the candidate fix deadlocks when a handler waits on the `Stop` caller |
+| `EngineLifecycleRestartFromCallbackBug.cfg` | | `MessageReceivedFunc` calling `StopForRestart` deadlocks on its own `readDoneChan` |
+| `EngineLifecycleRestartAnyMessageBug.cfg` (mutation: restart from an ordinary message) | | `RestartNeverWaitsOnCallback` violated |
+| `EngineLifecycleRestartDeadlockBug.cfg` (same mutation) | | deadlock: `readLoop` passes `SendError`'s `stopChan` check, `StopForRestart` closes it and waits on `readDoneChan` inside `onceStop.Do`, and `readLoop`'s `Stop` blocks in the same `Do` |
+| `EngineLifecycleWatcherBug.cfg` (mutation: watcher waits for `recvLoop` only) | | `DoneImpliesRecvSendExited` violated |
+| `EngineLifecycleStartIgnoresStoppedBug.cfg` | | `NoLoopAfterStopStart` violated |
+| `EngineLifecycleNoOnceBug.cfg` (no `doneOnce`, `Start` ignores `stopped`) | | `DoneClosedOnce` violated |
+| `EngineLifecycleNoWaitReadBug.cfg` | | `CarryCompleteBeforeNewInstance` violated |
+| `EngineLifecycleWaitUnderLockBug.cfg` | | `NoLockAcrossWait` violated |
+| `EngineLifecycleProbe*Bug.cfg` (three) | | probes reached: a restart; a loop running after `DoneChan`; `Stop` before `Start` |
+
+### What slice 4 found
+
+- **Inventory item A7 is overturned for every call site.** `StopForRestart`
+  waits on `readDoneChan` with no other case, but the servers call it only
+  from the `MsgDone` handler, and `readLoop` queues `MsgDone` only after
+  `MessageReceivedFunc` returned for it, then stops reading
+  (`:2171-2201`). So the restart never waits on a callback
+  (`RestartNeverWaitsOnCallback` holds). It becomes reachable only by API
+  misuse: `StopForRestart` from `MessageReceivedFunc` (self-deadlock), or
+  from any point where `readLoop` is still reading, where a `SendError` in
+  `readLoop` also deadlocks inside `onceStop.Do`. Worth a doc sentence on
+  `StopForRestart`.
+- **A8 is confirmed and is a design decision, not a one-line fix.** A join
+  inside `Protocol.Stop` deadlocks against a callback that waits on the
+  `Stop` caller, and PRs #3154 and #3140 call `Protocol.Stop` while holding
+  `busyMutex`. The reference joins where the connection's `run` returns,
+  not in `stop`, and it can interrupt a callback; Go cannot.
+- PR #3159's `handlerDoneChan` rendezvous selects on `stopChan` and
+  `doneChan` and `stateLoop` exits only on those, so it adds no deadlock
+  (read, not modelled).
+- **Go tests:** `test/protocol-lifecycle` (`c5ab084c`,
+  `protocol/lifecycle_test.go`) runs each cell: `Stop` from outside, from
+  `MessageHandlerFunc`, from `MessageReceivedFunc`, through a decode error;
+  `Stop` before `Start`; a handler waiting on `StopChan`; a handler blocked
+  on the `Stop` caller; and a restart from the terminal message with
+  `MessageReceivedFunc` held. Each checks `goleak`. Mutations: `Start`
+  ignoring `stopped` and `Stop` waiting for `DoneChan` are caught; dropping
+  the `readDoneChan` wait is not, because `readLoop` has always exited by
+  the time the `MsgDone` handler runs, which is the model's finding.
+
+### Run it
+
+```sh
+make engine-lifecycle
+```
+
