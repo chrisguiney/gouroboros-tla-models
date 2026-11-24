@@ -174,10 +174,12 @@ whatever `ObjectIDsFunc` returns and fails the connection if that is empty.
 | `PerasVotes.cfg`: gOuroboros both sides, the server always has a vote | 58 | passes |
 | `PerasVotesReferenceServerBug.cfg`: the reference server | 55 | **fails** `NoClientViolation` |
 | `PerasVotesEmptyServerBug.cfg`: a gOuroboros server with no vote yet | 46 | **fails** `NoServerFailure` |
-| `PerasVotesAwait.cfg`: a client with the reference's `MustReply` state, reference server | 127 | passes |
+| `PerasVotesFixed.cfg`: gOuroboros with the fix against the reference server (and against its own fixed server, which awaits the same way) | 127 | passes |
+| `PerasVotesFixedDeep.cfg`: the fix, a window of three, five rounds | 347 | passes |
 | `PerasVotesProbesBug.cfg`: probe, a Sync round completes | 18 | violated, as expected |
+| `PerasVotesFixedIdleProbesBug.cfg`: probe, under the fix `MsgServerIdle` gives the client agency back | 23 | violated, as expected |
 
-**Deviation, not fixed: no `MsgAwaitReply` or `MsgServerIdle`.** Since
+**Deviation, fixed on a branch: no `MsgAwaitReply` or `MsgServerIdle`.** Since
 2026-11-11 the reference server may answer a blocking request with
 `MsgAwaitReply` (tag 7), and must then send identifiers or `MsgServerIdle`
 (tag 6) [R6]. gOuroboros has neither message nor the `MustReply` state, so its
@@ -187,7 +189,20 @@ reference client waits 10 s (`shortWait`) in that state [R7]; gOuroboros sets
 no timeout there. Votes come once a round, so a gOuroboros server that blocks
 for new votes will be timed out by a reference client. The fix is two
 messages, a state and a timeout, a protocol change rather than a small fix.
-`PerasVotesAwait.cfg` checks that design.
+
+The fix, gOuroboros branch `fix/perasvotes-await-reply` (`f7ebba9b`) [G2],
+does what the reference does. Messages 6 and 7 encode as `[6]` and `[7]`
+[R7, Codec.hs lines 166-171, 239-242]. `ObjectIDsBlocking` (CanAwait) takes a
+non-empty reply or `MsgAwaitReply`; the new `ObjectIDsBlockingMustReply`
+takes a non-empty reply or `MsgServerIdle`, both back to Idle. The client
+waits 10 s in the first and 60 s in the second [R7]. `Sync` asks again after
+`MsgServerIdle`, acknowledging nothing, since the idle request's
+acknowledgement already counted. A server with no vote sends `MsgAwaitReply`
+at once, then waits up to `AwaitTimeout` (30 s by default, always below the
+client's 60 s) through an optional `AwaitObjectIDsFunc`, and sends the
+identifiers that arrive or `MsgServerIdle`. `PerasVotesFixed.cfg` checks it:
+`ReferenceServer` and `ClientKnowsAwait` both describe the fixed code, and
+`PerasVotesFixedIdleProbesBug.cfg` shows the idle path is reached.
 
 ## Spec, reference, and gOuroboros
 
@@ -203,8 +218,8 @@ messages, a state and a timeout, a protocol change rather than a small fix.
 | LeiosFetch Block, BlockTxs timeouts | Not stated | 60 s (`longWait`) [R3] | None in the client; the caller's context bounds the wait | Differs: a caller without a deadline waits forever |
 | LeiosVotes pipelined request in Busy | Expected [C2] | No reference | Refused by the server | **Defect 3**, fixed |
 | LeiosVotes count limit | Unbounded N | No reference | 1 to 1,000 | Differs; recorded |
-| ObjectDiffusion await | Not stated | `MsgAwaitReply`, `MsgServerIdle`, `MustReply` [R6] | Missing | **Deviation**, written up |
-| ObjectDiffusion blocking timeout | Not stated | 10 s, then 60 s after await [R7] | None | Differs |
+| ObjectDiffusion await | Not stated | `MsgAwaitReply`, `MsgServerIdle`, `MustReply` [R6] | Missing at `61046085`; as the reference with the fix [G2] | **Deviation**, fixed on a branch |
+| ObjectDiffusion blocking timeout | Not stated | 10 s, then 60 s after await [R7] | None at `61046085`; 10 s and 60 s with the fix [G2] | Fixed on a branch |
 | Server restart after `MsgDone` | Spec 5.7: responders restart | Yes | LeiosNotify, LeiosFetch, LeiosVotes: yes. Peras: no | Peras differs |
 
 ## Go tests and mutations
@@ -220,6 +235,7 @@ mutation of the line it guards and failed; the table lists them.
 | `test/perasvotes-state-model` | `TestStateMapMatchesModel` (each state reached through a real window), `TestStatesThatCannotBeEntered` | blocking rule dropped; empty blocking reply accepted; unrequested object accepted; non-outstanding identifier requestable |
 | `fix/leiosnotify-request-after-quit` | `TestStopDuringRefillSendsNoRequestAfterQuit`, `TestSyncAfterStopIsRefused` | Fail without the fix: request 33 to 59 of a 100-request refill followed `MsgQuit` in 4 of 5 runs; `Sync` after `Stop` returned nil |
 | `fix/leiosnotify-unexpected-cancel` | `TestClientRefusesCanceledBeforeQuit`, `TestClientAcceptsCanceledAfterQuit` | Fails without the fix |
+| `fix/perasvotes-await-reply` (`f7ebba9b`, includes the state-model test with the MustReply row) | `TestClientAcceptsAwaitReplyThenIDs`, `TestSyncContinuesAfterServerIdle`, `TestClientBlockingRequestTimeouts`, `TestServerWithNoVoteSendsAwaitReply`, `TestStateMapMatchesModel` cell `client/inObjectIDsBlocking/AwaitReply` | Fail on `61046085`: "unknown message type 7"; Sync stops after the idle; Blocking timeout 0; the server fails with "blocking Peras object ID request requires a non-empty reply"; the cell is Violation |
 | `fix/leiosvotes-pipelined-requests` | `TestServerAnswersPipelinedRequestNext` | Fails without the fix: "received message type 0 without peer agency ... in state Busy" |
 
 Existing tests already covered the LeiosFetch slot (above), LeiosNotify's
@@ -244,6 +260,7 @@ ObjectDiffusion window rules (`TestObjectDiffusionWindowAndAgencyRules`).
 | C3 | [CIP-0164 lines 1480-1548](https://github.com/cardano-foundation/CIPs/blob/03387471681166e746518d58a33e25f2ccea3d29/CIP-0164/README.md?plain=1#L1480-L1548) | The CIP's LeiosFetch and its message table. |
 | C4 | [CIP-0140 line 1515](https://github.com/cardano-foundation/CIPs/blob/03387471681166e746518d58a33e25f2ccea3d29/CIP-0140/README.md?plain=1#L1515) | Two new mini-protocols for vote and certificate diffusion. |
 | G1 | gOuroboros `61046085`, `protocol/leiosnotify/`, `protocol/leiosfetch/`, `protocol/leiosvotes/`, `protocol/perasvotes/`, and `protocol/protocol.go` (`sendLoop`, `reserveInboundAdmission`, `recvLoop`) | The code modelled. |
+| G2 | gOuroboros `f7ebba9b` on local branch `fix/perasvotes-await-reply`, `protocol/perasvotes/` | The await fix: StateMap, `Sync`, `awaitObjectIDs`. |
 
 ## Not modelled
 
@@ -259,10 +276,10 @@ cd specs/12-leios-peras
 for c in LeiosNotify LeiosNotifyDeep LeiosNotifyDry LeiosNotifyRogueCancel; do ../../bin/tlc -config $c.cfg LeiosNotify.tla; done
 for c in LeiosFetch LeiosFetchDeep; do ../../bin/tlc -config $c.cfg LeiosFetch.tla; done
 for c in LeiosVotes LeiosVotesToday LeiosVotesCipClient; do ../../bin/tlc -config $c.cfg LeiosVotes.tla; done
-for c in PerasVotes PerasVotesAwait; do ../../bin/tlc -config $c.cfg PerasVotes.tla; done
+for c in PerasVotes PerasVotesFixed PerasVotesFixedDeep; do ../../bin/tlc -config $c.cfg PerasVotes.tla; done
 # Expected to fail:
 for c in LeiosNotifyQuitRaceBug LeiosNotifyRogueCancelBug LeiosNotifyNoCancelBug LeiosNotifyProbesBug; do ../../bin/tlc -config $c.cfg LeiosNotify.tla; done
 for c in LeiosFetchAbandonFreesBug LeiosFetchProbesBug; do ../../bin/tlc -config $c.cfg LeiosFetch.tla; done
 for c in LeiosVotesCipClientBug LeiosVotesNoDrainBug LeiosVotesProbesBug; do ../../bin/tlc -config $c.cfg LeiosVotes.tla; done
-for c in PerasVotesReferenceServerBug PerasVotesEmptyServerBug PerasVotesProbesBug; do ../../bin/tlc -config $c.cfg PerasVotes.tla; done
+for c in PerasVotesReferenceServerBug PerasVotesEmptyServerBug PerasVotesProbesBug PerasVotesFixedIdleProbesBug; do ../../bin/tlc -config $c.cfg PerasVotes.tla; done
 ```
