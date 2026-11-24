@@ -38,7 +38,7 @@ closes. A PR can draw on more than one model.
 | `ledger-shelley` | #3129 (epoch-aware pool registration) | #3124, #3125, #3126 | open |
 | `ledger-governance` | #3155 (nil voter, governance lookup contract) | #3147, #3148, #3149 | open |
 | `ledger-governance` | ouroboros-mock #368 (governance action expiry at the last slot) | ouroboros-mock #367 | approved |
-| `pipeline-cbor` | #3161 (drain after the apply runner, lossless Results) | #3156, #3157, #3158 | open |
+| `pipeline-cbor` | #3161 (drain after the apply runner, lossless Results; reentrant drain follow-up `1cfba318`) | #3156, #3157, #3158 | open |
 | `pipeline-cbor` | #3141 (transaction body id without stored CBOR) | #3136 | open |
 | `ledger-utxo` | #3193 (BadInputs covers collateral and reference inputs) | #3179, #3180 | open |
 | `consensus-genesis` | #3173 (exact window count, density table tests) | #3169, #3170 | open |
@@ -61,6 +61,8 @@ closes. A PR can draw on more than one model.
 | `pipeline-cbor` (`PipelineLifecycle`) | `test/pipeline-lifecycle-model` | Stop releases and joins after a parent cancel, waits for ApplyFunc |
 | `ledger-hash-cache` | `fix/ledger-scoped-memo-panic` | a panicking scoped-memo build is retried, not published as nil |
 | `ledger-hash-cache` | `test/ledger-hash-cache-model` | hash cache waiters, panic hand-over, single compute |
+| `pipeline-cbor` (`PipelineLifecycle`) | `fix/pipeline-callback-stop` | Stop(ctx) API change; ApplyFunc may stop or drain its own pipeline |
+| `pipeline-cbor` (`PipelineLifecycle`) | `fix/pipeline-cancel-cleanup` | parent cancel tears the pipeline down without Stop |
 
 ## Not yet attributed
 
