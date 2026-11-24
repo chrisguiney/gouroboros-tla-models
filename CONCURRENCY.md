@@ -2119,6 +2119,63 @@ evidence, branch or PR. Branches are local and unpushed.
   does not re-enter the memo for the same key, and its work is CPU-bound over
   the fixed UTxO view.
 
+### Status: A4-A6, A9-A11
+
+Re-checked on gOuroboros `origin/main` `5c4f31c1` (2026-11-24), and on the
+local branch `fix/connection-teardown-joins` where it changes the code. One
+line per hazard: disposition, evidence, branch. Branches are local and
+unpushed; `fix/protocol-callback-context` is based on
+`fix/connection-teardown-joins` and must be published after it.
+
+- **A4: covered by `fix/connection-teardown-joins`.** On `origin/main` the
+  handshake `FinishedFunc` still writes `handshakeVersion` unsynchronised. On
+  the branch the timer and protocol-error paths call `Close`, which joins the
+  handshake protocol's loops before `setupConnection` returns, so
+  `FinishedFunc` has returned (ordered through the loop pool's mutex).
+  Residual, not fixed (low): a concurrent `Close` makes `setupConnection`
+  return on `doneChan` without that wait, so `ProtocolVersion` read after the
+  failed `Dial` can still race.
+- **A5: not reachable.** Both callers call `Start` only after the handshake
+  reply was read, which needs `readLoop` to have taken `StartOnce`'s value:
+  `connection.go` (`Start` after `handshakeFinishedChan`) and Dingo
+  `dmq/peer.go:450`/`:572` (after `p.finished`). A trap for other direct
+  users of the muxer API only.
+- **A6: unjoined, fixed.** `muxer.Stop` only signals and nothing waited for the
+  cleanup goroutine, so a `Metrics` callback could run after `Close` returned.
+  Shutdown now drains the muxer's `ErrorChan`, which closes after the cleanup
+  `waitGroup.Wait` (read loop, forwarders, senders).
+  `TestCloseWaitsForMuxerMetricsCallback` fails without the drain ("Close
+  returned while a muxer metrics callback was running"). `Muxer.Stop` stays
+  signal-only: ouroboros-mock calls it. Branch `fix/protocol-callback-context`
+  `a1324a8b`; model `ConnectionTeardownNoMuxerJoinBug.cfg`.
+- **A9: race, fixed.** `enqueueMessage` read `sendQueueChan` and
+  `muxerDoneChan` without `lifecycleMu`; before `Start` a send with no
+  deadline blocked on the nil queue. The queue is now made in `New` and the
+  muxer's done channel is read under `lifecycleMu`. On `origin/main`
+  `TestSendMessageBeforeStartIsQueued` fails (context deadline exceeded) and
+  `TestSendMessageDuringStartDoesNotRace` reports two data races; both pass
+  `-race -count=5` on the branch. Branch `fix/protocol-send-before-start`
+  `4cca4329`, from `origin/main`.
+- **A10: not reachable.** The `Warn` under `pendingBytesMu` runs only when
+  `pendingSendBytes` is negative. Its three writers keep it non-negative:
+  `+= msgLen` at enqueue (`protocol/protocol.go:893`), `-= msgLen` for a
+  message that never reached the queue (`:915`), and `-= len(data)` for the
+  same bytes once written (`:1413`).
+- **A11: unjoined (bounded), fixed.** Bound on `origin/main`: one extra
+  `AfterFunc` timer, firing one `Period` later, which sends nothing and arms
+  nothing more. `Client.Stop` now signals the protocol before clearing the
+  timer; `startTimer` checks for shutdown under `timerMutex`.
+  `TestStopLeavesNoTimerArmed` fails with the old order ("Stop left a
+  keep-alive timer armed"). Branch `fix/protocol-callback-context`
+  `861f349b`.
+- **C11, C18, C21 (owned elsewhere): covered by `fix/protocol-callback-context`
+  `d84adf86`.** Goroutines started through `RunLoop` are now in the join of
+  `Stop(ctx)` and `Close(ctx)`. `TestStopWaitsForRequestSource` (leios-notify)
+  fails without it (`Stop` returns nil while the source runs; goleak lists
+  the goroutine). The Peras `AwaitObjectIDsFunc` is covered once
+  `fix/perasvotes-op-lock-and-await-panic` lands, minus the `go` in front of
+  `RunLoop`. Model `EngineLifecycleCtxRunLoopUnjoinedBug.cfg`.
+
 ## 7. Model plan
 
 ### What the existing models already cover

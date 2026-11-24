@@ -333,6 +333,12 @@ Three-way comparison:
 | `EngineLifecycleNoWaitReadBug.cfg` | | `CarryCompleteBeforeNewInstance` violated |
 | `EngineLifecycleWaitUnderLockBug.cfg` | | `NoLockAcrossWait` violated |
 | `EngineLifecycleProbe*Bug.cfg` (three) | | probes reached: a restart; a loop running after `DoneChan`; `Stop` before `Start` |
+| `EngineLifecycleCtx.cfg` (adopted API: `Stop(ctx)` joins the loops and the `RunLoop` goroutine; client, every handler and `RunLoop` callback kind, `ctx` may end) | 108,628 | passes, with `JoinedAfterCtxStop` |
+| `EngineLifecycleCtxServer.cfg` (same, server restart after `MsgDone`) | 124,770 | passes |
+| `EngineLifecycleCtxNeverEndsBug.cfg` | | deadlock: a `RunLoop` callback that ignores `StopChan` holds a `Stop` whose `ctx` never ends |
+| `EngineLifecycleCtxRunLoopUnjoinedBug.cfg` (mutation: `rl` not joined) | | `JoinedAfterCtxStop` violated |
+| `EngineLifecycleCtxNoMarkerBug.cfg`, `CtxRunLoopNoMarkerBug.cfg` (mutation: a callback's `Stop` carries no marker) | | deadlock: the handler, or the `RunLoop` callback, waits for its own goroutine |
+| `EngineLifecycleCtxProbeTimeoutBug.cfg` | | probe reached: `Stop` returns `ctx.Err()` while a `RunLoop` callback is held |
 
 ### What slice 4 found
 
@@ -364,6 +370,39 @@ Three-way comparison:
   ignoring `stopped` and `Stop` waiting for `DoneChan` are caught; dropping
   the `readDoneChan` wait is not, because `readLoop` has always exited by
   the time the `MsgDone` handler runs, which is the model's finding.
+
+### Slice 4, third pass: `Stop(ctx)` with the callback marker
+
+The user chose to break the API so a caller cannot pick the wrong variant:
+every exported `Stop` takes a `context.Context` and returns an error, as
+does the connection's `Close`. `Stop` signals at once; if `ctx` is the
+callback marker of the instance (the `Context()` of a `CallbackContext` that
+instance built, compared by identity) it returns without joining, since the
+caller is one of the goroutines it would wait for; otherwise it waits for
+the four loops and every goroutine started through `RunLoop`, until they
+exit or `ctx` ends (then `ctx.Err()`, and shutdown goes on). Every
+mini-protocol now passes the marker to its callbacks. The model adds
+`StopJoins = "ctx"`, the `RunLoop` goroutine `rl` (started by a handler, as
+the leios-notify server does per request), and a step where the user's
+`ctx` ends. The done watcher runs no callback and is not joined.
+
+What it shows: the `busyMutex` deadlock of the second pass
+(`JoinInStopBusyMutexBug`) becomes a bounded wait when `ctx` can end
+(`EngineLifecycleCtx.cfg` has a handler waiting on the `Stop` caller and
+passes); a callback that ignores `StopChan` holds `Stop` only until `ctx`
+ends (`CtxProbeTimeoutBug`), and forever without one (`CtxNeverEndsBug`);
+the marker is what keeps a callback's own `Stop` from waiting for itself
+(`CtxNoMarkerBug`, `CtxRunLoopNoMarkerBug`). Hazards C11, C18 and C21
+(goroutines that outlive `Stop`) are the `RunLoop` goroutine left out of the
+join (`CtxRunLoopUnjoinedBug`).
+
+Go: branch `fix/protocol-callback-context`, based on
+`fix/connection-teardown-joins`. `TestStopWaitsForRequestSource`
+(`protocol/leiosnotify/server_join_test.go`) holds a `RequestNextFunc` on its
+`RunLoop` goroutine: `Stop` with a 200 ms context returns
+`context.DeadlineExceeded`, and after the release `Stop` returns and goleak
+finds nothing. With `RunLoop` not counted, `Stop` returns nil while the
+callback runs and goleak lists the goroutine.
 
 ### Run it
 
