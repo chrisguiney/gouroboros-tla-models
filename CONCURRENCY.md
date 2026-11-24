@@ -1924,21 +1924,48 @@ hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
   log record by a lock-free handler) reports the race deterministically under
   `-race`. Fix: read through `ProtocolInstance` and wait on
   `req.protocol.DoneChan()`, the instance the request went out on. Branch
-  `fix/blockfetch-client-protocol-race` `33c31219`. Promoted methods on a
+  `fix/blockfetch-client-protocol-race` `33c31219`. Not folded into the
+  server change: hiding the client's embed touches about twenty `c.Protocol`
+  uses and its Start/Stop state machine, so it is larger, not simpler.
+  Promoted methods on a
   restarting *client* race the same way, but there the caller drives both
   `Start` and the call, so it can order them; not changed.
-- **B5, B8, B9, B10: race, fixed.** Confirmed at `blockfetch/server.go:78`,
-  `chainsync/server.go:125`, `txsubmission/server.go:106`,
-  `peersharing/server.go:71`. #3197 does not touch these four servers.
-  `TestServerMethodsDuringRestart` in each package holds the done handler
-  (`internal/test/restartwindow`), calls the promoted `DoneChan` from a
-  goroutine started before the release, and fails under `-race -count=3` in
-  all four. Fix: each server shadows every promoted `*protocol.Protocol`
-  method with one that goes through `ProtocolInstance` (the pattern
-  `txsubmission.Server.Start` already used). The exported `Protocol` field
-  itself stays racy for direct readers; hiding it is an API break. Branch
-  `fix/server-restart-protocol-race` `853eea67`. C9, C12, C20 and the
-  servers #3197 makes restart are the same class.
+- **B5, B8, B9, B10: race, fixed (API change).** Confirmed at
+  `blockfetch/server.go:78`, `chainsync/server.go:125`,
+  `txsubmission/server.go:106`, `peersharing/server.go:71`. #3197 does not
+  touch these four servers. `TestServerMethodsDuringRestart` in each package
+  holds the done handler (`internal/test/restartwindow`), calls `DoneChan`
+  from a goroutine started before the release, and fails under
+  `-race -count=3` in all four on `origin/main`; passes `-race -count=3` on
+  the branch. Fix (user decision: break the API so callers cannot read the
+  instance unlocked): the servers no longer embed `*protocol.Protocol`; the
+  instance is an unexported `proto` field under `protocolMu`. `Start`,
+  `EnsureRegistered`, `DoneChan`, `StopChan`, `IsDone` (plus the existing
+  `Stop`, `ProtocolInstance`) stay as server methods reading under the lock;
+  everything else goes through `ProtocolInstance()`. Branch
+  `fix/server-restart-protocol-race`, `853eea67` (overrides, superseded) then
+  `a084f6bd` (`fix(protocol)!`). gOuroboros call sites updated:
+  `chainsync/server.go` `SendMessage`, `leiosfetch/server_test.go:199`,
+  `txsubmission/pending_bytes_internal_test.go:243`, `:258`. Dingo
+  (`2fc7975d3`, type-checked through a scratch `go.work`; `ouroboros`
+  package and tests compile) uses nothing removed from these four servers.
+  No file overlap with `fix/protocol-callback-context`; its `Stop(ctx)` change
+  will touch the same four `Server.Stop` methods.
+  - **Same shape elsewhere** (server replaces `s.Protocol` on restart):
+    C9 `leiosfetch/server.go:71`, C12 `leiosvotes/server.go:85`,
+    C20 `leiosnotify/server.go:116`, also `localstatequery/server.go:100`
+    and `keepalive/server.go:156` (not in the hazard list). The #3197
+    servers: `localtxmonitor/server.go:76`, `localtxsubmission/server.go:57`,
+    `perasvotes/server.go:40`, `messagesubmission/server.go:100`,
+    `localmessagesubmission/server.go:137`,
+    `localmessagenotification/server.go:92`; `connection.go:574`, `:582`,
+    `:634`, `:647`, `:661` read their `.Server.Protocol` unlocked.
+  - **Dingo uses that the same change there would hit:**
+    `ouroboros/localtxsubmission.go:129` (`ctx.Server.Protocol != nil`,
+    field). Kept-method uses: `ouroboros/localtxsubmission.go:130`
+    `StopChan`, `ouroboros/localstatequery.go:258` `IsDone`, `:910`
+    `StopChan`, `ouroboros/leiosnotify.go:3441`, `:3534` `DoneChan`,
+    `dmq/stack_test.go:702-703` `IsDone`.
 - **B6: covered by #3094.** On main the `GetCurrentTip` worker waits on
   `busyMutex` (`chainsync/client.go:625`) and the caller can return a tip that
   answered someone else's request. #3094 removes the worker and the borrowed
