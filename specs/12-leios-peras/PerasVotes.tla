@@ -19,7 +19,10 @@
 (* The reference added two messages on 2026-11-11: in a blocking request's *)
 (* state the server may send MsgAwaitReply (no identifiers now), and must  *)
 (* then send identifiers or MsgServerIdle, which returns agency. gOuroboros*)
-(* has neither.                                                            *)
+(* 61046085 has neither. Branch fix/perasvotes-await-reply (f7ebba9b)      *)
+(* adds both: its client moves to MustReply and asks again after           *)
+(* MsgServerIdle; its server, with no vote, sends MsgAwaitReply, then the  *)
+(* identifiers that arrive or MsgServerIdle, as the reference server does. *)
 (*                                                                         *)
 (* Questions:                                                              *)
 (*   NoClientViolation  does the client refuse a message the reference    *)
@@ -43,6 +46,9 @@
 (*   [G1] gOuroboros 61046085, protocol/perasvotes/perasvotes.go           *)
 (*        (StateMap, match functions), client.go (Sync, Done),             *)
 (*        server.go (handleRequestObjectIDs).                              *)
+(*   [G2] gOuroboros f7ebba9b on fix/perasvotes-await-reply: StateMap's    *)
+(*        ObjectIDsBlockingMustReply, client.go (Sync asks again after     *)
+(*        MsgServerIdle), server.go (awaitObjectIDs).                      *)
 (*                                                                         *)
 (* Not modelled: non-blocking requests (the Sync loop sends none), vote    *)
 (* content, timeouts.                                                      *)
@@ -54,9 +60,11 @@ EXTENDS Naturals, Sequences
 CONSTANTS
     Window,            \* MaxObjectsUnacknowledged
     MaxRounds,         \* rounds of the Sync loop (keeps it finite)
-    ReferenceServer,   \* TRUE: the server may send MsgAwaitReply and MsgServerIdle [R1]
+    ReferenceServer,   \* TRUE: the server may send MsgAwaitReply and MsgServerIdle [R1]:
+                       \* the reference server, or gOuroboros' with the fix [G2]
     ServerMayBeEmpty,  \* TRUE: at some request the server has no new vote yet
-    ClientKnowsAwait   \* FALSE today; TRUE: a client with the reference's MustReply state
+    ClientKnowsAwait   \* FALSE today; TRUE: a client with the reference's MustReply
+                       \* state, as gOuroboros' is with the fix [G2]
 
 VARIABLES
     pc,         \* the client: "init", "ids", "waitIds", "objs", "waitObjs", "done"
@@ -203,4 +211,10 @@ WindowBound == unacked <= Window
 
 \* Probe, EXPECTED to be violated: "No Sync round ever completes."
 ProbeNoRound == ~(rounds >= 1 /\ pc = "ids")
+
+\* Probe, EXPECTED to be violated under the fix: "The client never gets
+\* agency back through MsgServerIdle." After MsgServerIdle the client is
+\* ready for its next request with no identifiers from the last one, which
+\* no completed round leaves (a reply carries at least one).
+ProbeNoIdle == ~(rounds >= 1 /\ pc = "ids" /\ lastIds = 0)
 =============================================================================
