@@ -281,6 +281,43 @@ channel`). The test queues the error by hand at the point the handshake's
 `SendError` would; the end-to-end path from peer bytes was not reproduced.
 The two branches conflict trivially in the `Connection` struct.
 
+### Part 5, second pass: the join, where the reference puts it
+
+The reference waits for every mini-protocol thread when the mux's `run`
+ends (`Control/Concurrent/JobPool.hs:105-109`), not in `stop`. The model
+adds that as fix `join`: shutdown, whether started by `Close` or by a fatal
+error, waits for the protocol loops (one running the callback, one standing
+for the others) before it closes `errorChan` and `connClosedChan`. A
+callback that closes its own connection must not wait for itself: it calls
+`CloseContext` with the context its protocol instance gave it, whose
+marker excuses that instance's loops from the shutdown join, and every
+`Close` then also waits for every loop except its caller's instance. The
+marker is compared by identity: `UserMarker = "foreign"` is a `Close` made
+with another connection's callback context, which must still wait. Fix
+`closeEarly` makes a `Close` before `doneChan` exists tear down what has
+started (it closes the conn and setup gives up), instead of doing nothing.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ConnectionTeardownFixed.cfg` (every fix, concurrent `Close`, late error, callback `CloseContext`, foreign marker) | 12,843 | passes all six, including `NoCallbackAfterClose` and `CloseTearsDown` |
+| `ConnectionTeardownFixedPlain.cfg` (as Fixed, the user calls plain `Close`) | 12,843 | passes |
+| `ConnectionTeardownCallbackAfterCloseBug.cfg` (no join) | | `NoCallbackAfterClose` violated |
+| `ConnectionTeardownJoinPlainCloseBug.cfg` | | deadlock: plain `Close` from a callback waits for itself, which is why `CloseContext` exists |
+| `ConnectionTeardownAnyMarkerBug.cfg` (mutation: any marker excuses) | | `NoCallbackAfterClose` violated: another connection's callback context let `Close` return while this connection's callback ran |
+| `ConnectionTeardownCloseBeforeDoneBug.cfg` (no `closeEarly`) | | `CloseTearsDown` violated: a `Close` before `doneChan` exists did nothing |
+
+`EngineLifecycle.tla` shows why the join is not in `Protocol.Stop`
+(`EngineLifecycleJoinInStopBusyMutexBug.cfg`) and that a join at `Close`
+after `Stop` has returned passes with every callback kind
+(`EngineLifecycleJoinAtClose.cfg`).
+
+Go: `fix/connection-teardown-joins` combines both earlier branches and adds
+the join (`c164be91`): a protocol-loop pool on the muxer
+(`muxer/loops.go`), `Protocol.CallbackContext` and `CallbackOwner`,
+`Connection.CloseContext`, and the context in the keep-alive
+`CallbackContext`. The other mini-protocols' callback contexts do not carry
+it yet.
+
 ## What model `connection` found
 
 - **Messages survive restarts.** Carrying the read buffer, admitting one
@@ -306,5 +343,5 @@ The two branches conflict trivially in the `Connection` struct.
 ## Not modelled yet
 
 Byte sizes beyond "fits or not", timeouts, and the egress side of the
-muxer. Protocol goroutines outliving `Close` is modelled (part 5) but not
-fixed: it needs a decision on where the join belongs.
+muxer. Goroutines started with `RunLoop` and the keep-alive client's timer
+are not in the join.

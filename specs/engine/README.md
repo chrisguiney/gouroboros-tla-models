@@ -319,9 +319,11 @@ Three-way comparison:
 | --- | --- | --- |
 | `EngineLifecycle.cfg` (server, every callback kind, timer, muxer stop) | 191,310 | passes all six invariants, no deadlock |
 | `EngineLifecycleClient.cfg` (client, an undecodable message) | 140,814 | passes |
-| `EngineLifecycleJoin.cfg` (candidate fix: an outside `Stop` waits for every loop) | 186,640 | passes, including `JoinedAfterStop`, while no callback waits on the `Stop` caller |
+| `EngineLifecycleJoin.cfg` (rejected candidate: an outside `Stop` waits for every loop) | 186,640 | passes, including `JoinedAfterStop`, while no callback waits on the `Stop` caller |
 | `EngineLifecycleNoJoinBug.cfg` (gOuroboros) | | `JoinedAfterStop` violated: `Stop` returns while loops and callbacks run |
-| `EngineLifecycleJoinCallerBug.cfg` | | the candidate fix deadlocks when a handler waits on the `Stop` caller |
+| `EngineLifecycleJoinAtClose.cfg` (the fix: the connection's teardown joins after `Stop` returned) | 191,576 | passes, with `JoinedAfterClose`, for every callback kind |
+| `EngineLifecycleJoinInStopBusyMutexBug.cfg` | | a join inside `Protocol.Stop` deadlocks when a handler waits on the `Stop` caller, as one waiting for the `busyMutex` that the local-tx clients hold across `Protocol.Stop` does |
+| `EngineLifecycleCloseSkipsJoinBug.cfg` (mutation) | | `JoinedAfterClose` violated |
 | `EngineLifecycleRestartFromCallbackBug.cfg` | | `MessageReceivedFunc` calling `StopForRestart` deadlocks on its own `readDoneChan` |
 | `EngineLifecycleRestartAnyMessageBug.cfg` (mutation: restart from an ordinary message) | | `RestartNeverWaitsOnCallback` violated |
 | `EngineLifecycleRestartDeadlockBug.cfg` (same mutation) | | deadlock: `readLoop` passes `SendError`'s `stopChan` check, `StopForRestart` closes it and waits on `readDoneChan` inside `onceStop.Do`, and `readLoop`'s `Stop` blocks in the same `Do` |
@@ -344,7 +346,8 @@ Three-way comparison:
   from any point where `readLoop` is still reading, where a `SendError` in
   `readLoop` also deadlocks inside `onceStop.Do`. Worth a doc sentence on
   `StopForRestart`.
-- **A8 is confirmed and is a design decision, not a one-line fix.** A join
+- **A8 is confirmed; the join goes at connection teardown** (second pass,
+  `StopJoins = "close"`). A join
   inside `Protocol.Stop` deadlocks against a callback that waits on the
   `Stop` caller, and PRs #3154 and #3140 call `Protocol.Stop` while holding
   `busyMutex`. The reference joins where the connection's `run` returns,
