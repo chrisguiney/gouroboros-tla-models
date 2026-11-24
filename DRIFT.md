@@ -324,9 +324,9 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **What differs.** Reference: a request's receiver exists only once the request is sent. gOuroboros: main: the shutdown drain calls `RangeDoneFunc` for a request whose `RequestRange` returned an error; PR: not.
 - **Spec.** spec silent
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/BlockFetch/Client.hs` (a receiver per pipelined request)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/blockfetch/client.go` 1238; PR #3114 head `395b9c2e7` same file 140-147 (`sending`)
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/blockfetch/client.go` 1238; PR #3114 head `d10daf24` same file 140-147 (`sending`), 1116-1140 (a refused request leaves the queue before the send token is handed back; at `395b9c2e7` the token was released first, so a concurrent range's answers could reach the stale entry: review finding, model 06 `BlockFetchQueueSendFailsEarlyTokenBug.cfg`)
 - **Verdict.** conforms
-- **Status.** Open PR #3114. Library defect; Dingo works around it
+- **Status.** Open PR #3114 at `d10daf24`. Library defect; Dingo works around it
 
 ### N17
 
