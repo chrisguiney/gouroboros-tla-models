@@ -51,8 +51,9 @@ gOuroboros (`origin/main` at `61046085`):
    `SameStateWhenQuiet`)?
 10. Does `MsgAcceptVersion` carry the negotiated data
     (`AcceptCarriesNegotiatedData`)?
-11. Does every receiver reject a version table whose keys are not in
-    ascending order (`UnorderedMapsRejected`)?
+11. Does every receiver reject a version table whose recognised keys are
+    not in ascending order (`UnorderedMapsRejected`), and accept one with
+    an unrecognised key anywhere (`UnknownKeysTolerated`)?
 
 ## The answers
 
@@ -67,8 +68,10 @@ client table (288) against every server table (24), 6,912 starting pairs
 | `HandshakeStrictQuery.cfg` (gOuroboros after the fix: strict client) | 27,648 | passes |
 | `HandshakeGouroborosBug.cfg` (gOuroboros today: query checked first) | | **fails** `QueryOnlyWhenNegotiable` |
 | `HandshakeAcceptOwnDataBug.cfg` (gOuroboros today: accept carries the server's own data) | | **fails** `AcceptCarriesNegotiatedData` |
-| `HandshakeKeyOrder.cfg` (reference; unordered client tables and one injected unordered table, one magic) | 227,428 | passes |
+| `HandshakeKeyOrder.cfg` (reference; client tables in any wire order, with or without an unrecognised key, and one injected table; one magic) | 758,780 | passes |
+| `HandshakeKeyOrderUnknown.cfg` (reference; recognised keys ascending, an unrecognised key anywhere) | 47,616 | passes, no failures |
 | `HandshakeKeyOrderBug.cfg` (gOuroboros today: key order not checked) | | **fails** `UnorderedMapsRejected` |
+| `HandshakeKeyOrderEveryBug.cfg` (strict variant: every key must ascend) | | **fails** `UnknownKeysTolerated` |
 | `HandshakeRogue.cfg` (one injected message, reference client) | 2,726,172 | passes |
 | `HandshakeRogueStrict.cfg` (the same, gOuroboros client) | 2,726,172 | passes |
 | `HandshakeSilentServer.cfg` (node-to-node, server never answers) | 27,648 | passes: the client times out |
@@ -99,14 +102,20 @@ sharing `<>`, query `||`, Peras `min`) is idempotent and commutative, so
 (`fix/handshake-accept-negotiated-data`) sends the agreed data; the
 `FinishedFunc` callback still receives the peer's data.
 
-**Key order.** The specification requires ascending, unique keys [S7], and
-the reference codec fails to decode anything else [R10]: a protocol error,
-not a `MsgRefuse`. gOuroboros rejected duplicates only (`CheckKeyOrder`).
-Every encoder sends keys ascending (the reference by `Map` order, gOuroboros
-by `SortCoreDeterministic`), so only a broken or hostile peer is affected.
-The fix (`fix/handshake-version-key-order`) checks every key, which the
-reference does only for keys it recognises: an unrecognised key out of
-order is skipped by the reference and refused by the fix.
+**Key order.** The specification requires every key unique and ascending
+[S7]. The reference codec is narrower [R10]: it skips a key its version
+codec does not recognise, and fails to decode (a protocol error, not a
+`MsgRefuse`) only when a recognised key is not greater than the previous
+recognised one. The model follows the reference (`KeyOrderRule =
+"Recognised"`). Wire order is a sequence of keys that may include
+`Unknown`, a version no receiver recognises. gOuroboros main checks no order
+(`"None"`). A strict every-key check (`"Every"`) refuses a peer the
+reference accepts, an unrecognised key out of order
+(`HandshakeKeyOrderEveryBug.cfg`), so the fix
+(`fix/handshake-version-key-order`) checks recognised keys only. Every
+encoder sends keys ascending (the reference by `Map` order, gOuroboros by
+`SortCoreDeterministic`), so only a broken or hostile peer meets either
+check.
 
 The client's strictness about `MsgQueryReply` is harmless: against an honest
 server it never fires (`HandshakeStrictQuery.cfg`), because a server only
@@ -130,6 +139,7 @@ reset"), and the refusing side closes the connection.
 | `HandshakeSimOpenEarlyReadBug.cfg` | proposing before reading | `NoViolations` |
 | `HandshakeAcceptOwnDataBug.cfg` | sending the agreed data | `AcceptCarriesNegotiatedData` |
 | `HandshakeKeyOrderBug.cfg` | the key-order check | `UnorderedMapsRejected` |
+| `HandshakeKeyOrderEveryBug.cfg` | skipping unrecognised keys | `UnknownKeysTolerated` |
 
 Reachability probes, each expected to fail, show the passing configs reach
 every answer: `HandshakeProbeAcceptBug.cfg`, `HandshakeProbeQueryBug.cfg`,
@@ -225,7 +235,7 @@ fails on `61046085`.
 | `MsgQueryReply` in the state machine | Absent [S2] | Present [R1] | Present | Spec out of date |
 | Data in `MsgAcceptVersion` | Negotiated data [S7] | Agreed data [R9][R6] | The server's own data; each side's callback gets the peer's data | **Differs**, no wrong outcome found (the reference client recomputes the agreement); fixed on a branch |
 | Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; fixed on a branch |
-| Proposal keys in ascending order | Required [S7] | Recognised keys out of order fail to decode [R10] | Accepted in any order; duplicates rejected | **Differs** (lenient); fixed on a branch, which checks every key |
+| Proposal keys in ascending order | Required for every key [S7] | Recognised keys out of order fail to decode; unrecognised keys skipped [R10] | Accepted in any order; duplicates rejected | **Differs** (lenient); fixed on a branch, which follows the reference |
 | Size limits | 5760 both states [S3] | 5760 [R5] | 5760 | Agree |
 | Timeouts | 10 s both, NtN; none NtC [S3] | `shortWait` = 10 s [R5] | 10 s NtN (overridable), none NtC | Agree |
 | Message after Done | Not stated | Connection torn down [R7] | Dropped | Differs, harmless |
@@ -253,7 +263,7 @@ unless noted.
 | R6 | `cardano-diffusion/api/lib/Cardano/Network/NodeToNode/Version.hs` 134-156; `NodeToClient/Version.hs` 123-135 | `acceptableVersion`, `queryVersion`. |
 | R7 | `network-mux/src/Network/Mux/Ingress.hs` 122-126 | Unknown mini-protocol tears the connection down. |
 | R9 | `Server.hs` 42-44 | `MsgAcceptVersion` carries `encodeData vNumber agreedData`. |
-| R10 | `Codec.hs` 210-240 | `decodeVersions`: distinct, ascending keys, else "unordered version"; unrecognised keys skipped. |
+| R10 | `Codec.hs` 197-241 | `decodeVersions`: unrecognised keys skipped (235); recognised keys strictly ascending, else "unordered version" (237-240). |
 | S7 | `docs/network-spec/miniprotocols.tex` 572-573, 653-656 | "the negotiated version data is sent back using MsgAcceptVersion"; keys "unique and appear in ascending order". |
 | G1 | gOuroboros `protocol/handshake/{handshake,client,server}.go`, `connection.go` 746-800, `muxer/muxer.go` `readLoop` | The code compared. |
 
@@ -270,7 +280,7 @@ a query connection; the connection-wide handshake timeout in `connection.go`.
 cd specs/05-handshake
 for c in Handshake HandshakeNtC HandshakeStrictQuery HandshakeRogue \
          HandshakeRogueStrict HandshakeSilentServer HandshakeSilentClient \
-         HandshakeKeyOrder; do
+         HandshakeKeyOrder HandshakeKeyOrderUnknown; do
   ../../bin/tlc -config $c.cfg Handshake.tla
 done
 ../../bin/tlc -config HandshakeSimOpen.cfg HandshakeSimOpen.tla
@@ -283,7 +293,7 @@ for c in HandshakeGouroborosBug HandshakeLowestBug HandshakeNoMagicBug \
          HandshakeProbeAcceptBug HandshakeProbeQueryBug HandshakeProbeMismatchBug \
          HandshakeProbeDecodeErrorBug HandshakeProbeRefusedBug \
          HandshakeProbeAcceptBelowProposedBug HandshakeAcceptOwnDataBug \
-         HandshakeKeyOrderBug; do
+         HandshakeKeyOrderBug HandshakeKeyOrderEveryBug; do
   ../../bin/tlc -config $c.cfg Handshake.tla
 done
 for c in HandshakeSimOpenGouroborosBug HandshakeSimOpenAsymmetricBug \
