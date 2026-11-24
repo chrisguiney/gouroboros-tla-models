@@ -92,6 +92,9 @@ protocol.
 - [Model 23: the block-body rule](specs/23-ledger-bbody/README.md): body
   size and hash, transactions applied in order, execution-unit and
   reference-script totals, and the header's protocol version.
+- [Model 24: Conway and Dijkstra](specs/24-ledger-conway-dijkstra/README.md):
+  treasury values, reference-script fees, deposits, delegated
+  withdrawals, and Dijkstra's sub-transactions and direct deposits.
 - [Model 15: Conway governance](specs/15-ledger-governance/README.md):
   proposals, voting, ratification, enactment and refunds.
 - [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):

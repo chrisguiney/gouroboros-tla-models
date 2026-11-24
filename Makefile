@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -155,6 +155,9 @@ consensus-nonce: ## Check the epoch nonce model (evolving, candidate, tick)
 
 ledger-bbody: ## Check the block-body rule model (size, hash, order, totals)
 	@scripts/run-model.sh specs/23-ledger-bbody
+
+ledger-conway-dijkstra: ## Check the Conway and Dijkstra ledger model (gates, deposits, sub-transactions)
+	@scripts/run-model.sh specs/24-ledger-conway-dijkstra
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done
