@@ -159,7 +159,7 @@ ledger-bbody: ## Check the block-body rule model (size, hash, order, totals)
 ledger-conway-dijkstra: ## Check the Conway and Dijkstra ledger model (gates, deposits, sub-transactions)
 	@scripts/run-model.sh specs/24-ledger-conway-dijkstra
 
-consensus-eras: ## Check the eras model (era history, header check order)
+consensus-eras: ## Check the eras model (era history, header check order, TPraos overlay)
 	@scripts/run-model.sh specs/25-consensus-eras
 
 ledger-witnesses: ## Check the UTXOW witness model (keys, scripts, redeemers, datums)

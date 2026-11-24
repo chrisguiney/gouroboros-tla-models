@@ -18,7 +18,10 @@
 (*      form, as Qry.hs does.                                              *)
 (*   3. gOuroboros. It computes no era history. Its one slot-to-epoch     *)
 (*      formula, ByronConfig.SlotToEpoch (slot / SlotsPerEpoch), is      *)
-(*      compared with the walk, in the first era and after it.            *)
+(*      compared with the walk, in the first era and after it. On main   *)
+(*      it answers every slot; the fix (GoByron = "Fixed") refuses a slot *)
+(*      at or past Byron's end once the caller has set that end from the *)
+(*      era history.                                                       *)
 (*                                                                         *)
 (* Sources (links and quotes in specs/25-consensus-eras/README.md).        *)
 (*   Specification: ouroboros-consensus ec239d57f618,                      *)
@@ -71,7 +74,8 @@ CONSTANTS
     Shape,       \* "Two" or "Three": which era table below to use
     SafeFromTip, \* the safe zone: slots ahead of the tip that are always convertible [R4]
     MaxSlot,     \* the last slot the chain walks to (keeps the model finite)
-    Mutation     \* "none", or one deliberate change that some invariant must catch
+    Mutation,    \* "none", or one deliberate change that some invariant must catch
+    GoByron      \* "Main": ByronConfig.SlotToEpoch on main; "Fixed": fix/consensus-byron-slot-epoch
 
 \* The era tables. Era 1 is Byron-like (long slots, short epochs); later
 \* eras have shorter slots and longer epochs, as on mainnet (Byron 20 s
@@ -119,6 +123,7 @@ QuerySlots == 0..(MaxSlot + SafeFromTip + 2 * MaxEpochSize)
 ASSUME Len(SlotLen) = NumEras /\ Len(Trigger) = NumEras
 ASSUME \A i \in 1..(NumEras - 1) : Trigger[i] < Trigger[i + 1]
 ASSUME Mutation \in {"none", "NextEraSize", "LateVote", "HorizonPlusOne", "AnyBump"}
+ASSUME GoByron \in {"Main", "Fixed"}
 
 VARIABLES
     nslot,     \* the next slot to fill; the ledger tip is nslot - 1 (-1 is Origin)
@@ -450,6 +455,42 @@ GoByronFormulaInFirstEra == wEra = 1 => nslot \div EpochSize[1] = wEpoch
 \* Literally: "GoByronFormulaEverywhere is defined as: nslot integer-divided
 \*   by EpochSize of 1 equals wEpoch."
 GoByronFormulaEverywhere == nslot \div EpochSize[1] = wEpoch
+
+\* gOuroboros' ByronConfig.SlotToEpochChecked, with -1 for its error. On
+\* main (and through SlotToEpoch) it is slot / SlotsPerEpoch for every
+\* slot. On the fix, once the Summary knows a second era the caller sets
+\* Byron's end slot (the second era's start), and a slot at or past it is
+\* an error: converting it needs the era history [R7][R8].
+\* In English: "gOuroboros' Byron epoch for slot s, or -1 for an error,
+\* given the known era starts st."
+\* Literally: "GoByronEpoch of st and s is defined as: if GoByron equals
+\*   "Fixed" and the length of st is more than 1 and s is at least the slot
+\*   of StartBound of st and 2, then minus 1, else s integer-divided by
+\*   EpochSize of 1."
+GoByronEpoch(st, s) ==
+    IF GoByron = "Fixed" /\ Len(st) > 1 /\ s >= StartBound(st, 2).slot
+    THEN -1
+    ELSE s \div EpochSize[1]
+
+\* Every answer gOuroboros gives for a slot the Summary can convert is the
+\* Summary's epoch: it never answers a later era's slot with Byron's
+\* formula.
+\* In English: "every epoch gOuroboros' Byron conversion gives is right."
+\* Literally: "GoByronSound is defined as: for all s in QuerySlots, if
+\*   Convertible of starts, Tip and s and GoByronEpoch of starts and s does
+\*   not equal minus 1, then GoByronEpoch of starts and s equals element 1
+\*   of Conv of starts, Tip and s."
+GoByronSound ==
+    \A s \in QuerySlots :
+        Convertible(starts, Tip, s) /\ GoByronEpoch(starts, s) /= -1
+            => GoByronEpoch(starts, s) = Conv(starts, Tip, s)[1]
+
+\* The fix still answers while the chain is in the first era.
+\* In English: "in the first era gOuroboros answers the next slot, with
+\* the walk's epoch."
+\* Literally: "GoByronAnswersInFirstEra is defined as: if wEra equals 1,
+\*   then GoByronEpoch of starts and nslot equals wEpoch."
+GoByronAnswersInFirstEra == wEra = 1 => GoByronEpoch(starts, nslot) = wEpoch
 
 \* [R9]: an era changes only at an epoch boundary.
 \* In English: "eras change only where an epoch starts."

@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-79 entries. On `main`: does not conform 33; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
+82 entries. On `main`: does not conform 36; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -116,6 +116,9 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [C12](#c12) | consensus | Rolling nonce from a raw 64-byte VRF output | The VRF output is hashed to a 32-byte nonce first (`mkNonceFromOutputVRF`), then combined | main before `756a9a89`: `CalculateRollingNonce` accepted the 64-byte output and hashed `prev ‖ output` (96 bytes). Now `NonceFromTPraosVRF`/`NonceFromPraosVRF` derive the contribution and a 64-byte operand is rejected | Combine two seeds; the block's seed is the nonce from its header | does not conform → conforms | Fixed by #3053 (merged, `756a9a89`) |
 | [C13](#c13) | consensus | The neutral nonce as an identity | `x ⭒ NeutralNonce = x` and `NeutralNonce ⭒ x = x` | Rolling: `CombineNonces` has `NonceTypeNeutral` as identity on both sides since `756a9a89`. Epoch: main's `CalculateEpochNonce` hashes a zero (or rejects an empty) candidate or lab nonce; branch: `EpochNonceFromNonces` takes `common.Nonce` and composes with `CombineNonces`, and `CalculateEpochNonce` is deprecated | `0_seed` is the neutral element of ⭒ | does not conform (epoch nonce only) → conforms | Rolling part fixed by #3053 (`756a9a89`). Epoch part fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet; model 21 `EpochNonceNewByron` passes, `EpochNonceDirectLabBug` still reproduces the deprecated function. Dingo applies the identity by hand and can move to the new function |
 | [C14](#c14) | consensus | A neutral epoch nonce in the VRF input | Appends nothing for a neutral η0 | main: `MkInputVrf` and `MkSeedTPraos` need 32 bytes, so a neutral η0 is passed as 32 zero bytes; branch: `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce` and `ComputeVRFInputFromNonce` take `common.Nonce` and append nothing for `NonceTypeNeutral`, and the `[]byte` builders are deprecated | `slotToSeed slot ⭒ η0`, with `0_seed` neutral | does not conform → conforms | Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet; model 21 `EpochNonceNewNeutral` passes, `EpochNonceVrfInputBug` still reproduces the deprecated builders. gOuroboros' exported `[]byte` callers (leader election, header validation, `VerifyBlock`) still cannot express a neutral η0. Only a chain with a neutral initial nonce reaches it, in its first epoch |
+| [C15](#c15) | consensus | TPraos overlay schedule (d > 0) | A non-active overlay slot is rejected; an active one belongs to a genesis delegate, checked against its delegation with no stake | main: `ValidateHeaderInput` cannot carry d or the genesis delegations, so a valid genesis-delegate header is rejected (no stake, no pool VRF key) and a pool header in a non-active slot is accepted; branch: required `Overlay`, `ErrNotActiveSlot`, `ErrWrongGenesisColdKey`, `ErrWrongGenesisVRFKey` | OVERLAY rule: Active-OBFT and Decentralized | does not conform → conforms | Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet (model 25, `OverlayGenesisBug`, `OverlayNonActiveBug`). No production caller: Dingo validates with `VerifyBlock` and its own overlay check |
+| [C16](#c16) | consensus | Header envelope: ObsoleteNode, header size, body size | Checked before the protocol rules | main: not in `ValidateHeader`; branch: required `Envelope`, `ErrObsoleteNode`, `ErrHeaderSizeTooLarge`, `ErrBlockSizeTooLarge`; a missing input is the only error (`ErrMissingHeaderInput`) | `chainChecks` | does not conform → conforms | Fixed on the same branch (model 25, `ExtrasBug`, `MissingInputBug`) |
+| [C17](#c17) | consensus | Byron slot to epoch past Byron | The era history (`Summary`) converts every slot | main: `ByronConfig.SlotToEpoch` divides any slot by the Byron epoch length (mainnet slot 4514400 gives 209, not 208); branch: `EndSlot` and `SlotToEpochChecked` (`ErrSlotAfterByron`) | Conversions use each era's own epoch size | does not conform → conforms | Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet (model 25, `GoByronSoundBug`). Only tests call it |
 | [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129. Dingo's view already satisfies the contract |
 | [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: a pure function, covered by Go tests |
 | [L3](#l3) | ledger | Conway CC vote with a nil voter key | Not representable | main: `UtxoValidateCCVotingRestrictions` panics; PR: skips it as the sibling rules do | n/a (unreachable from decoded CBOR) | conforms | Open PR #3155. Library defect, hand-built transactions only |
@@ -832,6 +835,39 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet; the `[]byte` builders are kept and deprecated. Model 21: `EpochNonceNewNeutral` passes; `EpochNonceVrfInputBug` and `EpochNonceNewVrfInputBug` fail. gOuroboros' own exported APIs that take a `[]byte` η0 (`IsSlotLeader*`, header validation, `VerifyBlock`) now call the new builders but still cannot express a neutral η0. Only a chain with a neutral initial nonce reaches it, in its first epoch
 
+### C15
+
+**TPraos overlay schedule (d > 0)** (kind 4: gOuroboros outside the spec)
+
+- **What differs.** Reference: the slot at offset s is an overlay slot when ceiling(s·d) < ceiling((s+1)·d), active when its position is a multiple of floor(1/f), and then belongs to genesis key (position / floor(1/f)) mod |keys|; a non-active slot fails, an active one checks the delegate's cold key, VRF key and both proofs, with no stake. gOuroboros: main has no overlay inputs, so it rejects valid genesis-delegate headers and accepts pool headers in non-active slots; the branch requires `Overlay` and checks the schedule.
+- **Spec.** cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/chain.tex` 1170-1192 (`isOverlaySlot`, `classifyOverlaySlot`), 1198-1274 (Active-OBFT, Decentralized), 1280-1305 (predicate failures)
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs` 219-282, 314-344; `libs/cardano-ledger-core/src/Cardano/Ledger/Slot.hs` 117-130
+- **gOuroboros.** gOuroboros `f9ba2d3c` `consensus/validate.go` (`ValidateHeader`, `ValidateHeaderInput`); branch `78f2f391` `consensus/overlay.go` (`classifyOverlaySlot`, `checkRequiredInputs`)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet. Breaking: every caller must now pass `Overlay` for TPraos headers. No production caller in gOuroboros or Dingo
+
+### C16
+
+**Header envelope: ObsoleteNode, header size, body size** (kind 4: gOuroboros outside the spec)
+
+- **What differs.** Reference: the protocol major (the header's own in TPraos, the ledger view's in Praos) is at most the node's maximum, the header size at most `maxBlockHeaderSize`, the declared body size at most `maxBlockBodySize`. gOuroboros: main does not check them in `ValidateHeader`; the branch requires `Envelope` in every mode and returns `ErrMissingHeaderInput` alone when an input is missing.
+- **Spec.** cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/chain.tex` 1682-1687 (`chainChecks`)
+- **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Protocol/EnvelopeChecks.hs` 77-91; `Protocol/TPraos.hs` 69-80; `Protocol/Praos.hs` 82-106; cardano-ledger `eras/shelley/impl/src/Cardano/Ledger/Chain.hs` 65-82
+- **gOuroboros.** gOuroboros `f9ba2d3c` `consensus/validate.go`; branch `78f2f391` `consensus/overlay.go` (`validateEnvelopeLimits`)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on the same branch, no PR yet. `VerifyBlock` already checks the sizes from protocol parameters
+
+### C17
+
+**Byron slot to epoch past Byron** (kind 4: gOuroboros outside the spec)
+
+- **What differs.** Reference: slot-to-epoch goes through the era history, each era with its own epoch size. gOuroboros: `ByronConfig.SlotToEpoch` uses `slot / SlotsPerEpoch` for any slot; the branch adds `EndSlot` (from the era history) and `SlotToEpochChecked`, which refuses a slot at or past it.
+- **Spec.** ouroboros-consensus `ec239d57f618` `docs/tech-reports/report/chapters/hfc/time.tex` 142-177
+- **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/HardFork/History/Qry.hs` 366-378, 496-523
+- **gOuroboros.** gOuroboros `f9ba2d3c` `consensus/byron/byron.go` (`SlotToEpoch`); branch `70d83369` same file (`SlotToEpochChecked`)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet. Only tests call it
+
 ## Ledger
 
 ### L1
@@ -1085,6 +1121,9 @@ No pull request yet (decide whether and how to fix):
 - **C8** Genesis window count from `SimpleChainFragment`. The float rounding is fixed on local branch `fix/genesis-window-estimate-rounding` (`74699bf6`, no PR); the estimate itself remains. Callers with real headers should implement `ChainFragment` with a count.
 - **C13** The neutral nonce as an identity in the epoch nonce (the rolling part is fixed by #3053). Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet: `EpochNonceFromNonces`, `CalculateEpochNonce` deprecated.
 - **C14** A neutral epoch nonce in the VRF input. Fixed additively on the same branch, no PR yet: `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce`, `ComputeVRFInputFromNonce`, the `[]byte` builders deprecated. Only a chain with a neutral initial nonce reaches it, in its first epoch.
+- **C15** TPraos overlay schedule. Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet; breaking for callers, which must now pass `Overlay`.
+- **C16** Header envelope checks. Fixed on the same branch; callers must pass `Envelope`.
+- **C17** Byron slot to epoch past Byron. Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet.
 - **L5** Byron transaction with no inputs or no outputs. Fixed on a local branch, no PR yet.
 - **L6** Byron `maxTxSize`. Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`).
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
