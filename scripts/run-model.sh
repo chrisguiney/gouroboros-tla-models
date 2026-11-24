@@ -35,7 +35,7 @@ for cfg in *.cfg; do
   fi
   if "$root/bin/tlc" -workers auto -config "$cfg" "$tla" >"/tmp/run-model.$$.out" 2>&1; then
     passed=yes
-  elif grep -qE 'is violated|Deadlock reached' "/tmp/run-model.$$.out"; then
+  elif grep -qE 'is violated|properties were violated|Deadlock reached' "/tmp/run-model.$$.out"; then
     passed=no
   else
     passed=broken

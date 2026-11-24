@@ -58,6 +58,9 @@ Fill in the numbers when the PRs exist.
 | `ledger-conway-dijkstra` | `test/ledger-conway-dijkstra-model` | table tests |
 | `consensus-tachys` | `test/consensus-tachys-model` | table tests |
 | `consensus-nonce` | `fix/nonce-neutral-epoch-and-vrf-input` | neutral epoch nonce and VRF input, as new functions |
+| `pipeline-cbor` (`PipelineLifecycle`) | `test/pipeline-lifecycle-model` | Stop releases and joins after a parent cancel, waits for ApplyFunc |
+| `ledger-hash-cache` | `fix/ledger-scoped-memo-panic` | a panicking scoped-memo build is retried, not published as nil |
+| `ledger-hash-cache` | `test/ledger-hash-cache-model` | hash cache waiters, panic hand-over, single compute |
 
 ## Not yet attributed
 
