@@ -256,13 +256,14 @@ including a goroutine re-taking a lock it holds.
 | `BlockFetchBusyDeliveryFixed.cfg`: the fix, two `Stop`s, callbacks off `recvLoop` may call `Stop` or `RequestRange` | 531,003 | passes all eight |
 | `BlockFetchBusyDeliverySender.cfg`: the fix composed with PR #3114's sender | 1,873,292 | passes all eight |
 | `BlockFetchBusyDeliveryNoOnceAlone.cfg`: `resolveOnce` removed | 22,569 | passes `RangeDoneOnce` |
-| `BlockFetchBusyDeliveryRecvStop.cfg`: the fix plus `SelfStop`, `recvLoop` callbacks call `Stop` | 37,484 | passes all eight |
-| `BlockFetchBusyDeliveryJoin.cfg`: `SelfStop` and `JoinWatchers`, two `Stop`s, every callback may call `Stop` | 56,947 | passes all eight and `StopJoinsWatcher` |
+| `BlockFetchBusyDeliveryRecvStop.cfg`: the fix; `recvLoop` callbacks stop the client with `StopContext` and their own context | 37,484 | passes all eight |
+| `BlockFetchBusyDeliveryJoin.cfg`: the same and `JoinWatchers`, two `Stop`s, every callback may stop the client | 56,947 | passes all eight and `StopJoinsWatcher` |
 | `...StopLockBug.cfg` (main, two `Stop`s) | | **fails** `NoCallbackUnderLifecycle`: B1 |
 | `...OrderBug.cfg` (main, two `Stop`s) | | **fails** `NoResolveDuringDelivery`: new |
 | `...ReenterBug.cfg` (main, callback calls `Stop`) | | **fails** `NoWaitCycle`: B1 deadlocks |
 | `...RecvStopBug.cfg` (first fix only, `recvLoop` callback calls `Stop`) | | **fails** `NoWaitCycle`: new |
-| `...JoinNoSelfBug.cfg` (joining the watchers without `SelfStop`) | | **fails** `NoWaitCycle`: a watcher's callback waits for itself |
+| `...JoinNoSelfBug.cfg` (joining the watchers; callbacks call plain `Stop`) | | **fails** `NoWaitCycle`: a watcher's callback waits for itself |
+| `...JoinOtherCtxBug.cfg` (callbacks pass another client's context) | | **fails** `NoWaitCycle`: the marker is compared by identity |
 | `...StopJoinBug.cfg` (origin/main) | | **fails** `StopJoinsWatcher`: B3 |
 | `...X1ReachableBug.cfg` (deadline resolves before removing) | | **fails** `NoX1Shape` |
 | `...QueueCallbackBug.cfg` (resolve under `queueMutex`) | | **fails** `NoCallbackUnderQueue` |
@@ -291,16 +292,19 @@ including a goroutine re-taking a lock it holds.
 - **A callback on `recvLoop` that calls `Stop` waits for itself.** `Stop`
   waits for `DoneChan`, which closes only when `recvLoop` returns, so a
   `BlockFunc`, or a `RangeDoneFunc` from `handleBatchDone` or
-  `handleNoBlocks`, that calls `Stop` never returns (`RecvStopBug`). With
-  `SelfStop`, a `Stop` from inside a callback requests shutdown and returns
-  without waiting, joining or draining (`RecvStop`). It must not drain
-  either: a `BlockFunc`'s goroutine holds that range's `deliveryMu`, which the
-  fixed drain takes.
+  `handleNoBlocks`, that calls `Stop` never returns (`RecvStopBug`). Each
+  callback's `CallbackContext` now carries a context marked with its client,
+  and `StopContext` given a context carrying *this* client's marker
+  (`OwnStop`, `CbStopCtx = "own"`) requests shutdown and returns without
+  waiting, joining or draining (`RecvStop`). It must not drain either: a
+  `BlockFunc`'s goroutine holds that range's `deliveryMu`, which the fixed
+  drain takes. Another client's marker is not recognized (`JoinOtherCtxBug`).
 - **B3:** nothing joins the shutdown or deadline watchers, so `Stop` can
   return before their `RangeDoneFunc` calls (`StopJoinBug`). `JoinWatchers`
-  makes every `Stop` not inside a callback wait for them, after `DoneChan`
-  (`Join`). The join needs `SelfStop`: a watcher's callback that calls `Stop`
-  would otherwise wait for its own goroutine (`JoinNoSelfBug`).
+  makes every other stop wait for them, after `DoneChan` (`Join`). The join
+  needs callbacks to use `StopContext` with their own context: a watcher's
+  callback that calls plain `Stop` waits for its own goroutine
+  (`JoinNoSelfBug`).
 
 ### The fix (gOuroboros branch `fix/blockfetch-stop-callbacks-unlocked`)
 
@@ -325,13 +329,15 @@ apply #3114's `resolvableLocked` before returning. That composition is what
 shutdown watcher, the pipeline stop watcher, each deadline watcher, the
 `GetBlockRange` busy releaser) and waits for them after `DoneChan`; a group
 closed for the wait refuses new goroutines, which a `sync.WaitGroup` cannot
-do safely. A `Stop` called from inside a callback returns without waiting.
-Go has no goroutine-local storage, so "inside a callback" is a frame of
-`messageHandler` or `resolve` (both `go:noinline`) on the caller's own
-stack, checked only while one of the client's callbacks is running.
-`TestStopFromReceiveLoopCallbackReturns` (each of `BlockRawFunc`,
-`BlockFunc`, `RangeDoneFunc`, `BatchDoneFunc` calls `Stop`) and
-`TestStopWaitsForDeadlineWatcher` fail at the first fix and pass after.
+do safely. `CallbackContext.Context()` returns a context carrying the
+client's `*Client` under an unexported key, and `StopContext(ctx)` skips the
+waits only when that value is this client. `Stop()` always waits, so a
+callback must use `StopContext`. `TestStopFromReceiveLoopCallbackReturns`
+(each of `BlockRawFunc`, `BlockFunc`, `RangeDoneFunc`, `BatchDoneFunc` calls
+`StopContext`) hangs when the marker is ignored, and
+`TestStopWaitsForDeadlineWatcher` (plain `Stop`, and `StopContext` with
+another client's context) fails at the first fix and when any client's
+marker is accepted.
 
 ### Not modelled in this slice
 
