@@ -60,6 +60,9 @@
 (*   [G1] ledger/shelley/rules.go 146-160 TTL, 163-173 inputs, 245-268   *)
 (*        fee, 270-290 BadInputs (spent inputs only), 341-451 value       *)
 (*        conservation, 462-488 OutputTooSmall.                            *)
+(*   [G9] branch fix/ledger-bad-inputs-reference-set: BadInputs checks    *)
+(*        the reference's set, spent inputs plus collateral (Alonzo on)   *)
+(*        plus reference inputs (Babbage on), in each era's rules.go.     *)
 (*   [G2] ledger/allegra/rules.go 145-168 validity interval.               *)
 (*   [G3] ledger/mary/rules.go 154-180 OutputTooBig, 271-491 value with  *)
 (*        tokens, 493-540 OutputTooSmall (exempt with a positive asset).  *)
@@ -286,17 +289,31 @@ GoInterval(tx) ==
          /\ ~(tx.hi # 0 /\ (IF Mutation = "GoIntervalInclusive"
                             THEN slot > tx.hi ELSE slot >= tx.hi))
 
-\* In English: which inputs gOuroboros requires to exist. BadInputs looks
-\* only at spent inputs in every era [G1]. Collateral is resolved by the
-\* collateral-vkey-witnesses rule for every transaction, and reference
-\* inputs by the script-witness rules [G7]; either fails when the input is
-\* absent.
-GoReadInputs(tx) ==
-    tx.ins
-    \cup (IF AtLeast("Alonzo") /\ (Mutation # "GoCollUnresolved" \/ tx.rdmrs)
-          THEN tx.coll ELSE {})
-    \cup (IF AtLeast("Babbage") /\ Mutation # "GoRefsUnresolved"
-          THEN tx.refs ELSE {})
+\* Mutations that put back the old BadInputs (spent inputs only) [G1], and
+\* mutations that drop a witness rule's lookup [G7]. The "GoSpentOnly..."
+\* ones do both, which is what the code did before [G9].
+GoSpentOnly   == Mutation \in {"GoBadInputsSpentOnly",
+                               "GoSpentOnlyCollUnresolved",
+                               "GoSpentOnlyRefsUnresolved"}
+GoNoCollLookup == Mutation \in {"GoCollUnresolved", "GoSpentOnlyCollUnresolved"}
+GoNoRefLookup  == Mutation \in {"GoRefsUnresolved", "GoSpentOnlyRefsUnresolved"}
+
+\* In English: the inputs gOuroboros' BadInputs rule requires to exist.
+\* Fixed [G9]: the reference's set, SpecReadInputs. Old [G1]: spent inputs
+\* only, in every era.
+GoBadInputs(tx) == IF GoSpentOnly THEN tx.ins ELSE SpecReadInputs(tx)
+
+\* In English: the inputs the witness rules look up on their own [G7]: the
+\* collateral-vkey-witnesses rule resolves every collateral input, and the
+\* script-witness rules every reference input; either fails when the input
+\* is absent. The rule checking collateral (GoCollateral) also needs the
+\* collateral to exist, but only when there are redeemers.
+GoLookedUp(tx) ==
+    (IF AtLeast("Alonzo") /\ ~GoNoCollLookup THEN tx.coll ELSE {})
+    \cup (IF AtLeast("Babbage") /\ ~GoNoRefLookup THEN tx.refs ELSE {})
+
+\* In English: every input gOuroboros requires to exist, by any rule.
+GoReadInputs(tx) == GoBadInputs(tx) \cup GoLookedUp(tx)
 
 \* In English: outputTooSmall as gOuroboros computes it. Mary skips an
 \* output that holds a positive token quantity (outputHasPositiveAsset)
@@ -335,7 +352,7 @@ GoAccepts(tx) ==
     /\ GoInterval(tx)
     /\ tx.ins # {}                                       \* InputSetEmptyUtxo
     /\ tx.fee >= MinFee                                  \* FeeTooSmallUtxo
-    /\ GoReadInputs(tx) \subseteq Live                   \* BadInputs and [G7]
+    /\ GoReadInputs(tx) \subseteq Live                   \* BadInputs [G9], and [G7]
     /\ Consumed(tx) = OutCoin(tx) + tx.fee + Deposit(tx) \* ValueNotConserved [G1]
     /\ AtLeast("Mary") => TokOf(tx.ins) + tx.mint = OutTok(tx)  \* [G3]
     /\ GoOutputOk(tx)
@@ -402,6 +419,15 @@ Checked == {tx \in FamInputs \cup FamBalance \cup FamOutputs \cup FamInterval
 
 \* In English: gOuroboros accepts exactly what the reference accepts.
 GoAgrees == \A tx \in Checked : GoAccepts(tx) = SpecAccepts(tx)
+
+\* In English: BadInputs by itself rejects a transaction whose spent,
+\* collateral or reference input is missing, exactly when the reference's
+\* BadInputsUTxO does, whatever the witness rules look up. So a missing
+\* collateral or reference input is reported as BadInputs, as the
+\* reference reports it, and stays rejected if a witness rule stops
+\* looking it up.
+GoBadInputsComplete ==
+    \A tx \in Checked : (GoBadInputs(tx) \subseteq Live) = (SpecReadInputs(tx) \subseteq Live)
 
 -----------------------------------------------------------------------------
 (* TableSpec: every small UTxO, slot and credential state; nothing moves.   *)
