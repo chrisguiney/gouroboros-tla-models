@@ -54,6 +54,14 @@ closes. A PR can draw on more than one model.
 | `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | open |
 | `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | open |
 
+## Local branches, not yet published
+
+| Model | gOuroboros branch | Contents |
+| --- | --- | --- |
+| `pipeline-cbor` (`PipelineLifecycle`) | `test/pipeline-lifecycle-model` | Stop releases and joins after a parent cancel, waits for ApplyFunc |
+| `ledger-hash-cache` | `fix/ledger-scoped-memo-panic` | a panicking scoped-memo build is retried, not published as nil |
+| `ledger-hash-cache` | `test/ledger-hash-cache-model` | hash cache waiters, panic hand-over, single compute |
+
 ## Not yet attributed
 
 #3082 (null native script child lists), #3083 (MaxKesEvolutions before apply)

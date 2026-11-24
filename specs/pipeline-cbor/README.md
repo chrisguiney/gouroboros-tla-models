@@ -237,8 +237,8 @@ transaction reconstruction found no case.
 
 Metrics, the retained-CBOR byte budget (other than as a reason the stall comes
 sooner), validation in trusted decode-only and header-only modes (their
-`Results` delivery is modelled by `HasApplyFunc`), panics in stages, parent
-context cancellation without `Stop`, more than one client, and Leios or Peras
+`Results` delivery is modelled by `HasApplyFunc`), panics in stages (parent
+context cancellation without `Stop` is in `PipelineLifecycle.tla`), more than one client, and Leios or Peras
 messages in the reference queue.
 
 ## Lossless results (`WithLosslessResults`)
@@ -313,5 +313,105 @@ bin/tlc -workers auto -config specs/pipeline-cbor/BlockPipelineProbeRollbackBug.
 bin/tlc -workers auto -config specs/pipeline-cbor/BlockPipelineProbeAllAppliedBug.cfg specs/pipeline-cbor/BlockPipeline.tla
 bin/tlc -workers auto -config specs/pipeline-cbor/BlockPipelineProbeDropBug.cfg specs/pipeline-cbor/BlockPipeline.tla
 # or all at once:
+scripts/run-model.sh specs/pipeline-cbor
+```
+
+## Lifecycle at goroutine granularity (`PipelineLifecycle.tla`)
+
+`BlockPipeline.tla` checks what the pipeline decides. `PipelineLifecycle.tla`
+checks how its goroutines finish: one step per lock acquire or release, per
+channel send, receive, close or `select` choice, per WaitGroup wait and per
+context cancel, with each goroutine (submitter, decode worker, apply runner,
+result forwarder, metrics collector, Stop and its runner-joining helper, a
+`Results` reader, a `WaitForDrain` caller) as its own process. `ApplyFunc`
+may return, block forever, call `Stop`, or call `WaitForDrain`. Switch
+`PR3161` swaps in open PR #3161's forwarder, `Stop` and `WaitForDrain`
+(`0dbc3775`). Read at gOuroboros `5c4f31c1`; `pipeline/` is unchanged since
+the inventory's `d8f5bc2a`. Deadlock checking is on: a state where nothing
+moves while an API call (`Stop`, `Submit`, `WaitForDrain`) is still waiting is
+a deadlock; one where only parked goroutines remain is judged by
+`NoLeakWhenQuiescent`.
+
+| Config | Result | Distinct states |
+| --- | --- | --- |
+| `PipelineLifecycle.cfg` (2 blocks, reader, owner and second `Stop`, parent cancel) | passes | 17,752 |
+| `PipelineLifecycleDeep.cfg` (3 blocks, no reader) | passes | 25,596 |
+| `PipelineLifecycleNoReader.cfg` | passes | 4,341 |
+| `PipelineLifecyclePR.cfg` (PR #3161) | passes | 16,374 |
+| `PipelineLifecyclePRNoReader.cfg` (PR #3161, 3 blocks) | passes | 9,378 |
+| `PipelineLifecycleDrainPR.cfg` (PR #3161, a drainer) | passes, with `NoCommitAfterDrain` | 48,588 |
+| `PipelineLifecycleApplyCallsDrain.cfg` (`ApplyFunc` calls `WaitForDrain`) | passes | 4,603 |
+| `PipelineLifecycleDrainStopBug.cfg` (gOuroboros `5c4f31c1`, a drainer) | `NoCommitAfterDrain` violated | 8,336 |
+| `PipelineLifecycleBlockingApplyBug.cfg` (`ApplyFunc` never returns) | deadlock: `Stop` waits forever holding `mu` | 2,619 |
+| `PipelineLifecycleApplyCallsStopBug.cfg` (`ApplyFunc` calls `Stop`) | deadlock | 578 |
+| `PipelineLifecycleApplyCallsStopOwnerBug.cfg` (same, owner's `Stop` holds `mu`) | deadlock | 2,909 |
+| `PipelineLifecycleApplyCallsDrainPRBug.cfg` (PR #3161, `ApplyFunc` calls `WaitForDrain`) | deadlock | 3,657 |
+| `PipelineLifecycleParentCancelLeakBug.cfg` (parent cancel, no `Stop`) | `NoLeakWhenQuiescent` violated | 814 |
+| `PipelineLifecycleParentCancelLeakPRBug.cfg` (same, PR #3161) | `NoLeakWhenQuiescent` violated | 311 |
+| `PipelineLifecycleMuAcrossApplyBug.cfg` | `MuNotHeldAcrossApply` violated (by design) | 3,065 |
+| `PipelineLifecycleCloseBeforeJoinBug.cfg` (mutation) | `NoPanic` violated | 1,789 |
+| `PipelineLifecycleSkipRunnerJoinBug.cfg` (mutation) | `JoinedAfterStop` violated | 3,388 |
+| `PipelineLifecycleNoReleaseActiveBug.cfg` (mutation) | `AllReleasedAfterStop` violated | 4,375 |
+| `PipelineLifecycleReleaseTwiceBug.cfg` (mutation) | `BudgetMatchesActive` violated | 4,151 |
+| `PipelineLifecycleProbeGateWaitBug.cfg` (probe) | violated: `Stop` waits for the gate a `Submit` holds | 644 |
+| `PipelineLifecycleProbeStopDrainBug.cfg` (probe) | violated: `Stop` takes results while it waits | 3,416 |
+
+Invariants that hold in every passing config: `NoPanic` (no send on a closed
+channel, no double close), `BudgetMatchesActive` (`rawBytesInUse` is one
+reservation per tracked item plus the submitter's own), `AllReleasedAfterStop`
+and `JoinedAfterStop` (once `Stop` returns, every reservation is back and the
+worker, runner, forwarder, metrics collector and helper have exited), and no
+deadlock. Lock order: `mu` -> `submitGate` is the only edge between the two
+non-leaf locks; nothing takes `mu` while holding the gate, so no cycle exists
+on locks alone. The deadlocks below are cycles through a join, not through
+lock order.
+
+Findings:
+
+- **`Stop` waits behind `ApplyFunc`, holding `mu` (inventory C5, confirmed).**
+  `ApplyFunc` has no context, so `Stop`'s cancel cannot reach it; `Stop`
+  waits for it while holding `mu`, and a second `Stop` (or `Start`) waits on
+  `mu` behind it. With an `ApplyFunc` that returns this is a join, not a
+  defect; with one that never returns, `Stop` never returns. The reference
+  interrupts its add-block thread with an asynchronous exception on close,
+  which Go cannot do.
+- **New: an `ApplyFunc` that calls `Stop` deadlocks.** `Stop` waits for the
+  runner, which is running that `ApplyFunc`; if the owner's `Stop` already
+  holds `mu`, the inner one waits for `mu` instead. Either way neither returns.
+  Reproduced on `5c4f31c1` and on PR #3161 with a scratch test (inner `Stop`
+  had not returned after 2 s). Nothing documents that `ApplyFunc` must not
+  call `Stop`.
+- **New, PR #3161 only: an `ApplyFunc` that calls `WaitForDrain` during
+  `Stop` deadlocks.** #3161 makes `WaitForDrain` wait for the runner once
+  `Stop` has begun, and the runner is the caller. On `5c4f31c1` the same call
+  returns nil. Reproduced on `0dbc3775` (both the drain and `Stop` hang past
+  2 s) and not on `5c4f31c1`. A conflict for #3161 to resolve, not a reason to
+  revert its drain fix, which `DrainStopBug`/`DrainPR` confirm.
+- **A parent cancel without `Stop` leaks (inventory C4, confirmed, on both
+  heads).** Workers, runner and metrics collector exit; `forwardResults`
+  never does (it exits only when `Stop` closes `resultsQueue`; #3161 notices
+  the cancel but still waits for the close), and items stranded in the
+  channels keep their budget. A scratch run held 6,414 retained bytes and the
+  forwarder goroutine until `Stop`. `Stop` afterwards cleans up completely,
+  which the new test pins. Exiting the forwarder on the cancel alone would not
+  release the stranded items; making the pipeline clean up without `Stop`
+  means running `Stop`'s cleanup on the cancel.
+- **C6 (a `Submit` holds the gate while `Stop` waits for it) is reachable but
+  never a deadlock**, because `Stop` cancels before taking the gate.
+- **C7 (the budget clamp at zero hides a double release)**: no double release
+  is reachable; `ReleaseTwice` shows the clamp would hide one from the budget
+  but not from `BudgetMatchesActive`.
+
+Go tests, on `test/pipeline-lifecycle-model` (`081686a1`, from `5c4f31c1`):
+`TestBlockPipelineStopAfterParentCancelReleasesEverything` (budget, active
+items and goroutines after a parent cancel and `Stop`, with `goleak`) and
+`TestBlockPipelineStopWaitsForApplyFuncInProgress` (`Stop` does not return
+while `ApplyFunc` runs, then joins everything). Killed mutations: removing
+`releaseActiveItems` (12,828 bytes left), removing the runner join (`Stop`
+returned while `ApplyFunc` ran). No fix branch: the two new deadlocks need a
+decision (document "`ApplyFunc` must not call `Stop` or `WaitForDrain`", or
+give `ApplyFunc` a context), and the second belongs in #3161.
+
+```sh
 scripts/run-model.sh specs/pipeline-cbor
 ```

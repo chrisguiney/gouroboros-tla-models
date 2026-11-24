@@ -117,7 +117,11 @@ protocol.
 ### Block pipeline
 
 - [Block pipeline and CBOR](specs/pipeline-cbor/README.md):
-  ordered apply, rollback fencing, drain, and preserved bytes.
+  ordered apply, rollback fencing, drain, preserved bytes, and how `Stop`
+  joins the pipeline's goroutines.
+- [Hash cache and scoped memo](specs/ledger-hash-cache/README.md): the
+  lock-free header-hash and transaction-id cache, and the memo shared by the
+  rules validating one transaction.
 
 ### Across the models
 

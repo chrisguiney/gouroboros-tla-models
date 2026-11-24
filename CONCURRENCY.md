@@ -1975,6 +1975,13 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 16 | `DmqReplayShared`, `LmsReplayTokens` | DMQ local protocols | C22, C23 | Cross-connection shared state through one `Config`. |
 | 17 | `PeerSharingExchange`, `MuxStartGate`, `AuthOpCertCache` | peersharing, muxer, `protocol/common` | A5 | Small; A5 is ruled out by `Connection`'s ordering. |
 
+Status (2026-11-24, gOuroboros `5c4f31c1`): `PipelineLifecycle` is in
+`specs/pipeline-cbor` and `HashCacheSpin` and `TxScopedMemo` are in
+`specs/ledger-hash-cache`. They confirm C4, C5 and D1 (fixed on a branch),
+find D3 unreachable from any caller, and add two hazards: an `ApplyFunc` that
+calls `Stop` deadlocks, and with PR #3161 one that calls `WaitForDrain` during
+`Stop` deadlocks.
+
 ### Proposed models
 
 Granularity for all of them: **one step is one lock acquire, one lock
