@@ -10,19 +10,30 @@ chain itself:
   ηc ⭒ ηh ⭒ extraEntropy, and ηh becomes the current **lab nonce**, the hash
   the last applied block names as its predecessor.
 
-gOuroboros keeps no chain state. It provides two functions in
-`ledger/common/nonce.go`, `CalculateRollingNonce` (one block into ηv) and
-`CalculateEpochNonce` (the tick's η0), and the VRF input builders that use η0
-(`vrf.MkInputVrf`, `vrf.MkSeedTPraos`, `consensus.ComputeVRFInput`, and
-`verifyNonceVrf` in `ledger/verify_block.go`). Everything else is the
-caller's (Dingo's): holding the nonces, deciding when to tick and freeze,
-choosing what to pass, and restoring the state on rollback. The model makes
-that contract its caller and checks it against the reference.
+gOuroboros keeps no chain state. It provides the nonce functions and
+everything else is the caller's (Dingo's): holding the nonces, deciding when
+to tick and freeze, choosing what to pass, and restoring the state on
+rollback. The model makes that contract its caller and checks it against the
+reference. gOuroboros has two sets of functions, and the constant `GoApi`
+picks one:
+
+- `"Bytes"`, now deprecated: `CalculateRollingNonce` (one block into ηv) and
+  `CalculateEpochNonce` (the tick's η0) in `ledger/common/nonce.go`, and the
+  VRF input builders `vrf.MkInputVrf`, `vrf.MkSeedTPraos` and
+  `consensus.ComputeVRFInput`. They take `[]byte`, so they cannot spell
+  `NeutralNonce`.
+- `"Nonce"`: `NonceFromTPraosVRF`, `NonceFromPraosVRF` and `CombineNonces`
+  (main `756a9a89`), and `EpochNonceFromNonces`, `vrf.MkInputVrfFromNonce`,
+  `vrf.MkSeedTPraosFromNonce` and `consensus.ComputeVRFInputFromNonce`
+  (branch `fix/nonce-neutral-epoch-and-vrf-input`). They take
+  `common.Nonce`, whose `NonceTypeNeutral` is the reference's `NeutralNonce`.
 
 Sources are pinned to cardano-ledger `1210d37fe6bd`
 (`eras/shelley/formal-spec`, `libs/cardano-protocol-tpraos`,
 `libs/cardano-protocol`, `libs/cardano-ledger-core`), ouroboros-consensus
-`ec239d57f618`, and gOuroboros `d0b95845`. `EpochNonce.tla` lists them with
+`ec239d57f618`, and gOuroboros `d0b95845` (the `[]byte` functions), `756a9a89`
+and branch `fix/nonce-neutral-epoch-and-vrf-input` (the `common.Nonce`
+functions). `EpochNonce.tla` lists them with
 file and line.
 
 ## The model (`EpochNonce.tla`)
@@ -41,17 +52,20 @@ from epoch 1 after a Byron chain), the initial nonce (`GenesisHash` or
 `Neutral`), the era's block nonce (`TPraos` or `Praos`), the window, the epochs
 with extra entropy, the caller (`Contract`, `Dingo`, `Direct`), what the
 caller passes `CalculateRollingNonce` (`Nonce`: 32 bytes; `Raw`: the 64-byte
-VRF output), and the gOuroboros fixes in force (`GoFix`).
+VRF output), the hypothetical `[]byte` fixes in force (`GoFix`), and which
+functions the caller uses (`GoApi`). `Caller`, `Operand` and `GoFix` matter
+only for `"Bytes"`; with `"Nonce"` every caller derives the block nonce from
+the raw output and passes typed nonces.
 
-| Rule | Specification | Reference | gOuroboros (main at `756a9a89`) |
+| Rule | Specification | Reference | gOuroboros (main at `756a9a89`; the branch's additions marked) |
 | --- | --- | --- | --- |
 | ⭒ | `seedOp`, abstract | `Nonce a ⭒ Nonce b = Nonce (blake2b (a‖b))`, `NeutralNonce` identity on both sides (BaseTypes 607-612) | rolling: `CombineNonces` has `NonceTypeNeutral` as identity on both sides, and 32 zero bytes are an ordinary nonce (before `756a9a89`: zero bytes were neutral but the result was `blake2b(x)`); epoch: no neutral at all, zero bytes are hashed |
 | Block nonce | `bnonce` | TPraos `blake2b(output)` (BaseTypes 615-619); Praos `blake2b(blake2b("N"‖output))` (Praos/VRF.hs 121-134) | `NonceFromTPraosVRF` and `NonceFromPraosVRF` derive it as the reference does; `CalculateRollingNonce` rejects a 64-byte operand (before `756a9a89`: concatenated raw) |
 | Freeze | `s < firstSlot(e+1) − StabilityWindow` (chain.tex 600-640), meant 4k/f (errata 17.3) | strict `<`; 3k/f for TPraos and Babbage, 4k/f from Conway (Node.hs 590-597, 692-702) | caller's |
-| Tick | `η0 := ηc ⭒ ηh ⭒ ηe`, `ηh := ηph` (chain.tex 514-533) | same (Tickn.hs 71-81); Praos without ηe (PolyPraos 606-640); once per block, however many epochs passed (Util.hs 22-42) | `blake2b(ηc‖ηh)`, then `‖ ηe` unless empty |
+| Tick | `η0 := ηc ⭒ ηh ⭒ ηe`, `ηh := ηph` (chain.tex 514-533) | same (Tickn.hs 71-81); Praos without ηe (PolyPraos 606-640); once per block, however many epochs passed (Util.hs 22-42) | `CalculateEpochNonce` (deprecated): `blake2b(ηc‖ηh)`, then `‖ ηe` unless empty. Branch: `EpochNonceFromNonces(ηc, ηh, ηe)` is `CombineNonces` twice, the reference's formula with `NonceTypeNeutral` as identity |
 | ηph | hash of the last applied block itself (chain.tex 1748, 1809) | **its predecessor's hash** (`prevHashToNonce (bheaderPrev …)`, API.hs 563, 599; PolyPraos 713) | caller's; the parameter is named `prevEpochFirstBlockHash` |
 | Start | `toShelley` (chain.tex 1975-2010) | η0 = ηv = ηc = initial nonce, ηh = lab = `NeutralNonce` (CanHardFork.hs 393-423, API.hs 451-468) | caller's |
-| VRF input | `slotToSeed s ⭒ η0` | a `NeutralNonce` η0 adds no bytes (Praos/VRF.hs 64-78, BlockHeader.hs 422-435) | η0 must be 32 bytes, always appended |
+| VRF input | `slotToSeed s ⭒ η0` | a `NeutralNonce` η0 adds no bytes (Praos/VRF.hs 64-78, BlockHeader.hs 422-435) | `MkInputVrf`, `MkSeedTPraos`, `ComputeVRFInput` (deprecated): η0 must be 32 bytes, always appended. Branch: `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce`, `ComputeVRFInputFromNonce` append nothing for `NonceTypeNeutral` |
 
 Invariants:
 
@@ -78,10 +92,15 @@ Invariants:
 | `EpochNonceDirectFixed.cfg` (Byron start, raw operand, direct caller, both fixes) | 9,251 | passes |
 | `EpochNonceNeutralInitFixed.cfg` (neutral initial nonce, direct, neutral fix) | 8,930 | passes |
 | `EpochNonceNeutralInitContract.cfg` (neutral initial nonce, main's contract) | 8,930 | passes |
-| `EpochNonceDirectLabBug.cfg` | main: zero ηh is hashed in | `EpochNonceAgrees` |
+| `EpochNonceNewByron.cfg` (`common.Nonce` functions, Byron start, raw output, extra entropy) | 9,251 | passes |
+| `EpochNonceNewNeutral.cfg` (`common.Nonce` functions, neutral initial nonce, VRF input included) | 8,930 | passes |
+| `EpochNonceNewPraos.cfg` (`common.Nonce` functions, Praos, neutral initial nonce) | 7,430 | passes |
+| `EpochNonceNewLabBug.cfg` | mutation: `EpochNonceFromNonces` hashes a neutral ηh in | `EpochNonceAgrees` |
+| `EpochNonceNewVrfInputBug.cfg` | mutation: the nonce VRF input appends a neutral η0 as zeros | `VrfInputAgrees` |
+| `EpochNonceDirectLabBug.cfg` | `CalculateEpochNonce`: zero ηh is hashed in | `EpochNonceAgrees` |
 | `EpochNonceRawOperandBug.cfg` | main before `756a9a89`: 64-byte output concatenated raw | `StateAgrees` |
 | `EpochNonceNeutralInitBug.cfg` | main before `756a9a89`: neutral ηv hashes the block nonce again | `StateAgrees` |
-| `EpochNonceVrfInputBug.cfg` | main: neutral η0 appended as zero bytes | `VrfInputAgrees` |
+| `EpochNonceVrfInputBug.cfg` | `MkInputVrf`/`MkSeedTPraos`: neutral η0 appended as zero bytes | `VrfInputAgrees` |
 | `EpochNonceFreezeLEBug.cfg` | mutation: `<=` | `StateAgrees` |
 | `EpochNonceNoFreezeBug.cfg` | mutation: never freeze | `StateAgrees` |
 | `EpochNonceOtherWindowBug.cfg` | mutation: the other era's window | `StateAgrees` |
@@ -94,7 +113,8 @@ Probes (expected violated): `ProbeTickLab` (an η0 built with a real ηh),
 `ProbeSkippedEpoch` (one tick across an empty epoch), `ProbeEntropy`,
 `ProbePostFreeze`, `ProbeRollbackCand` (a rollback that changed ηc).
 
-`make consensus-nonce` runs all 23 configs in about 20 seconds.
+Every config before the `New` ones sets `GoApi = "Bytes"`. `make
+consensus-nonce` runs all 28 configs in about 25 seconds.
 
 ### What the caller must do (the contract on main)
 
@@ -115,6 +135,13 @@ Dingo does 1-5 for the public networks (`ledger/eras/*.go`,
 It does not handle a neutral ηc with a real ηh, which needs a neutral initial
 nonce.
 
+With the `common.Nonce` functions (`GoApi = "Nonce"`), items 2 and 4 reduce
+to holding `NonceTypeNeutral` where the reference holds `NeutralNonce`: derive
+the block nonce with `NonceFromTPraosVRF` or `NonceFromPraosVRF`, fold it with
+`CombineNonces`, tick with `EpochNonceFromNonces`, and build the VRF input
+with `MkInputVrfFromNonce` or `MkSeedTPraosFromNonce`. The freeze, the tick
+condition, the lab nonce and the rollback (items 3-5) stay the caller's.
+
 ### Findings
 
 1. **64-byte operand (defect, fixed on branch).** `CalculateRollingNonce`
@@ -125,16 +152,26 @@ nonce.
    vectors equal the reference's value. Branch
    `fix/ledger-nonce-raw-vrf-operand` hashes a 64-byte operand to its TPraos
    nonce and restores the earlier vectors.
-2. **NeutralNonce identity (defect, fixed on branch).** From a zero ηv,
-   `CalculateRollingNonce` returns `blake2b(x)` for a 32-byte nonce `x`, where
-   ⭒ gives `x`; `CalculateEpochNonce` hashes a zero or rejects an empty ηc or
-   ηh, where ⭒ skips it. The second case is reached on every chain, at the
-   second tick after the start. Branch `fix/ledger-nonce-neutral-identity`
-   applies the identity in both.
-3. **Neutral η0 in the VRF input (open).** `MkInputVrf` and `MkSeedTPraos`
-   need 32 bytes, so a neutral η0 is appended as zeros; the reference appends
-   nothing. Only a chain with a neutral initial nonce reaches it, during its
-   first epoch. Fixing it changes the API.
+2. **NeutralNonce identity (fixed additively).** From a zero ηv,
+   `CalculateRollingNonce` returned `blake2b(x)` for a 32-byte nonce `x`,
+   where ⭒ gives `x`; `CalculateEpochNonce` hashes a zero or rejects an empty
+   ηc or ηh, where ⭒ skips it. The second case is reached on every chain, at
+   the second tick after the start. `CombineNonces` (main `756a9a89`) fixed
+   the rolling part; branch `fix/nonce-neutral-epoch-and-vrf-input` adds
+   `EpochNonceFromNonces` for the tick and deprecates `CalculateEpochNonce`,
+   whose behaviour is unchanged (`EpochNonceDirectLabBug` still reproduces
+   it; `EpochNonceNewByron` passes).
+3. **Neutral η0 in the VRF input (fixed additively).** `MkInputVrf` and
+   `MkSeedTPraos` need 32 bytes, so a neutral η0 is appended as zeros; the
+   reference appends nothing. Only a chain with a neutral initial nonce
+   reaches it, during its first epoch. The same branch adds
+   `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce` and
+   `ComputeVRFInputFromNonce` and deprecates the `[]byte` builders
+   (`EpochNonceVrfInputBug` still reproduces them; `EpochNonceNewNeutral`
+   passes). gOuroboros' own callers (`consensus` leader election, header
+   validation and block building, `ledger` VRF verification) now call the new
+   builders with an ordinary nonce made from their 32-byte η0, so their
+   exported `[]byte` APIs still cannot express a neutral η0.
 4. **Naming (open).** `CalculateEpochNonce`'s `prevEpochFirstBlockHash` is
    neither the reference's ηh (the previous epoch's last block's predecessor)
    nor the spec's (that block's own hash). `EpochNonceSpecLabBug` shows the
