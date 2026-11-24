@@ -47,7 +47,8 @@ once (`onceStart`). The LeiosNotify, LeiosFetch and LeiosVotes clients' `Stop`
 does not abandon requests: it queues `MsgQuit` or `MsgDone`, which the
 protocol only writes when the state allows. The servers restart after
 `MsgDone` (LeiosNotify after answering `MsgQuit`), except Peras, whose server
-stays in `Done`. The Peras client's `Stop` and a context that ends mid-request
+stays in `Done` on `main` (`PerasVotesNoRestartBug.cfg`; fixed on
+`fix/perasvotes-server-restart`). The Peras client's `Stop` and a context that ends mid-request
 stop the protocol for good. So the slice 2 defect has no way in here.
 
 ## LeiosNotify (`LeiosNotify.tla`)
@@ -178,6 +179,16 @@ whatever `ObjectIDsFunc` returns and fails the connection if that is empty.
 | `PerasVotesFixedDeep.cfg`: the fix, a window of three, five rounds | 347 | passes |
 | `PerasVotesProbesBug.cfg`: probe, a Sync round completes | 18 | violated, as expected |
 | `PerasVotesFixedIdleProbesBug.cfg`: probe, under the fix `MsgServerIdle` gives the client agency back | 23 | violated, as expected |
+| `PerasVotesRestart.cfg`: two runs on one connection, the server restarts after `MsgDone` (the reference, and the restart fix) | 69 | passes |
+| `PerasVotesNoRestartBug.cfg`: the same against gOuroboros `main` `d8f5bc2a`, whose server stays in `Done` | 39 | **fails** `NewRunServed` |
+| `PerasVotesProbeNoSecondRunBug.cfg`: probe, a second run starts | 35 | violated, as expected |
+
+`NewRunServed` says a client message waiting for the server can be read
+(`c2s nonempty => ENABLED ServerRead`). The other configs keep `MaxRuns = 1`.
+The reference runs this server, the outbound side, as a responder
+(consensus `ec239d57f618` `NodeToNode.hs` 522-536), and the inbound governor
+restarts a responder that ended cleanly (ouroboros-network `InboundGovernor.hs`
+455-470; `connection-manager.tex` 492-496).
 
 **Deviation, fixed on a branch: no `MsgAwaitReply` or `MsgServerIdle`.** Since
 2026-11-11 the reference server may answer a blocking request with
@@ -220,7 +231,7 @@ identifiers that arrive or `MsgServerIdle`. `PerasVotesFixed.cfg` checks it:
 | LeiosVotes count limit | Unbounded N | No reference | 1 to 1,000 | Differs; recorded |
 | ObjectDiffusion await | Not stated | `MsgAwaitReply`, `MsgServerIdle`, `MustReply` [R6] | Missing at `61046085`; as the reference with the fix [G2] | **Deviation**, fixed on a branch |
 | ObjectDiffusion blocking timeout | Not stated | 10 s, then 60 s after await [R7] | None at `61046085`; 10 s and 60 s with the fix [G2] | Fixed on a branch |
-| Server restart after `MsgDone` | Spec 5.7: responders restart | Yes | LeiosNotify, LeiosFetch, LeiosVotes: yes. Peras: no | Peras differs |
+| Server restart after `MsgDone` | Spec 5.7: responders restart | Yes | LeiosNotify, LeiosFetch, LeiosVotes: yes. Peras: no on `main` | Peras **does not conform**; fixed on `fix/perasvotes-server-restart` |
 
 ## Go tests and mutations
 
@@ -236,6 +247,7 @@ mutation of the line it guards and failed; the table lists them.
 | `fix/leiosnotify-request-after-quit` | `TestStopDuringRefillSendsNoRequestAfterQuit`, `TestSyncAfterStopIsRefused` | Fail without the fix: request 33 to 59 of a 100-request refill followed `MsgQuit` in 4 of 5 runs; `Sync` after `Stop` returned nil |
 | `fix/leiosnotify-unexpected-cancel` | `TestClientRefusesCanceledBeforeQuit`, `TestClientAcceptsCanceledAfterQuit` | Fails without the fix |
 | `fix/perasvotes-await-reply` (`f7ebba9b`, includes the state-model test with the MustReply row) | `TestClientAcceptsAwaitReplyThenIDs`, `TestSyncContinuesAfterServerIdle`, `TestClientBlockingRequestTimeouts`, `TestServerWithNoVoteSendsAwaitReply`, `TestStateMapMatchesModel` cell `client/inObjectIDsBlocking/AwaitReply` | Fail on `61046085`: "unknown message type 7"; Sync stops after the idle; Blocking timeout 0; the server fails with "blocking Peras object ID request requires a non-empty reply"; the cell is Violation |
+| `fix/perasvotes-server-restart` (from `d8f5bc2a`, after the await fix merged) | `TestServerAnswersRequestAfterRestart`, `TestServerAnswersInitSentDuringRestart` | Fail on `d8f5bc2a`: "no reply from restarted server: ReplyObjectIDs"; "server never reached its Done handler" (the server ignored `MsgDone`). `TestClientServerObjectDiffusionFlow` now expects the restart |
 | `fix/leiosvotes-pipelined-requests` | `TestServerAnswersPipelinedRequestNext` | Fails without the fix: "received message type 0 without peer agency ... in state Busy" |
 
 Existing tests already covered the LeiosFetch slot (above), LeiosNotify's
