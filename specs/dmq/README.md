@@ -153,6 +153,9 @@ continuation of that submission.
 | `LocalMessageSubmissionTagged.cfg`: two concurrent calls, answers tied to calls (the reference) | 141 | passes |
 | `LocalMessageSubmissionConcurrentBug.cfg`: two concurrent calls, gOuroboros callbacks | | **fails** `AnswerReachesAsker` |
 | `LocalMessageSubmissionNoAgencyBug.cfg` (mutation: the send loop ignores agency) | | **fails** `NoViolation` |
+| `LocalMessageSubmissionOwnAnswer.cfg`: two concurrent calls, `SubmitMessage` returns its own answer under the submit lock (the fix) | 43 | passes |
+| `LocalMessageSubmissionOwnAnswerNoLockBug.cfg` (mutation: own answer, no submit lock) | | **fails** `AnswerReachesAsker` |
+| `LocalMessageSubmissionOwnAnswerProbeDoneBug.cfg` (probe: `ProbeNeverDone` with the fix) | | **fails** (Stop completes) |
 
 `Stop` never abandons a submission: `MsgDone` is queued behind the
 submissions and goes out from `StIdle` after their answers. `Start` runs once
@@ -163,10 +166,16 @@ message, B returns, A returns. The application now waits for B then A; the
 node answers A then B. A rejection for A is reported for B. Nothing in the
 callback can tell them apart. The trace is six steps.
 
-This is a design limitation, not a wire defect, and fixing it changes the
-callback signatures, so it is written up rather than fixed: an application
-must make one `SubmitMessage` at a time and wait for its answer before the
-next.
+This is a design limitation, not a wire defect. The fix follows the
+reference, where `SendMsgSubmitTx tx k` hands the answer to that
+submission's continuation (`protocols/lib/.../LocalTxSubmission/Client.hs` 46-56 at
+ouroboros-network `5f356486ab3e`): `SubmitMessage` takes the client's submit
+lock, registers as the waiter, queues its message, and returns its own
+answer (nil, or the rejection) once it arrives (`OwnAnswer`). The lock is
+what keeps registration order equal to queue order; without it
+(`OwnAnswerNoLockBug`) two calls can register in one order and queue in the
+other. `ConcurrentBug` is gOuroboros `origin/main` `5c4f31c1`. Go side:
+`fix/localmessagesubmission-own-answer`.
 
 ## Part 3: local message notification (`LocalMessageNotification.tla`)
 
