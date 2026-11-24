@@ -2047,12 +2047,17 @@ evidence, branch or PR. Branches are local and unpushed.
   `RunLoop` goroutines in the instance's loop group so the connection-teardown
   join covers them. C18 adds a decision: a `RequestNextFunc` that ignores
   `QuitChan` would then hold up teardown until the join's context ends.
-- **C13: by design, documented.** Re-entering the client from `VoteFunc`
-  waits for `Sync` (which holds the exchange) to end. On the C14 branch the
-  wait now ends with the caller's context, and `Sync`'s doc says to return an
-  error or cancel `Sync`'s context instead. A call with a context that never
-  ends still waits forever; detecting the re-entry needs the callback
-  instance marker (decision).
+- **C13: defect, fixed (user decision).** The client passes `VoteFunc` a
+  `CallbackContext` whose `Context()` marks the client; `RequestObjectIDs`,
+  `RequestObjects` and `Done` called with it return `ErrCalledFromVoteFunc`
+  at once instead of waiting on the `Sync` running the callback (the
+  reference inbound side issues requests from its one protocol thread, so it
+  has no re-entrant request). `TestVoteFuncCallingItsClientReturnsAtOnce`
+  fails on the C14 commit (5 s bound); `TestCallbackContextOfAnotherClientWaits`
+  shows another client's callback context still waits. Branch
+  `fix/perasvotes-op-lock-and-await-panic` `9cd873e8`. Local marker key; same
+  `Context()` shape as `fix/protocol-callback-context`, switch to its
+  `CallbackOwner` when that lands.
 - **C14: defect, fixed.** `Done(ctx)` waited on `opMu` held by `Sync`
   (`perasvotes/client.go:207`, `:251`). `TestDoneHonoursContextWhileSyncRuns`
   (server's `ObjectIDsFunc` gated so `Sync` is known to hold the exchange,
@@ -2080,7 +2085,9 @@ evidence, branch or PR. Branches are local and unpushed.
   `TestServerAnswersPipelinedRequestsInOrder` (second source would finish
   first) passes on `origin/main` with no overlap; kept as a regression test on
   `test/leiosnotify-request-order` `173907f8`. Its passing case waits a
-  bounded 500 ms for an overlap that must not happen.
+  bounded 500 ms for an overlap that must not happen: the engine exposes no
+  signal for "request read but held" (`MessageReceivedFunc` is the server's
+  own, and the read loop logs nothing), so the wait stays.
 - **C22: by design.** Holding the `Config`-wide replay lock across
   `PrepareMessages` (`localmessagenotification/client.go:281-323`) is what
   makes check, authenticate and record one step across connections sharing
@@ -2092,11 +2099,19 @@ evidence, branch or PR. Branches are local and unpushed.
   stopped keeps it. Unchanged on #3197.
 - **C24, C26: covered by #3197** (`242cc3cd`, `c43632a9`: restart after
   `MsgClientDone`/`MsgDone`).
-- **C25: by design (API).** Unchanged on `origin/main`
-  (`localmessagesubmission/client.go:99`); the dmq model's write-up stands.
-  Following the reference (submit returns its own answer, as
-  `localtxsubmission.SubmitTx` does) changes `SubmitMessage`'s signature:
-  decision.
+- **C25: defect, fixed (user decision, breaking).** Model first:
+  `specs/dmq` `LocalMessageSubmissionOwnAnswer.cfg` (43 states) passes;
+  `OwnAnswerNoLockBug` (no submit lock) fails `AnswerReachesAsker`;
+  `ConcurrentBug` is `origin/main`. `SubmitMessage` now holds a submit lock
+  from send to answer and returns nil or `MessageRejectedError{Reason}`, as
+  the reference's `SendMsgSubmitTx tx k` hands the result to `k`.
+  `TestConcurrentSubmitsGetTheirOwnAnswers` fails before (the rejected call
+  got nil). Branch `fix/localmessagesubmission-own-answer` `1e61486c`. No
+  overlap with the DMQ interop PR (other package) or the server-restart PR
+  (`server.go` and a raw-message test only). Dingo
+  `internal/test/dmqinterop/dmq-submit/main.go:80` exits on `SubmitMessage`'s
+  error, so a rejection now prints `ERROR:` and exits 1 instead of printing
+  `REJECTED:`.
 - **D1: covered** by `fix/ledger-scoped-memo-panic` `2c619f5d` (retries a
   build after a panic; `rules.go:250` path).
 - **D2: by design.** `<-entry.done` (`ledger/common/rules.go:241`) waits only

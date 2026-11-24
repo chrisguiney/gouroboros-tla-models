@@ -72,7 +72,8 @@ closes. A PR can draw on more than one model.
 | none (race detector, CONCURRENCY B5, B8-B10) | `fix/server-restart-protocol-race` | four restarting servers stop embedding the protocol instance (breaking) |
 | none (goleak, CONCURRENCY C8) | `fix/leiosfetch-range-delivery-leak` | a finished range's delivery stops when its caller leaves |
 | none (race detector, CONCURRENCY C9, C12, C20) | `fix/leios-server-protocol-race` | three leios servers stop embedding the protocol instance (breaking) |
-| none (CONCURRENCY C14, C15) | `fix/perasvotes-op-lock-and-await-panic` | `Done` and requests honour their context during `Sync`; `AwaitObjectIDsFunc` panics are contained |
+| none (CONCURRENCY C13, C14, C15) | `fix/perasvotes-op-lock-and-await-panic` | `Done` and requests honour their context during `Sync`; a call from `VoteFunc` fails at once; `AwaitObjectIDsFunc` panics are contained |
+| `dmq` (`LocalMessageSubmissionOwnAnswer`) | `fix/localmessagesubmission-own-answer` | `SubmitMessage` returns its own answer (breaking) |
 | none (CONCURRENCY C19, overturned) | `test/leiosnotify-request-order` | pipelined requests answered one at a time, in order |
 
 ## Not yet attributed
