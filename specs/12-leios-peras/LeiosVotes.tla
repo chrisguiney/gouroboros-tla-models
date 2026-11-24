@@ -54,11 +54,19 @@ CONSTANTS
     ServerHoldsPipelined,  \* FALSE today; TRUE: the fix, the server holds a request that arrives in Busy
     DrainOnStop            \* TRUE as in gOuroboros; FALSE is a mutation
 
+\* Literally: "LoopGen is defined as "loop"."
 LoopGen == "loop"   \* tags a request (and its votes) the loop sent
+\* Literally: "CallGen is defined as "call"."
 CallGen == "call"   \* tags RequestNext's request
 
 \* In English: "A request message for n votes, tagged with who sent it."
+\* Literally: "Req of n and g is defined as the record whose field t is "Req",
+\*   whose field n is n, and whose field g is g."
 Req(n, g) == [t |-> "Req", n |-> n, g |-> g]
+\* In English: "The MsgDone message: it asks for no votes and belongs to no
+\* reader."
+\* Literally: "DoneMsg is defined as the record whose field t is "Done", whose
+\*   field n is 0, and whose field g is "none"."
 DoneMsg == [t |-> "Done", n |-> 0, g |-> "none"]
 
 VARIABLES
@@ -79,9 +87,21 @@ VARIABLES
     cviol,        \* the client got a vote it was not owed
     foreign       \* a reader took a vote answering the other reader's request
 
+\* Literally: "vars is defined as the tuple of all sixteen variables."
 vars == <<lpc, outstanding, refills, synced, rpc, stopping, queue, c2s, s2c,
           cowed, inbox, srv, srvHeld, sviol, cviol, foreign>>
 
+\* In English: "The loop is off and owed nothing, nothing has been synced,
+\* requested, stopped, queued, written or handed over, the server is idle and
+\* holds nothing, and nothing has gone wrong."
+\* Literally: "Init is defined as: lpc equals "Off" and outstanding equals 0
+\*   and refills equals 0 and synced equals FALSE, and rpc equals "idle" and
+\*   stopping equals FALSE, and queue equals the empty sequence and c2s equals
+\*   the empty sequence and s2c equals the empty sequence and cowed equals 0
+\*   and inbox equals the empty sequence, and srv equals the record whose field
+\*   st is "Idle", whose field tokens is 0, and whose field g is "none", and
+\*   srvHeld equals the empty sequence, and sviol equals FALSE and cviol equals
+\*   FALSE and foreign equals FALSE."
 Init ==
     /\ lpc = "Off" /\ outstanding = 0 /\ refills = 0 /\ synced = FALSE
     /\ rpc = "idle" /\ stopping = FALSE
@@ -90,11 +110,19 @@ Init ==
     /\ sviol = FALSE /\ cviol = FALSE /\ foreign = FALSE
 
 \* In English: "Requests the loop sends as one batch."
+\* Literally: "SyncBatch is defined as the function that maps every i in 1
+\*   through Depth to Req of Count and LoopGen."
 SyncBatch == [i \in 1..Depth |-> Req(Count, LoopGen)]
 
 \* --- The client application. ---------------------------------------------
 
 \* In English: "Sync, once, with no loop running and Stop not yet run."
+\* Literally: "Sync is defined as: synced is not true and stopping is not true
+\*   and lpc equals "Off" and rpc does not equal "wait", and queue in the next
+\*   state equals queue followed by SyncBatch, and outstanding in the next
+\*   state equals Depth times Count and lpc in the next state equals "Run" and
+\*   synced in the next state equals TRUE, and refills, rpc, stopping, c2s,
+\*   s2c, cowed, inbox, srv, srvHeld, sviol, cviol and foreign are unchanged."
 Sync ==
     /\ ~synced /\ ~stopping /\ lpc = "Off" /\ rpc /= "wait"
     /\ queue' = queue \o SyncBatch
@@ -106,6 +134,24 @@ Sync ==
 \* RequestNext's request. Then the callback continues or stops the loop;
 \* after Stop the loop drains; otherwise it refills when what it is owed
 \* falls to (Depth - 1) * Count."
+\* Literally: "LoopTake is defined as: lpc equals "Run" and inbox does not
+\*   equal the empty sequence, and foreign in the next state equals (foreign,
+\*   or the head of inbox does not equal LoopGen), and inbox in the next state
+\*   equals the tail of inbox, and either (lpc in the next state equals (if
+\*   DrainOnStop then "Drain", else "Off"), and outstanding in the next state
+\*   equals outstanding minus 1, and queue and refills are unchanged), or
+\*   (stopping is true, and lpc in the next state equals (if DrainOnStop then
+\*   "Drain", else "Off"), and outstanding in the next state equals outstanding
+\*   minus 1, and queue and refills are unchanged), or (stopping is not true,
+\*   and if outstanding minus 1 is less than or equal to (Depth minus 1) times
+\*   Count and refills is less than MaxRefills, then queue in the next state
+\*   equals queue with Req of Count and LoopGen appended, and outstanding in
+\*   the next state equals outstanding minus 1 plus Count, and refills in the
+\*   next state equals refills plus 1; else outstanding in the next state
+\*   equals outstanding minus 1, and queue and refills are unchanged; and lpc
+\*   in the next state equals (if outstanding in the next state equals 0 then
+\*   "Off", else "Run")); and synced, rpc, stopping, c2s, s2c, cowed, srv,
+\*   srvHeld, sviol and cviol are unchanged."
 LoopTake ==
     /\ lpc = "Run" /\ inbox /= <<>>
     /\ foreign' = (foreign \/ Head(inbox) /= LoopGen)
@@ -129,6 +175,14 @@ LoopTake ==
                    cviol>>
 
 \* In English: "Draining: take each vote still owed; then the loop ends."
+\* Literally: "LoopDrain is defined as: lpc equals "Drain", and if outstanding
+\*   equals 0, then lpc in the next state equals "Off" and inbox, outstanding
+\*   and foreign are unchanged; else inbox does not equal the empty sequence,
+\*   and foreign in the next state equals (foreign, or the head of inbox does
+\*   not equal LoopGen), and inbox in the next state equals the tail of inbox
+\*   and outstanding in the next state equals outstanding minus 1, and lpc is
+\*   unchanged; and refills, synced, rpc, stopping, queue, c2s, s2c, cowed,
+\*   srv, srvHeld, sviol and cviol are unchanged."
 LoopDrain ==
     /\ lpc = "Drain"
     /\ IF outstanding = 0
@@ -141,6 +195,11 @@ LoopDrain ==
                    srvHeld, sviol, cviol>>
 
 \* In English: "RequestNext(1), once, with no loop running and before Stop."
+\* Literally: "RequestNext is defined as: rpc equals "idle" and lpc equals
+\*   "Off" and stopping is not true, and queue in the next state equals queue
+\*   with Req of 1 and CallGen appended and rpc in the next state equals
+\*   "wait", and lpc, outstanding, refills, synced, stopping, c2s, s2c, cowed,
+\*   inbox, srv, srvHeld, sviol, cviol and foreign are unchanged."
 RequestNext ==
     /\ rpc = "idle" /\ lpc = "Off" /\ ~stopping
     /\ queue' = Append(queue, Req(1, CallGen)) /\ rpc' = "wait"
@@ -148,6 +207,12 @@ RequestNext ==
                    inbox, srv, srvHeld, sviol, cviol, foreign>>
 
 \* In English: "RequestNext takes its vote."
+\* Literally: "CallTake is defined as: rpc equals "wait" and inbox does not
+\*   equal the empty sequence, and foreign in the next state equals (foreign,
+\*   or the head of inbox does not equal CallGen), and inbox in the next state
+\*   equals the tail of inbox and rpc in the next state equals "done", and lpc,
+\*   outstanding, refills, synced, stopping, queue, c2s, s2c, cowed, srv,
+\*   srvHeld, sviol and cviol are unchanged."
 CallTake ==
     /\ rpc = "wait" /\ inbox /= <<>>
     /\ foreign' = (foreign \/ Head(inbox) /= CallGen)
@@ -156,6 +221,10 @@ CallTake ==
                    cowed, srv, srvHeld, sviol, cviol>>
 
 \* In English: "Stop, once: queue MsgDone."
+\* Literally: "Stop is defined as: stopping is not true, and stopping in the
+\*   next state equals TRUE and queue in the next state equals queue with
+\*   DoneMsg appended, and lpc, outstanding, refills, synced, rpc, c2s, s2c,
+\*   cowed, inbox, srv, srvHeld, sviol, cviol and foreign are unchanged."
 Stop ==
     /\ ~stopping
     /\ stopping' = TRUE /\ queue' = Append(queue, DoneMsg)
@@ -167,6 +236,13 @@ Stop ==
 \* In English: "The send loop writes the oldest queued message: in Idle
 \* (nothing owed), or, for a request from a pipelining client, at any time
 \* [C2]. MsgDone is written only in Idle [C1]."
+\* Literally: "ClientWrite is defined as: queue does not equal the empty
+\*   sequence, and, letting m be the head of queue: (cowed equals 0, or
+\*   ClientPipelines is true and m's t equals "Req"), and c2s in the next state
+\*   equals c2s with m appended, and cowed in the next state equals cowed plus
+\*   m's n; and queue in the next state equals the tail of queue, and lpc,
+\*   outstanding, refills, synced, rpc, stopping, s2c, inbox, srv, srvHeld,
+\*   sviol, cviol and foreign are unchanged."
 ClientWrite ==
     /\ queue /= <<>>
     /\ LET m == Head(queue) IN
@@ -180,6 +256,13 @@ ClientWrite ==
 
 \* In English: "The client reads a vote: it must be owed; it goes to the
 \* vote channel."
+\* Literally: "ClientRecv is defined as: s2c does not equal the empty sequence,
+\*   and if cowed equals 0, then cviol in the next state equals TRUE and cowed
+\*   and inbox are unchanged, else cowed in the next state equals cowed minus 1
+\*   and inbox in the next state equals inbox with the head of s2c appended,
+\*   and cviol is unchanged; and s2c in the next state equals the tail of s2c,
+\*   and lpc, outstanding, refills, synced, rpc, stopping, queue, c2s, srv,
+\*   srvHeld, sviol and foreign are unchanged."
 ClientRecv ==
     /\ s2c /= <<>>
     /\ IF cowed = 0
@@ -196,6 +279,25 @@ ClientRecv ==
 \* oldest message on the wire: a request with N > 0 makes it Busy with N
 \* tokens; MsgDone ends the run [C1]. In Busy, a request is held (with the
 \* fix) or refused (today); MsgDone is refused."
+\* Literally: "ServerRead is defined as: sviol is not true and srv's st does
+\*   not equal "Done", and either (srv's st equals "Idle" and srvHeld does not
+\*   equal the empty sequence, and srv in the next state equals the record
+\*   whose field st is "Busy", whose field tokens is the head of srvHeld's n,
+\*   and whose field g is the head of srvHeld's g, and srvHeld in the next
+\*   state equals the tail of srvHeld, and c2s and sviol are unchanged), or
+\*   ((srvHeld equals the empty sequence, or srv's st equals "Busy"), and c2s
+\*   does not equal the empty sequence, and, letting m be the head of c2s: if
+\*   srv's st equals "Idle", then (if m's t equals "Done", then srv in the next
+\*   state equals the record whose field st is "Done", whose field tokens is 0,
+\*   and whose field g is "none", and srvHeld and sviol are unchanged; else srv
+\*   in the next state equals the record whose field st is "Busy", whose field
+\*   tokens is m's n, and whose field g is m's g, and srvHeld and sviol are
+\*   unchanged); else if m's t equals "Req" and ServerHoldsPipelined is true,
+\*   then srvHeld in the next state equals srvHeld with m appended and srv and
+\*   sviol are unchanged; else sviol in the next state equals TRUE and srv and
+\*   srvHeld are unchanged; and c2s in the next state equals the tail of c2s);
+\*   and lpc, outstanding, refills, synced, rpc, stopping, queue, s2c, cowed,
+\*   inbox, cviol and foreign are unchanged."
 ServerRead ==
     /\ ~sviol /\ srv.st /= "Done"
     /\ \/ /\ srv.st = "Idle" /\ srvHeld /= <<>>
@@ -220,6 +322,13 @@ ServerRead ==
 
 \* In English: "In Busy the server sends one vote; the last token returns
 \* it to Idle [C1]."
+\* Literally: "ServerVote is defined as: srv's st equals "Busy", and s2c in the
+\*   next state equals s2c with srv's g appended, and srv in the next state
+\*   equals (if srv's tokens equals 1 then the record whose field st is "Idle",
+\*   whose field tokens is 0, and whose field g is "none", else srv except that
+\*   its tokens field is the old field minus 1), and lpc, outstanding, refills,
+\*   synced, rpc, stopping, queue, c2s, cowed, inbox, srvHeld, sviol, cviol and
+\*   foreign are unchanged."
 ServerVote ==
     /\ srv.st = "Busy"
     /\ s2c' = Append(s2c, srv.g)
@@ -229,29 +338,46 @@ ServerVote ==
                    cowed, inbox, srvHeld, sviol, cviol, foreign>>
 
 \* In English: "Over: the server finished after MsgDone, or a side hung up."
+\* Literally: "Ended is defined as: srv's st equals "Done", or sviol is true,
+\*   or cviol is true."
 Ended == srv.st = "Done" \/ sviol \/ cviol
 
+\* In English: "A step is an application step, a client protocol step, a server
+\* step, or, once over, nothing."
+\* Literally: "Next is defined as: Sync, or LoopTake, or LoopDrain, or
+\*   RequestNext, or CallTake, or Stop, or ClientWrite, or ClientRecv, or
+\*   ServerRead, or ServerVote, or Ended is true and vars is unchanged."
 Next ==
     \/ Sync \/ LoopTake \/ LoopDrain \/ RequestNext \/ CallTake \/ Stop
     \/ ClientWrite \/ ClientRecv \/ ServerRead \/ ServerVote
     \/ Ended /\ UNCHANGED vars
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* Literally: "Spec is defined as: Init holds at the start, and always, every
+\*   step is a Next step or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 
 \* In English: "The server never refused a client message."
+\* Literally: "NoServerViolation is defined as: sviol is not true."
 NoServerViolation == ~sviol
 
 \* In English: "The client never got a vote it was not owed."
+\* Literally: "NoClientViolation is defined as: cviol is not true."
 NoClientViolation == ~cviol
 
 \* In English: "Neither reader took a vote answering the other's request."
+\* Literally: "OwnVotes is defined as: foreign is not true."
 OwnVotes == ~foreign
 
 \* Probes, EXPECTED to be violated.
 \* In English: "The server never holds a pipelined request."
+\* Literally: "ProbeNeverHeld is defined as: srvHeld equals the empty
+\*   sequence."
 ProbeNeverHeld == srvHeld = <<>>
 \* In English: "RequestNext never gets its vote after a loop ran."
+\* Literally: "ProbeNoCallAfterLoop is defined as: it is not the case that
+\*   (synced is true and rpc equals "done")."
 ProbeNoCallAfterLoop == ~(synced /\ rpc = "done")
 =============================================================================
