@@ -44,9 +44,18 @@ Read [Model 01](../01-keepalive/README.md) first: the receive table, the
 3. **`AwaitGetsNewSnapshot`**: is `MsgAwaitAcquire` ever answered with the
    snapshot the client already holds?
 4. **`NoFailures`**: with honest peers, is the connection ever torn down?
-5. Does anything get stuck? (TLC's deadlock check; a client waiting for a
+5. **`NewRunServed`**: while the connection is up, can the server always
+   read the message waiting for it? After `MsgDone` that is the first
+   message of the client's next run, which only a restarted server reads.
+   Written as `ENABLED Recv("Server")`, so it says nothing about how the
+   server restarts, only that it can read.
+6. Does anything get stuck? (TLC's deadlock check; a client waiting for a
    mempool change that the model has run out of is an allowed end,
    `WaitsForever`.)
+
+Two constants model the version gate on `MsgGetMeasures` [R6]:
+`NegotiatedV20` (the handshake agreed `NodeToClientV_20` or later) and
+`ClientChecksVersion` (the client sends `MsgGetMeasures` only then).
 
 ### The answers
 
@@ -59,8 +68,11 @@ Read [Model 01](../01-keepalive/README.md) first: the receive table, the
 | `LocalTxMonitorTimeoutBug.cfg` | **gOuroboros client against the node** | 140 | `NoFailures` violated in 8 steps |
 | `LocalTxMonitorStopBug.cfg` | **gOuroboros `Stop()` after a query** | 35 | `NoFailures` violated |
 | `LocalTxMonitorMeasuresBug.cfg` | reference client against gOuroboros server | 59 | `NoFailures` violated |
-| `LocalTxMonitorRestartBug.cfg` | gOuroboros server, second run | 21 | deadlock |
+| `LocalTxMonitorRestartBug.cfg` | gOuroboros server on main, second run | 21 | `NewRunServed` violated |
 | `LocalTxMonitorAwaitBug.cfg` | gOuroboros server answers await at once | 50 | `AwaitGetsNewSnapshot` violated |
+| `LocalTxMonitorFixed.cfg` | gOuroboros with the get-measures, await and restart fixes, plus the open Stop and await-timeout client fixes; as the reference config | 3,492 | all hold |
+| `LocalTxMonitorOldNode.cfg` | fixed client against a node before `NodeToClientV_20` | 452 | all hold |
+| `LocalTxMonitorOldNodeBug.cfg` | the same, client does not check the version | 369 | `NoFailures` violated |
 
 So, against the reference: (1) to (3) hold, and (4) holds for the
 reference pair. gOuroboros has two defects and three deviations:
@@ -77,7 +89,16 @@ reference pair. gOuroboros has two defects and three deviations:
   error. Reproduced in Go: "message \*localtxmonitor.MsgDone not allowed in
   current protocol state Acquired".
 - **No `MsgGetMeasures`, no restart, await answered at once
-  (deviations).** See the comparison table.
+  (deviations).** See the comparison table. Branches fix all three (see
+  Go tests); `LocalTxMonitorFixed.cfg` is gOuroboros with them, and checks
+  the same state space as the reference config, since with the fixes the
+  two behave alike. The await fix is opt-in (`AwaitMempoolFunc`): without
+  it the server still answers at once (`LocalTxMonitorAwaitBug.cfg`), and
+  with it but without the open client fix for the await timeout, a
+  gOuroboros client against that server fails as against the node
+  (`LocalTxMonitorTimeoutBug.cfg`). So the default should change only
+  after that client fix lands, and only where the application can say when
+  its mempool changed.
 
 ### Checking the checks
 
@@ -87,7 +108,8 @@ reference pair. gOuroboros has two defects and three deviations:
 | `LocalTxMonitorAgencyBug.cfg` | the same | `NeverBothHaveAgency` |
 | `LocalTxMonitorStopBug.cfg` | Stop releases first | `NoFailures` |
 | `LocalTxMonitorAwaitBug.cfg` | the server waits for a change | `AwaitGetsNewSnapshot` |
-| `LocalTxMonitorRestartBug.cfg` | the server restarts | deadlock |
+| `LocalTxMonitorRestartBug.cfg` | the server restarts | `NewRunServed` |
+| `LocalTxMonitorOldNodeBug.cfg` | the client checks the version | `NoFailures` |
 
 Reachability probes, each violated on the reference config, so the passing
 run does reach: the server blocked on an await
@@ -126,7 +148,7 @@ an unbuffered `submitResultChan`, which both answer handlers write to.
 | `LocalTxSubmissionGouroboros.cfg` | gOuroboros client, server never waits; 1 run | 27 | all hold |
 | `LocalTxSubmissionTable.cfg` | prints the receive table (24 rows) | 3 | passes |
 | `LocalTxSubmissionTimeoutBug.cfg` | **gOuroboros client against the node, mempool full** | 23 | `NoFailures` violated |
-| `LocalTxSubmissionRestartBug.cfg` | gOuroboros server, second run | 23 | deadlock |
+| `LocalTxSubmissionRestartBug.cfg` | gOuroboros server on main, second run | 23 | `NewRunServed` violated |
 
 The node's `addTx` "will block until the transaction fits into the
 mempool" [R4], and the reference sets no timeout [S3]. The gOuroboros
@@ -144,7 +166,7 @@ applied.
 | `LocalTxSubmissionOneSubmitBug.cfg` | honest client (rogue extra `MsgSubmitTx`) | `OneSubmitInFlight` |
 | `LocalTxSubmissionAgencyBug.cfg` | honest server (rogue answer) | `NeverBothHaveAgency` |
 | `LocalTxSubmissionTimeoutBug.cfg` | no client timer | `NoFailures` |
-| `LocalTxSubmissionRestartBug.cfg` | the server restarts | deadlock |
+| `LocalTxSubmissionRestartBug.cfg` | the server restarts | `NewRunServed` |
 
 Without `busyMutex` the second transaction still waits in the send queue
 (the send loop needs agency), but two callers wait on one channel and the
@@ -177,6 +199,16 @@ signed in this session; see the parent's handoff):
 | `fix/localtxmonitor-stop-releases` | `client.go`, `client_stop_test.go` | `Stop()` sends `MsgRelease` then `MsgDone` when acquired | test fails before the fix (no message, protocol error) |
 | `fix/localtxmonitor-await-acquire-timeout` | `localtxmonitor.go`, `client.go`, `await_acquire_test.go` | no `AcquireTimeout` on an acquire from Acquired; still timed from Idle | test fails before the fix ("timeout waiting on transition from protocol state Acquiring") |
 
+Fixes against gOuroboros `origin/main` `d0b95845`, each with a test that
+fails without it:
+
+| Branch | Commit | Covers | Fails before the fix |
+| --- | --- | --- | --- |
+| `fix/localtxmonitor-get-measures` | `55bdab2e` | `MsgGetMeasures` (11) and `MsgReplyGetMeasures` (12), their transitions, `Client.GetMeasures`, the server's answer over the transactions `NextTx` has not returned, gated on `NodeToClientV_20` both ways | `TestServerAnswersGetMeasures`: "no reply ... ReplyGetMeasures" (decoding failed) |
+| `fix/localtxmonitor-await-acquire` | `35b8ee61` | opt-in `AwaitMempoolFunc`: the server answers `MsgAwaitAcquire` only once it returns; stop ends the wait | `TestServerAwaitAcquireWaitsForChange`: "MsgAwaitAcquire answered with an unchanged mempool" |
+| `fix/localtxmonitor-server-restart` | `7f07099a` | restart in Idle after `MsgDone` | `TestServerAnswersAcquireSentDuringRestart`: "no reply from restarted server: Acquired" |
+| `fix/localtxsubmission-server-restart` | `ed1d2769` | restart in Idle after `MsgDone` | `TestServerAnswersSubmitSentDuringRestart`: "no reply from restarted server: AcceptTx" |
+
 Existing tests already covered: every query/reply pair in `matchReply`, a
 mismatched reply refused by a running client, shutdown releasing waiting
 callers, `MsgDone` from Idle in submission, and accept/reject round trips.
@@ -188,11 +220,12 @@ callers, `MsgDone` from Idle in submission, and accept/reject round trips.
 | Which reply in `StBusy HasTx`? | Table says `MsgReplyNextTx` [S3 l.2157]; figure says `MsgReplyHasTx` | `MsgReplyHasTx` [R1][R2] | `MsgReplyHasTx` (`matchReply`) | Spec typo; follow the reference |
 | Busy kind decides the legal reply? | Yes, `StBusy` per query [S2] | Yes [R1][R2] | Yes, via `stateContext` | Agree |
 | Queries only while acquired? | Yes [S3] | Yes | Yes | Agree |
-| `MsgAwaitAcquire` | waits for a new snapshot [S3] | same bytes as `MsgAcquire` [R2]; node blocks until the snapshot differs [R5] | client: same bytes, but timed (5 s); server: answers at once | **Client defect** (fixed); server deviation, not fixed: it needs a mempool-change signal from the application |
-| `MsgGetMeasures` | in the protocol [S3] | always decoded and answered [R2][R3] | not implemented; decoding fails and the connection is torn down | Deviation; a feature, not fixed |
+| `MsgAwaitAcquire` | waits for a new snapshot [S3] | same bytes as `MsgAcquire` [R2]; node blocks until the snapshot differs [R5] | client: same bytes, but timed (5 s); server: answers at once | **Client defect** (fixed); server deviation, fixed opt-in on `fix/localtxmonitor-await-acquire` (`AwaitMempoolFunc`), since only the application knows when its mempool changed |
+| `MsgGetMeasures` | in the protocol [S3] | always decoded and answered [R2][R3] | not implemented; decoding fails and the connection is torn down | Deviation; fixed on `fix/localtxmonitor-get-measures` |
+| `MsgGetMeasures` before `NodeToClientV_20` | not stated | the encoder refuses both messages [R6]; the node now negotiates only V_23, so it never arises there | with the fix: the client returns an error without sending; the server fails the protocol | Follows the reference |
 | Timeouts | "No timeouts" [S4], [S3 submission] | none defined | monitor: 5 s / 30 s; submission: 30 s | Deviation; harmful where the node may wait (await; full mempool) |
 | `MsgDone` from Acquired | not allowed [S3] | not expressible [R4] | `Stop()` sends it and fails | **Defect** (fixed) |
-| Server after `MsgDone` | restarts [S5] | inbound governor restarts it | stays done | Deviation, as for keep-alive in Model 01; not fixed (copy keep-alive's restart) |
+| Server after `MsgDone` | restarts [S5] | inbound governor restarts it [R7] | stays done | Deviation; fixed for both servers on `fix/localtxmonitor-server-restart` and `fix/localtxsubmission-server-restart` |
 | Receiving while holding agency | not stated | not read until peer has agency | refused at once | Deviation, as in Model 01 |
 
 ## Sources
@@ -213,7 +246,9 @@ and gOuroboros `origin/main` at `61046085`. `P` below is
 | R2 | `P/LocalTxMonitor/Codec.hs` 63-174; `P/LocalTxSubmission/Codec.hs` 107-169 | Tags; `MsgAwaitAcquire` = `[1]`; per-kind reply decoding; `MsgGetMeasures` decoded at every version. |
 | R3 | `cardano-diffusion/protocols/lib/Cardano/Network/Protocol/LocalTxMonitor/Codec.hs` 41-42 | The node always uses `LocalTxMonitor_V2`. |
 | R4 | `P/LocalTxMonitor/{Client,Server}.hs` 121-166, 117-191; `P/LocalTxSubmission/{Client,Server}.hs` 94-106, 56-80; consensus `Ouroboros/Consensus/Mempool/API.hs` 142-145 and `MiniProtocol/LocalTxSubmission/Server.hs` 26-38 | Typed peers; adding a transaction blocks until it fits. |
-| R5 | consensus `Ouroboros/Consensus/MiniProtocol/LocalTxMonitor/Server.hs` 85-104 | `recvMsgAwaitAcquire` retries until the snapshot differs. |
+| R5 | consensus `Ouroboros/Consensus/MiniProtocol/LocalTxMonitor/Server.hs` 85-104 | `recvMsgAwaitAcquire` retries until the snapshot differs; 75-84 `recvMsgGetMeasures` counts the transactions not yet returned by `MsgNextTx`. |
+| R6 | `P/LocalTxMonitor/Codec.hs` 57, 78-86, 102-113; `P/LocalTxMonitor/Type.hs` 316-317; `cardano-diffusion/api/lib/Cardano/Network/NodeToClient/Version.hs` 58-59 | The encoder sends `MsgGetMeasures` and `MsgReplyGetMeasures` only at `LocalTxMonitor_V2`, that is `NodeToClientV_20` and later. |
+| R7 | `ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs` 455-470; `ouroboros-network/lib/Ouroboros/Network/Diffusion.hs` 402-418 | A responder that ended cleanly is restarted; the node-to-client server runs under an inbound governor too. |
 | G1 | gOuroboros `protocol/localtxmonitor/{localtxmonitor,client,server}.go`, `protocol/localtxsubmission/{localtxsubmission,client,server}.go`, `protocol/protocol.go` | State maps, matchers, timeouts, `Stop`, send and receive checks. |
 
 The receive-before-agency rule cited as Model 01's [S8] (typed-protocols
@@ -233,6 +268,8 @@ limits, the server's transaction-ID cache, and API misuse such as
 cd specs/09-localtx
 ../../bin/tlc -config LocalTxMonitor.cfg LocalTxMonitor.tla
 ../../bin/tlc -config LocalTxMonitorGouroboros.cfg LocalTxMonitor.tla
+../../bin/tlc -config LocalTxMonitorFixed.cfg LocalTxMonitor.tla
+../../bin/tlc -config LocalTxMonitorOldNode.cfg LocalTxMonitor.tla
 ../../bin/tlc -config LocalTxMonitorRogue.cfg LocalTxMonitor.tla
 ../../bin/tlc -config LocalTxMonitorTable.cfg LocalTxMonitor.tla | grep '^<<'
 ../../bin/tlc -config LocalTxSubmission.cfg LocalTxSubmission.tla

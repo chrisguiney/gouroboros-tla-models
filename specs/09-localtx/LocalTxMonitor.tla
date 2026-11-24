@@ -42,6 +42,17 @@
 (*        MsgGetMeasures is always understood.                             *)
 (*   [R4] .../LocalTxMonitor/Server.hs 117-191, Client.hs 121-166: the     *)
 (*        typed peers; Done is only reachable from StIdle.                 *)
+(*   [R6] .../LocalTxMonitor/Codec.hs 57, 78-86, 102-113: the encoder      *)
+(*        sends MsgGetMeasures and MsgReplyGetMeasures only at             *)
+(*        LocalTxMonitor_V2, which Type.hs 316-317 ties to                 *)
+(*        NodeToClientV_20 and later (cardano-diffusion/api/lib/Cardano/   *)
+(*        Network/NodeToClient/Version.hs 58-59: V_20 "added               *)
+(*        MsgGetMeasures and MsgReplyGetMeasures").                        *)
+(*   [R7] ouroboros-network/framework/lib/Ouroboros/Network/               *)
+(*        InboundGovernor.hs 455-470: a responder that ended cleanly is    *)
+(*        restarted (TrResponderRestarted); ouroboros-network/lib/         *)
+(*        Ouroboros/Network/Diffusion.hs 402-418 runs the node-to-client   *)
+(*        server under an inbound governor too.                            *)
 (*   [R5] IntersectMBO/ouroboros-consensus commit ec239d57f618,            *)
 (*        ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/ *)
 (*        MiniProtocol/LocalTxMonitor/Server.hs 85-104: the node answers   *)
@@ -77,7 +88,11 @@ CONSTANTS
                          \* FALSE: gOuroboros's client, which has no call for it
     ServerKnowsMeasures, \* TRUE: the server understands MsgGetMeasures [R2][R3]
                          \* FALSE: gOuroboros's server, which cannot decode it
-    ServerRestarts,      \* TRUE: the server restarts after MsgDone [S5]. FALSE: gOuroboros today
+    ServerRestarts,      \* TRUE: the server restarts after MsgDone [S5][R7]. FALSE: gOuroboros today
+    ClientChecksVersion, \* TRUE: the client sends MsgGetMeasures only at NodeToClientV_20 or later [R6]
+                         \* FALSE: it sends it whatever version the handshake agreed
+    NegotiatedV20,       \* TRUE: the handshake agreed NodeToClientV_20 or later [R6]
+                         \* FALSE: an older version, which an older node may be speaking
     PrintTable           \* TRUE: print the receive table when TLC starts
 
 Roles == {"Client", "Server"}
@@ -256,13 +271,18 @@ ClientAcquire ==
     /\ UNCHANGED <<mempool, srvSnap, srvAwait, cliSnap, sameSnap, result,
                    queries, runs, rogueLeft>>
 
+\* In English: "The client may send MsgGetMeasures: it has a call for it,
+\* and either the handshake agreed NodeToClientV_20 or later or the client
+\* does not check" [R6].
+MayAskMeasures == ClientSendsMeasures /\ (NegotiatedV20 \/ ~ClientChecksVersion)
+
 \* In English: "From StAcquired, with queries left, the client can send a
-\* query q (MsgGetMeasures only if it has a call for it). It then waits in
-\* q's busy state."
+\* query q (MsgGetMeasures only if it may, above). It then waits in q's busy
+\* state."
 ClientQuery(q) ==
     /\ view["Client"] = "StAcquired"
     /\ queries < MaxQueries
-    /\ q /= "MsgGetMeasures" \/ ClientSendsMeasures
+    /\ q /= "MsgGetMeasures" \/ MayAskMeasures
     /\ view' = [view EXCEPT !["Client"] = BusyOf(q)]
     /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg(q, 0))]
     /\ queries' = queries + 1
@@ -440,6 +460,14 @@ RepliesMatchQueries ==
 \* In English: "An MsgAwaitAcquire is never answered with the snapshot the
 \* client already holds" [R1] 217-224, [R5].
 AwaitGetsNewSnapshot == ~sameSnap
+
+\* In English: "While the connection is up, a message waiting for the server
+\* is one the server can read: after MsgDone, the first message of the
+\* client's next run is read by a restarted server [S5][R7], not left on a
+\* server whose run is over." (Rogue configs leave it out: a rogue message
+\* can arrive while the server itself holds agency.)
+NewRunServed ==
+    (inbox["Server"] /= <<>> /\ NoFailures) => ENABLED Recv("Server")
 
 \* In English: "The client and the server never both believe they may send."
 NeverBothHaveAgency ==

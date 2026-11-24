@@ -298,6 +298,13 @@ NoFailures == \A r \in Roles : view[r] \notin Failures
 \* transaction ID on the wire, so only the order keeps them apart.
 AnswersReachTheirCallers == ~misrouted
 
+\* In English: "While the connection is up, a message waiting for the server
+\* is one the server can read: after MsgDone, the MsgSubmitTx that starts
+\* the client's next run is read by a restarted server [S4], not left on a
+\* server whose run is over." (Rogue configs leave it out.)
+NewRunServed ==
+    (inbox["Server"] /= <<>> /\ NoFailures) => ENABLED Recv("Server")
+
 NeverBothHaveAgency ==
     ~ /\ view["Client"] \in States /\ Agency(view["Client"]) = "Client"
       /\ view["Server"] \in States /\ Agency(view["Server"]) = "Server"
