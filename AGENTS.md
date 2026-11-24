@@ -10,6 +10,11 @@ is engineers who are new to TLA+, so readability beats cleverness.
 - One directory per model under `specs/`, numbered in learning order.
 - Comment every new TLA+ construct the first time a model uses it, and link
   the doc that explains it. Add new terms to `docs/glossary.md`.
+- Write every definition for a reader who does not know TLA+: an
+  `In English:` comment above it reading the whole definition as a sentence,
+  and a trailing comment on each clause that changes a variable or sets a
+  condition. Start each module with a "how to read the symbols" legend, or
+  point to one.
 - Cite a source for every rule in a model, before writing it: the network
   specification or reference implementation in IntersectMBO/ouroboros-network,
   pinned to a commit, with file, section, and line numbers. List sources in

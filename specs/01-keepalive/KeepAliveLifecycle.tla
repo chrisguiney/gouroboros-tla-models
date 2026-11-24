@@ -38,8 +38,14 @@
 (*     nothing registered, it unregisters instead.                         *)
 (*   - Start registers it (RegisterProtocol), resuming a suspended one.    *)
 (*   - A stopped muxer holds no receivers.                                 *)
+(*                                                                         *)
+(* HOW TO READ IT                                                          *)
+(*   Each goroutine is a little program counter: `restart` and `stopper`   *)
+(*   name the step each goroutine will run next, like a line number. A     *)
+(*   step's first lines say which step it is ("restart = ..."); the rest   *)
+(*   say what changes. Symbols are explained in KeepAlive.tla's header.    *)
 (***************************************************************************)
-EXTENDS Naturals, FiniteSets
+EXTENDS Naturals, FiniteSets    \* numbers, and Cardinality (the size of a set)
 
 CONSTANTS
     MaxDones,           \* how many MsgDone the client sends (each triggers a restart)
@@ -47,6 +53,7 @@ CONSTANTS
     StopGuard,          \* TRUE: Server.Stop sets a flag that a later restart honours
     CancelUnregisters   \* TRUE: a restart cancelled by the guard unregisters the slot
 
+\* The instances that can exist: the first one, plus one per restart.
 Instances == 1..(MaxDones + 1)
 
 VARIABLES
@@ -67,106 +74,121 @@ VARIABLES
 vars == <<status, current, nextId, muxer, slot, restart, old, stopper, snap,
           stopRequested, dones, lateError>>
 
+\* In English: "At the start, instance 1 is running and registered with a
+\* running muxer, and both goroutines are idle."
 Init ==
-    /\ status = [i \in Instances |-> IF i = 1 THEN "running" ELSE "unused"]
-    /\ current = 1
-    /\ nextId = 2
+    /\ status = [i \in Instances |-> IF i = 1 THEN "running" ELSE "unused"]  \* only instance 1 exists, running
+    /\ current = 1                  \* s.Protocol is instance 1
+    /\ nextId = 2                   \* the next new instance will be 2
     /\ muxer = "running"
-    /\ slot = "registered"
-    /\ restart = "idle"
+    /\ slot = "registered"          \* instance 1 holds the muxer slot
+    /\ restart = "idle"             \* no restart in progress
     /\ old = 1
-    /\ stopper = "idle"
+    /\ stopper = "idle"             \* nobody is stopping the server yet
     /\ snap = 1
     /\ stopRequested = FALSE
     /\ dones = 0
     /\ lateError = FALSE
 
-\* Whether Stop or StopForRestart on instance i does anything: only the first
-\* call on an instance acts.
+\* In English: "Stop or StopForRestart on instance i does something only if
+\* i has not been stopped already" (Go's sync.Once).
 Acts(i) == status[i] \in {"new", "running"}
 
 -----------------------------------------------------------------------------
 (* The restart goroutine. *)
 
-\* The running instance reads MsgDone and calls handleDone.
+\* In English: "When no restart is in progress and the current instance is
+\* running, it can read a MsgDone: the restart begins, remembering which
+\* instance it is replacing."
 RecvDone ==
-    /\ restart = "idle"
-    /\ dones < MaxDones
-    /\ status[current] = "running"
-    /\ restart' = "stopOld"
-    /\ old' = current
+    /\ restart = "idle"                 \* no restart in progress
+    /\ dones < MaxDones                 \* and the client has a MsgDone left to send
+    /\ status[current] = "running"      \* and the current instance is running
+    /\ restart' = "stopOld"             \* next, the restart's first step is due
+    /\ old' = current                   \* next, it remembers the instance it replaces
     /\ dones' = dones + 1
     /\ UNCHANGED <<status, current, nextId, muxer, slot, stopper, snap,
                    stopRequested, lateError>>
 
-\* 1. proto.StopForRestart(): suspend the slot, or unregister it if empty.
+\* Step 1, proto.StopForRestart().
+\* In English: "If the old instance was not stopped yet, stop it, and
+\* suspend the muxer slot (or empty it, if nothing was registered)."
 StopOld ==
-    /\ restart = "stopOld"
-    /\ IF Acts(old)
-          THEN /\ status' = [status EXCEPT ![old] = "stopped"]
-               /\ slot' = IF slot = "registered" THEN "suspended" ELSE "empty"
-          ELSE UNCHANGED <<status, slot>>
-    /\ restart' = "install"
+    /\ restart = "stopOld"              \* this is step 1
+    /\ IF Acts(old)                     \* if the old instance was not stopped yet
+          THEN /\ status' = [status EXCEPT ![old] = "stopped"]           \* stop it
+               /\ slot' = IF slot = "registered" THEN "suspended" ELSE "empty"  \* and suspend the slot
+          ELSE UNCHANGED <<status, slot>>                               \* else: nothing happens
+    /\ restart' = "install"             \* next, step 2 is due
     /\ UNCHANGED <<current, nextId, muxer, old, stopper, snap,
                    stopRequested, dones, lateError>>
 
-\* 2. Under protocolMu: install a new instance. With StopGuard, a restart
-\*    that sees Stop was requested installs nothing; with CancelUnregisters
-\*    it also releases the slot StopForRestart left suspended.
+\* Step 2, under protocolMu.
+\* In English: "If the guard is on and Stop was requested: install nothing,
+\* end the restart, and (with CancelUnregisters) empty the muxer slot.
+\* Otherwise: create the next instance, make it current, and go to step 3."
 Install ==
-    /\ restart = "install"
-    /\ IF StopGuard /\ stopRequested
-          THEN /\ restart' = "idle"
-               /\ slot' = IF CancelUnregisters THEN "empty" ELSE slot
+    /\ restart = "install"              \* this is step 2
+    /\ IF StopGuard /\ stopRequested    \* if Stop was requested
+          THEN /\ restart' = "idle"     \* the restart ends here
+               /\ slot' = IF CancelUnregisters THEN "empty" ELSE slot   \* and maybe releases the slot
                /\ UNCHANGED <<status, current, nextId>>
-          ELSE /\ status' = [status EXCEPT ![nextId] = "new"]
-               /\ current' = nextId
+          ELSE /\ status' = [status EXCEPT ![nextId] = "new"]   \* else: a new instance exists
+               /\ current' = nextId                             \* and is now current
                /\ nextId' = nextId + 1
-               /\ restart' = "start"
+               /\ restart' = "start"                            \* next, step 3 is due
                /\ UNCHANGED slot
     /\ UNCHANGED <<muxer, old, stopper, snap, stopRequested, dones, lateError>>
 
-\* 3. Start the new instance.
+\* Step 3, start the new instance.
+\* In English: "If the new instance was already stopped, nothing happens.
+\* Otherwise, if the muxer has stopped, registering fails and an error is
+\* raised. Otherwise it runs and holds the muxer slot. Either way the
+\* restart is over."
 StartNew ==
-    /\ restart = "start"
+    /\ restart = "start"                \* this is step 3
     /\ IF status[current] /= "new"
           THEN UNCHANGED <<status, slot, lateError>>   \* stopped already: no-op
        ELSE IF muxer = "stopped"
-          THEN /\ status' = [status EXCEPT ![current] = "stopped"]
-               /\ lateError' = TRUE                    \* registration failed
+          THEN /\ status' = [status EXCEPT ![current] = "stopped"]  \* it cannot register,
+               /\ lateError' = TRUE                                 \* and raises an error
                /\ UNCHANGED slot
-          ELSE /\ status' = [status EXCEPT ![current] = "running"]
-               /\ slot' = "registered"
+          ELSE /\ status' = [status EXCEPT ![current] = "running"]  \* it runs
+               /\ slot' = "registered"                              \* and holds the slot
                /\ UNCHANGED lateError
-    /\ restart' = "idle"
+    /\ restart' = "idle"                \* the restart is over
     /\ UNCHANGED <<current, nextId, muxer, old, stopper, snap,
                    stopRequested, dones>>
 
 -----------------------------------------------------------------------------
 (* The stopper. *)
 
-\* Read the current instance under the lock. Server.Stop also records the
-\* request; connection shutdown reads ProtocolInstance() and records nothing.
+\* In English: "The stopper reads which instance is current. Server.Stop
+\* also records that Stop was requested; connection shutdown records
+\* nothing."
 StopRead ==
-    /\ stopper = "idle"
-    /\ snap' = current
-    /\ stopRequested' = (Stopper = "Server")
-    /\ stopper' = "stop"
+    /\ stopper = "idle"                         \* the stopper has not started
+    /\ snap' = current                          \* next, it holds the current instance
+    /\ stopRequested' = (Stopper = "Server")    \* next, the flag is set if this is Server.Stop
+    /\ stopper' = "stop"                        \* next, its second step is due
     /\ UNCHANGED <<status, current, nextId, muxer, slot, restart, old, dones,
                    lateError>>
 
-\* Stop the instance read: it unregisters the slot, if it acts at all.
+\* In English: "Stop the instance it read: if that does anything, the
+\* instance is stopped and the muxer slot is emptied. Connection shutdown
+\* goes on to stop the muxer."
 StopSnap ==
-    /\ stopper = "stop"
+    /\ stopper = "stop"                         \* this is the stopper's second step
     /\ IF Acts(snap)
-          THEN /\ status' = [status EXCEPT ![snap] = "stopped"]
-               /\ slot' = "empty"
-          ELSE UNCHANGED <<status, slot>>
+          THEN /\ status' = [status EXCEPT ![snap] = "stopped"]     \* the instance stops
+               /\ slot' = "empty"                                   \* and releases the slot
+          ELSE UNCHANGED <<status, slot>>                           \* else: nothing happens
     /\ stopper' = IF Stopper = "Connection" THEN "muxer" ELSE "done"
     /\ UNCHANGED <<current, nextId, muxer, restart, old, snap,
                    stopRequested, dones, lateError>>
 
-\* Connection shutdown then stops the muxer, which drops every receiver.
+\* In English: "Connection shutdown stops the muxer, which drops every
+\* receiver."
 MuxerStop ==
     /\ stopper = "muxer"
     /\ muxer' = "stopped"
@@ -175,7 +197,8 @@ MuxerStop ==
     /\ UNCHANGED <<status, current, nextId, restart, old, snap,
                    stopRequested, dones, lateError>>
 
-\* A running instance's loops exit once the muxer has stopped.
+\* In English: "Once the muxer has stopped, any running instance's loops
+\* exit, one instance at a time."
 LoopsExit ==
     /\ muxer = "stopped"
     /\ \E i \in Instances :
@@ -184,11 +207,15 @@ LoopsExit ==
     /\ UNCHANGED <<current, nextId, muxer, slot, restart, old, stopper, snap,
                    stopRequested, dones, lateError>>
 
+\* In English: "When both goroutines are finished, nothing changes any
+\* more." This tells TLC that this is an expected ending, not a deadlock.
 Finished ==
     /\ restart = "idle"
     /\ stopper = "done"
     /\ UNCHANGED vars
 
+\* In English: "A step is any one step of either goroutine, or loops
+\* exiting, or staying finished."
 Next ==
     \/ RecvDone \/ StopOld \/ Install \/ StartNew
     \/ StopRead \/ StopSnap \/ MuxerStop \/ LoopsExit
@@ -199,6 +226,7 @@ Spec == Init /\ [][Next]_vars
 -----------------------------------------------------------------------------
 (* Invariants. *)
 
+\* In English: "the set of instances that are running."
 Running == {i \in Instances : status[i] = "running"}
 
 TypeOK ==
@@ -208,25 +236,28 @@ TypeOK ==
     /\ slot \in {"empty", "registered", "suspended"}
     /\ lateError \in BOOLEAN
 
-\* Never two keep-alive server instances reading the connection at once.
+\* In English: "At most one instance is running at any moment": never two
+\* keep-alive servers reading the connection at once.
 AtMostOneRunning == Cardinality(Running) <= 1
 
-\* Once Stop has returned and no restart is in flight, nothing is still
-\* serving keep-alive on a live muxer. Stop must mean stop.
+\* In English: "If the stopper has finished, no restart is in progress, and
+\* the muxer is still running, then no instance is running." Stop must
+\* mean stop.
 StopIsEffective ==
     (stopper = "done" /\ restart = "idle" /\ muxer = "running") =>
         Running = {}
 
-\* ...and nothing is left registered in the muxer either: a suspended
-\* receiver would keep buffering the client's bytes, charged against the
-\* connection's ingress budget, until the connection closes.
+\* In English: "...and in that same situation, the muxer slot is empty." A
+\* suspended receiver would keep buffering the client's bytes, charged
+\* against the connection's ingress budget, until the connection closes.
 StopReleasesSlot ==
     (stopper = "done" /\ restart = "idle" /\ muxer = "running") =>
         slot = "empty"
 
-\* A restart never starts an instance after the connection stopped the muxer.
-\* The error it then raises is dropped: the connection stops reading protocol
-\* errors before it stops the muxer (connection.go). The model shows the
-\* window; whether it matters needs the connection in the model.
+\* In English: "A restart never tries to start an instance after the muxer
+\* has stopped." The error it would raise is dropped: the connection stops
+\* reading protocol errors before it stops the muxer (connection.go). The
+\* model shows the window; whether it matters needs the connection in the
+\* model.
 NoStartAfterClose == ~lateError
 =============================================================================

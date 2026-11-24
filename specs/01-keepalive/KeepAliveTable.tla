@@ -8,8 +8,11 @@
 (* anything. PrintT prints its argument and is always TRUE, so this ASSUME *)
 (* exists only to print.                                                   *)
 (***************************************************************************)
-EXTENDS KeepAlive, TLC
+EXTENDS KeepAlive, TLC  \* everything in KeepAlive.tla, plus PrintT from TLC
 
+\* In English: "For every role r, every state s, and every kind of message
+\* k, print the four of them: role, state, kind, and what the receiver does."
+\* \A x \in S : P reads "for all x in S, P is true".
 ASSUME \A r \in Roles, s \in States, k \in Kinds :
          PrintT(<<r, s, k, ReceiveTable(r, s, k)>>)
 =============================================================================

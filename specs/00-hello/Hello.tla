@@ -5,10 +5,24 @@
 (*                                                                         *)
 (* The client sends "ping", the server answers "pong", and they repeat.    *)
 (* At any point when it is the client's turn, it may say "done" instead.   *)
+(*                                                                         *)
+(* HOW TO READ THE SYMBOLS                                                 *)
+(*   ==          "is defined as"                                           *)
+(*   /\          "and"   (a list of /\ lines: all of them are true)        *)
+(*   \/          "or"    (a list of \/ lines: at least one is true)        *)
+(*   ~           "not"                                                     *)
+(*   =           "equals" (a comparison, never an assignment)              *)
+(*   x'          "x in the next state"                                     *)
+(*   \in         "is one of"                                               *)
+(*   a..b        "the numbers a to b"                                      *)
+(*   =>          "implies" (if the left is true, the right must be too)    *)
+(*   <=>         "if and only if" (both true, or both false)               *)
+(*   []          "always"                                                  *)
+(*   \*          a comment until the end of the line                       *)
 (***************************************************************************)
-EXTENDS Naturals
+EXTENDS Naturals    \* use ordinary numbers: 0, 1, 2, +, -, <, ..
 
-\* How many pings the client may send before the model stops exploring.
+\* MaxPings is defined as 3.
 \* Real clients ping forever; a limit keeps the number of states finite.
 MaxPings == 3
 
@@ -18,66 +32,82 @@ VARIABLES
     pings,  \* how many pings the client has sent
     pongs   \* how many pongs the server has sent
 
+\* vars is the list of all three variables, so we can say "none changed".
 vars == <<state, pings, pongs>>
 
-\* What every behavior starts with.
+\* In English: "At the start, it is the client's turn, and nothing has been
+\* sent yet."
 Init ==
-    /\ state = "Client"
-    /\ pings = 0
-    /\ pongs = 0
+    /\ state = "Client"     \* it is the client's turn
+    /\ pings = 0            \* and no pings have been sent
+    /\ pongs = 0            \* and no pongs have been sent
 
-\* Each action is one possible step. A primed variable (state') means
-\* "the value in the next state". An action can only happen when its
-\* unprimed conditions are true.
+\* Each action is one possible step. Lines without a prime (') are
+\* conditions that must be true NOW for the step to happen. Lines with a
+\* prime say what the NEXT state looks like.
+
+\* In English: "The client can send a ping when it is the client's turn and
+\* it has pings left. Afterwards it is the server's turn, one more ping has
+\* been sent, and the pong count is unchanged."
 SendPing ==
-    /\ state = "Client"
-    /\ pings < MaxPings
-    /\ state' = "Server"
-    /\ pings' = pings + 1
-    /\ UNCHANGED pongs
+    /\ state = "Client"         \* it is the client's turn
+    /\ pings < MaxPings         \* and it has pings left
+    /\ state' = "Server"        \* next, it is the server's turn
+    /\ pings' = pings + 1       \* next, one more ping has been sent
+    /\ UNCHANGED pongs          \* and the pong count stays the same
 
+\* In English: "The server can send a pong when it is the server's turn.
+\* Afterwards it is the client's turn and one more pong has been sent."
 SendPong ==
-    /\ state = "Server"
-    /\ state' = "Client"
-    /\ pongs' = pongs + 1
-    /\ UNCHANGED pings
+    /\ state = "Server"         \* it is the server's turn
+    /\ state' = "Client"        \* next, it is the client's turn
+    /\ pongs' = pongs + 1       \* next, one more pong has been sent
+    /\ UNCHANGED pings          \* and the ping count stays the same
 
+\* In English: "The client can say done when it is the client's turn.
+\* Afterwards the conversation is over and the counts are unchanged."
 SendDone ==
-    /\ state = "Client"
-    /\ state' = "Done"
-    /\ UNCHANGED <<pings, pongs>>
+    /\ state = "Client"                 \* it is the client's turn
+    /\ state' = "Done"                  \* next, the conversation is over
+    /\ UNCHANGED <<pings, pongs>>       \* and both counts stay the same
 
-\* Finished conversations stay finished; this step lets TLC know that
-\* sitting in "Done" is the expected ending, not a crash.
+\* In English: "Once done, nothing changes any more." This step lets TLC
+\* know that sitting in "Done" is the expected ending, not a crash.
 Finished ==
-    /\ state = "Done"
-    /\ UNCHANGED vars
+    /\ state = "Done"           \* the conversation is over
+    /\ UNCHANGED vars           \* and nothing changes
 
+\* In English: "A step is a ping, or a pong, or done, or staying finished."
 Next == SendPing \/ SendPong \/ SendDone \/ Finished
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* You will write this line, unchanged, at the bottom of almost every model.
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
-\* Invariants: rules that must hold in EVERY reachable state.
+\* Invariants: rules that must hold in EVERY reachable state. TLC checks
+\* them after every step of every possible run.
 
+\* In English: "state is one of the three turns, and both counts are
+\* between 0 and MaxPings."
 TypeOK ==
-    /\ state \in {"Client", "Server", "Done"}
-    /\ pings \in 0..MaxPings
-    /\ pongs \in 0..MaxPings
+    /\ state \in {"Client", "Server", "Done"}   \* state is one of these three
+    /\ pings \in 0..MaxPings                    \* pings is between 0 and 3
+    /\ pongs \in 0..MaxPings                    \* pongs is between 0 and 3
 
-\* The server never answers a ping that was not sent, and at most one ping
-\* is ever waiting for an answer.
+\* In English: "The server never sends more pongs than there were pings,
+\* and at most one ping is ever waiting for an answer."
 PongsMatchPings ==
-    /\ pongs <= pings
-    /\ pings - pongs <= 1
+    /\ pongs <= pings           \* never more pongs than pings
+    /\ pings - pongs <= 1       \* at most one ping unanswered
 
-\* A ping is waiting for an answer exactly when it is the server's turn.
+\* In English: "It is the server's turn exactly when one ping is waiting."
 \* This is "agency" from the Ouroboros spec: whoever has agency talks next.
 AgencyMatchesOutstandingPing ==
     (state = "Server") <=> (pings - pongs = 1)
 
-\* DELIBERATELY WRONG, used by HelloBug.cfg: claims the client never says
-\* "done" after the server's last pong. TLC will find a counterexample.
+\* DELIBERATELY WRONG, used by HelloBug.cfg. In English: "The client never
+\* says done after getting a pong." TLC will find a counterexample.
 NeverDoneAfterPong ==
-    ~(state = "Done" /\ pongs > 0)
+    ~(state = "Done" /\ pongs > 0)  \* NOT (done AND at least one pong)
 =============================================================================

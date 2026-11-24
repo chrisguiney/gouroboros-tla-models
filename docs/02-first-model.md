@@ -186,7 +186,7 @@ State 1: <Initial predicate>
 /\ pings = 0
 /\ pongs = 0
 
-State 2: <SendPing line 33, col 5 to line 37, col 22 of module Hello>
+State 2: <SendPing line 53, col 5 to line 57, col 22 of module Hello>
 /\ state = "Server"
 /\ pings = 1
 /\ pongs = 0
