@@ -68,12 +68,18 @@ CONSTANTS
     ServerRestarts  \* TRUE: the server restarts after MsgDone [S7]. FALSE: gOuroboros today
 
 \* The two sides, the protocol states, and the message types, as sets.
+\* Literally: "Roles is defined as the set containing "Client" and "Server"."
 Roles     == {"Client", "Server"}
+\* Literally: "States is defined as the set containing "StClient", "StServer" and
+\*   "StDone"."
 States    == {"StClient", "StServer", "StDone"}
+\* Literally: "MsgTypes is defined as the set containing "MsgKeepAlive",
+\*   "MsgKeepAliveResponse" and "MsgDone"."
 MsgTypes  == {"MsgKeepAlive", "MsgKeepAliveResponse", "MsgDone"}
 
 \* Cookies are 16-bit numbers [S2]. Two values are enough to tell a matching
 \* cookie from a wrong one, and keep the model small.
+\* Literally: "Cookies is defined as the set containing 0 and 1."
 Cookies   == {0, 1}
 
 \* A message is a record: like a Go struct with three fields. `oversized`
@@ -95,6 +101,7 @@ Messages == {Msg(t, c, big) : t \in MsgTypes, c \in Cookies, big \in BOOLEAN}
 \* Where a side can end up besides a protocol state: it detected a protocol
 \* violation and closed the connection, or it waited too long and gave up.
 \* Either way the connection is torn down [S1][S2].
+\* Literally: "Failures is defined as the set containing "Violation" and "TimedOut"."
 Failures == {"Violation", "TimedOut"}
 
 \* In English: "In StClient the client may send; in StServer the server
