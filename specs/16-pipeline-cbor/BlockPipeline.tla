@@ -41,9 +41,13 @@ CONSTANTS
     StopAllowed,        \* TRUE: the owner may call Stop at any time
     DrainWaitsForApply, \* TRUE: the fix. FALSE: gOuroboros 61046085, where WaitForDrain
                         \* returns success during Stop without waiting for ApplyFunc
-    FailStops           \* TRUE: [G] and [R3]. FALSE: a mutation that keeps applying after a failure
+    FailStops,          \* TRUE: [G] and [R3]. FALSE: a mutation that keeps applying after a failure
+    ResultsNonBlocking  \* TRUE: the fix, where handing a result off never waits and a full
+                        \* Results buffer drops its oldest entry. FALSE: gOuroboros 61046085,
+                        \* where the runner waits for room in Results
 
 ASSUME MaxPending \in Nat /\ MaxPending >= 1 /\ CapacityBound \in Nat
+ASSUME QueueCap \in Nat /\ QueueCap >= 1   \* the fix keeps at least one result
 
 \* Sequence numbers. Submit hands them out in order, with no gaps [G].
 Seqs == 0 .. N - 1
@@ -70,11 +74,14 @@ VARIABLES
     rolledBack,  \* the client has rolled its own state back
     boundary,    \* blocks below this were drained before the rollback
     lateCommit,  \* a block below the boundary was committed after the rollback
-    afterFail    \* a block was committed after a failure
+    afterFail,   \* a block was committed after a failure
+    dropped,     \* how many results the fix discarded because Results was full
+    read         \* the blocks the consumer read from Results, in reading order
 
 vars == <<outcome, submitted, stage, pending, nextSeq, cur, rpc, toForward,
           results, completed, applied, canceled, stopping, failed, overflow,
-          pc, target, rolledBack, boundary, lateCommit, afterFail>>
+          pc, target, rolledBack, boundary, lateCommit, afterFail,
+          dropped, read>>
 
 \* In English: the outcomes a block may have.
 Outcomes == IF CanFail THEN {"ok", "bad"} ELSE {"ok"}
@@ -103,6 +110,8 @@ Init ==
     /\ boundary = 0
     /\ lateCommit = FALSE
     /\ afterFail = FALSE
+    /\ dropped = 0                     \* no result discarded
+    /\ read = <<>>                     \* the consumer has read nothing
 
 ---------------------------------------------------------------------------
 (* The client. *)
@@ -234,10 +243,13 @@ Stop ==
 
 \* In English: a block leaves Results, read either by a consumer or by
 \* Stop, which drains Results while it waits for the runner [G] Stop.
+\* Only a consumer's read is recorded; Stop just releases the block.
 TakeResult ==
     /\ Consumer \/ stopping
     /\ results # <<>>
     /\ results' = Tail(results)
+    /\ read' = IF Consumer THEN Append(read, Head(results)) ELSE read
+    /\ UNCHANGED dropped
     /\ UNCHANGED <<outcome, submitted, stage, pending, nextSeq, cur, rpc,
                    toForward, completed, applied, canceled, stopping, failed,
                    overflow, pc, target, rolledBack, boundary, lateCommit,
@@ -330,14 +342,25 @@ Reject ==
                    stopping, overflow, pc, target, rolledBack, boundary,
                    lateCommit, afterFail>>
 
-\* In English: the runner hands the next committed block to Results, if
-\* there is room [G] forwardItem.
+\* In English: the runner hands the next committed block to Results. With
+\* room, the block joins the end [G] forwardItem. Without room,
+\* gOuroboros 61046085 waits, so this step is disabled until a consumer
+\* reads; the fix instead drops the oldest waiting result and adds the new
+\* one, so the runner never waits for a reader [G] forwardResults on the
+\* fix branch. ChainDB followers pull, so a slow or absent follower never
+\* holds back chain selection [R2].
 Forward ==
     /\ rpc = "forward"
     /\ toForward # <<>>
-    /\ Len(results) < QueueCap
-    /\ results' = Append(results, Head(toForward))
+    /\ \/ /\ Len(results) < QueueCap                         \* room: append
+          /\ results' = Append(results, Head(toForward))
+          /\ UNCHANGED dropped
+       \/ /\ ResultsNonBlocking                              \* the fix only
+          /\ Len(results) >= QueueCap                        \* no room
+          /\ results' = Append(Tail(results), Head(toForward)) \* drop the oldest
+          /\ dropped' = dropped + 1
     /\ toForward' = Tail(toForward)
+    /\ UNCHANGED read
     /\ UNCHANGED <<outcome, submitted, stage, pending, nextSeq, cur, rpc,
                    completed, applied, canceled, stopping, failed, overflow,
                    pc, target, rolledBack, boundary, lateCommit, afterFail>>
@@ -371,11 +394,15 @@ Terminated ==
     /\ rpc \in {"exited", "idle"}
     /\ UNCHANGED vars
 
+\* In English: any step. Only Forward and TakeResult touch the record of
+\* dropped and read results; every other step leaves it alone.
 Next ==
-    \/ Submit \/ StartFence \/ FenceReturn \/ StartDrain \/ DrainReturn
-    \/ DrainStopReturn \/ Rollback \/ ClientFinish
-    \/ Stop \/ TakeResult
-    \/ Receive \/ Commit \/ Reject \/ Forward \/ ForwardDone \/ RunnerExit
+    \/ /\ \/ Submit \/ StartFence \/ FenceReturn \/ StartDrain \/ DrainReturn
+          \/ DrainStopReturn \/ Rollback \/ ClientFinish
+          \/ Stop
+          \/ Receive \/ Commit \/ Reject \/ ForwardDone \/ RunnerExit
+       /\ UNCHANGED <<dropped, read>>
+    \/ TakeResult \/ Forward
     \/ Terminated
 
 Spec == Init /\ [][Next]_vars
@@ -405,6 +432,18 @@ CompletedMeansApplied ==
 \* ignores every successor of an invalid block.
 NoApplyAfterFailure == ~afterFail
 
+\* In English: the consumer reads results in commit order, never one twice,
+\* and only blocks that ApplyFunc committed.
+ReadInCommitOrder ==
+    /\ \A i \in 1 .. Len(read) - 1 : read[i] < read[i + 1]
+    /\ \A i \in 1 .. Len(read) : \E j \in 1 .. Len(applied) : applied[j] = read[i]
+
+\* In English: while no result has been dropped, the consumer has read
+\* exactly the first blocks committed, with nothing missing. So a reader
+\* that keeps up loses nothing.
+ReadLosslessWithoutDrops ==
+    dropped = 0 => \A i \in 1 .. Len(read) : read[i] = applied[i]
+
 \* In English: Submit's backpressure keeps the apply stage from ever raising
 \* ErrPendingLimitExceeded.
 PendingBounded == ~overflow
@@ -428,4 +467,7 @@ ProbeNeverRollback == ~rolledBack
 
 \* In English: claims every block gets applied.
 ProbeAllApplied == pc = "done" => Len(applied) = N
+
+\* In English: claims no result is ever dropped.
+ProbeNeverDrop == dropped = 0
 =============================================================================
