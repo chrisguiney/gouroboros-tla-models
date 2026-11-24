@@ -132,7 +132,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model 16) |
 | [P3](#p3) | pipeline | `WaitForDrain` during `Stop` | Rollback is part of chain selection, serialised with adds | main: returns once `Stop` begins while a block may still commit after the caller's rollback; PR: waits for the apply runner | Silent | conforms | Open PR #3161. Library defect; not reached through chain-sync or Dingo today |
 | [P4](#p4) | pipeline | An unread `Results` channel | Chain selection never waits on a follower | main: stalls the apply runner; PR: never blocks commits, drops the oldest result for a reader that falls behind (counted in `ResultsDropped`) | Silent | conforms | Open PR #3161 |
-| [P5](#p5) | pipeline | `WithLosslessResults` | none | Opt-in: `Results` delivers every committed block and commits wait for the reader | Silent | conforms (implementation choice) | On PR #3161 (Dingo's trusted decode-only mode opts in). Wire: a slower commit only delays chain-sync's next request, which the protocol allows; ledger: unchanged |
+| [P5](#p5) | pipeline | `WithLosslessResults` | none | Opt-in with an `ApplyFunc`; always on in header-only and trusted decode-only modes: `Results` delivers every committed block and commits wait for the reader | Silent | conforms (implementation choice) | On PR #3161 at `0dbc3775` (decode-only modes are lossless by default; Dingo's opt-in is now redundant). Wire: a slower commit only delays chain-sync's next request, which the protocol allows; ledger: unchanged |
 
 ## Network
 
@@ -1015,12 +1015,12 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 
 **`WithLosslessResults`** (kind 5: gOuroboros-only addition)
 
-- **What differs.** Reference: none. gOuroboros: opt-in: `Results` delivers every committed block and commits wait for the reader.
+- **What differs.** Reference: none. gOuroboros: opt-in with an `ApplyFunc`; always on in header-only and trusted decode-only modes, whose only output is `Results`: every committed block is delivered and commits wait for the reader. At PR head `805d32abd` decode-only modes dropped results unless the caller opted in (review finding; model 16 `BlockPipelineDecodeOnlyDropBug.cfg`).
 - **Spec.** spec silent
 - **Reference.** n/a
-- **gOuroboros.** PR #3161 head `805d32abd` `pipeline/options.go` 74-81, 220-226
+- **gOuroboros.** PR #3161 head `0dbc3775` `pipeline/pipeline.go` (`Start`, `losslessResults`), `pipeline/options.go` (`LosslessResults`, `WithLosslessResults`)
 - **Verdict.** conforms (implementation choice)
-- **Status.** On PR #3161 (Dingo's trusted decode-only mode opts in). Wire: a slower commit only delays chain-sync's next request, which the protocol allows; ledger: unchanged
+- **Status.** On PR #3161 at `0dbc3775` (decode-only modes lossless by default; Dingo's trusted decode-only opt-in is now redundant). Wire: a slower commit only delays chain-sync's next request, which the protocol allows; ledger: unchanged
 
 ## Library boundary: contracts, not drift
 
