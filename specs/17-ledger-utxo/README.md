@@ -32,7 +32,7 @@ Era delegation, read from each function body at `d0b95845`:
 | Rule | Shelley | Allegra | Mary | Alonzo | Babbage |
 |---|---|---|---|---|---|
 | Validity | `TimeToLive` (ttl >= slot) | own interval | Allegra's | Allegra's | Allegra's |
-| BadInputs | spent inputs | Shelley's | Shelley's | Shelley's (spent only) | Shelley's (spent only) |
+| BadInputs | spent inputs | Shelley's | Shelley's | Shelley's (spent only); fixed: own, with collateral | Shelley's (spent only); fixed: own, with collateral and reference inputs |
 | Value | own | Shelley's | own, with tokens | own | own |
 | OutputTooSmall | coins | Shelley's | own (token exempts) | own, coins | own, with the return |
 | OutputTooBig | - | - | own (4000) | own (`MaxValueSize`) | own, with the return |
@@ -82,7 +82,8 @@ Two specifications:
 
 | Config | Result | Distinct states |
 |---|---|---|
-| `UtxoShelleyTable` .. `UtxoBabbageTable` | `GoAgrees` holds in every era | 253 per era with tokens (91 Shelley, Allegra) |
+| `UtxoShelleyTable` .. `UtxoBabbageTable` | `GoAgrees`, `GoBadInputsComplete` hold in every era | 253 per era with tokens (91 Shelley, Allegra) |
+| `UtxoAlonzoNoCollLookup`, `UtxoBabbageNoCollLookup`, `UtxoBabbageNoRefLookup` | both hold with a witness lookup removed | 253 |
 | `UtxoShelleyLedger` .. `UtxoMaryLedger` | all hold | see "Running it" |
 | `UtxoAlonzoLedger` | all hold | 1,322 |
 | `UtxoBabbageLedger` (2 transactions) | all hold | 2,328 |
@@ -96,21 +97,34 @@ output below the coin minimum is accepted), Alonzo's collateral without a
 return, or Babbage's collateral return, total collateral and permitted
 overlap of reference and spent inputs (protocol versions 7 and 8).
 
-**A finding needing a decision (not a defect today).** The reference's
-BadInputs covers the spent inputs and the collateral in Alonzo, and the
-reference inputs too in Babbage (`Alonzo/Rules/Utxo.hs` 538-540,
-`Babbage/Rules/Utxo.hs` 384-386). gOuroboros' `UtxoValidateBadInputsUtxo`
-covers only the spent inputs in every era. The two agree on acceptance
-only because other rules happen to resolve the rest:
-`ValidateCollateralVKeyWitnesses` resolves every collateral input of every
-transaction, and the script-witness rules resolve every reference input.
-The mutation configs `UtxoGoCollUnresolvedBug` and `UtxoGoRefsUnresolvedBug`
-show what follows if those rules stop resolving: a transaction without
-redeemers naming a missing collateral input (or any missing reference
-input) is accepted. The Go test's mutation of the witness rule confirms it
-on the code. The rejection also carries a witness-rule error, not
-`BadInputsUTxO`. Extending BadInputs per era to the reference's input set
-would remove the dependence and report the reference's failure.
+**Finding, fixed on gOuroboros branch `fix/ledger-bad-inputs-reference-set`.**
+The reference's BadInputs covers the spent inputs and the collateral in
+Alonzo, and the reference inputs too from Babbage (`Alonzo/Rules/Utxo.hs`
+538-540, `Babbage/Rules/Utxo.hs` 380-382 over `babbageAllInputsTxBodyF`,
+`Babbage/TxBody.hs` 228-236). Conway runs `babbageUtxoValidation`
+(`Conway/Rules/Utxo.hs` 254) with the same set at every protocol version;
+the reference/spent disjointness for 8 < pv < 11 is a separate rule.
+Dijkstra checks the same set plus each sub-transaction's spent and
+reference inputs against the UTxO before the sub-transactions
+(`Dijkstra/Rules/Utxo.hs` 346-354, `Dijkstra/TxBody.hs` 1555-1562).
+gOuroboros' `UtxoValidateBadInputsUtxo` at `d0b95845` covered only the
+spent inputs in every era; it agreed on acceptance only because
+`ValidateCollateralVKeyWitnesses` resolves every collateral input and the
+script-witness rules resolve every reference input, and the rejection
+carried a witness-rule error, not `BadInputsUTxO`.
+
+The model's `GoBadInputs` is now the reference's set ([G9]), and the
+invariant `GoBadInputsComplete` says BadInputs alone rejects exactly when
+the reference's does. `UtxoGoBadInputsSpentOnly{Alonzo,Babbage}Bug` put the
+old predicate back and fail it. `UtxoAlonzoNoCollLookup`,
+`UtxoBabbageNoCollLookup` and `UtxoBabbageNoRefLookup` remove a witness
+rule's lookup and still pass `GoAgrees`: the rejection no longer depends
+on it. `UtxoGoSpentOnlyCollUnresolvedBug` and
+`UtxoGoSpentOnlyRefsUnresolvedBug` show the old code's dependence: with the
+old predicate and the lookup removed, a transaction without redeemers
+naming missing collateral (or any missing reference input) is accepted.
+Conway and Dijkstra use Babbage's set, so the model stops at Babbage;
+sub-transactions are covered by the Go tests only.
 
 ## Checking the checks
 
@@ -119,8 +133,10 @@ would remove the dependence and report the reference's failure.
 | `UtxoGoTtlExclusiveBug` | Shelley TTL exclusive | `GoAgrees` |
 | `UtxoGoIntervalInclusiveBug` | Allegra accepts at invalidHereafter | `GoAgrees` |
 | `UtxoGoMaryCoinMinBug` | Mary coin minimum applied to a token output | `GoAgrees` |
-| `UtxoGoCollUnresolvedBug` | collateral resolved only with redeemers | `GoAgrees` |
-| `UtxoGoRefsUnresolvedBug` | reference inputs never resolved | `GoAgrees` |
+| `UtxoGoSpentOnlyCollUnresolvedBug` | old BadInputs, and collateral resolved only with redeemers | `GoAgrees` |
+| `UtxoGoSpentOnlyRefsUnresolvedBug` | old BadInputs, and reference inputs never resolved | `GoAgrees` |
+| `UtxoGoBadInputsSpentOnlyAlonzoBug` | old BadInputs (spent inputs only), Alonzo | `GoBadInputsComplete` |
+| `UtxoGoBadInputsSpentOnlyBabbageBug` | old BadInputs (spent inputs only), Babbage | `GoBadInputsComplete` |
 | `UtxoGoCollIgnoresReturnBug` | collateral percentage ignores the return | `GoAgrees` |
 | `UtxoGoDisjointAlwaysBug` | Babbage pv 7-8 rejects overlapping reference inputs | `GoAgrees` |
 | `UtxoSpecNoRefundBug` | consumed leaves out the refund | `ValuePreserved` |
@@ -179,7 +195,7 @@ Mutations, each killed:
 | Mary output minimum | `getValue txout >= inject (scaledMinDeposit ...)` | `pointwise (<)`: a token exempts | positive token exempts | agree with reference |
 | Alonzo+ output minimum | coins >= size-based minimum | `not pointwise (>=)` | coins compared | agree |
 | Babbage outputs | all outputs incl. return | `allSizedOutputsTxBodyF` | `TransactionOutputsAndCollateralReturn` | agree |
-| Inputs that must exist | Alonzo `txins ∪ collateral`; Babbage `∪ refInputs` | same | BadInputs: spent only; the rest by witness rules | agree on acceptance, **error differs; see finding** |
+| Inputs that must exist | Alonzo `txins ∪ collateral`; Babbage `∪ refInputs` | same; Conway same; Dijkstra adds sub-transaction inputs and reference inputs | was spent only (the rest by witness rules); fixed branch: same set as the reference | agree after the fix; see finding |
 | Collateral rules gate | `txrdmrs ≠ ∅` | same | redeemers present | agree |
 | Collateral balance | Babbage: coins less return | `collAdaBalance` | same, cross-multiplied | agree |
 | Collateral tokens | Babbage: all returned | `isAdaOnly (coll - ret)` | `MultiAsset.Compare` | agree |
