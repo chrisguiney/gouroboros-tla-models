@@ -732,9 +732,9 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **What differs.** Reference: slot strictly later except a main block after an EBB; an EBB after a main block shares its number; first block number 0. gOuroboros: main: any main block or EBB may share its predecessor's slot; an EBB may take either number; the first block must be 1; PR: as the reference.
 - **Spec.** cardano-ledger `1210d37fe6bd` `eras/byron/chain/formal-spec/byron-blockchain.tex`, "Permissive BFT Header Processing", line 582: "s > s_last"
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/byron/Ouroboros/Consensus/Byron/Ledger/HeaderValidation.hs` 39-52
-- **gOuroboros.** gOuroboros `d0b95845` `consensus/byron/validate.go` 112-113, 249, 284; PR #3111 head `1bc529c64` same file 93-96, 260-300
+- **gOuroboros.** gOuroboros `d0b95845` `consensus/byron/validate.go` 112-113, 249, 284; PR #3111 head `1bc529c64` same file 93-96, 260-300. Review: at `094aeac6` an EBB predecessor passed as a `*ByronEpochBoundaryBlock` counted as a main block (reference: kind from `byronHeaderIsEBB`, `HeaderValidation.hs` 30-32); fixed at `b137d455` (model `consensus` `ByronEnvelope.tla`)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3111 (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch
+- **Status.** Open PR #3111 at `b137d455` (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch
 
 ### C6
 
