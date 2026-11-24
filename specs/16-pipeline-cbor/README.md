@@ -49,8 +49,10 @@ in any order. TLC also checks for deadlock.
 
 | Config | Result | Distinct states |
 |---|---|---|
-| `BlockPipeline.cfg` (with the `WaitForDrain` fix) | passes | 3,846 |
-| `BlockPipelineDeep.cfg` (N=4, buffer 2, results queue 2) | passes | 18,238 |
+| `BlockPipeline.cfg` (with the `WaitForDrain` fix) | passes | 4,052 |
+| `BlockPipelineDeep.cfg` (N=4, buffer 2, results queue 2) | passes | 19,059 |
+| `BlockPipelineNoConsumer.cfg` (Results fix, nobody reads Results) | passes | 213 |
+| `BlockPipelineResults.cfg` (Results fix, N=4, a reader, failures and Stop) | passes | 20,724 |
 | `BlockPipelineDrainStopBug.cfg` (gOuroboros 61046085) | `NoCommitAfterRollback` violated | 1,568 |
 | `BlockPipelineNoConsumerBug.cfg` (gOuroboros 61046085, nobody reads Results) | deadlock | 139 |
 | `BlockPipelineCapacityBug.cfg` (mutation) | `PendingBounded` violated | 1,062 |
@@ -60,6 +62,7 @@ in any order. TLC also checks for deadlock.
 | `BlockPipelineProbeStopApplyingBug.cfg` (probe) | violated: Stop can begin during ApplyFunc | 403 |
 | `BlockPipelineProbeRollbackBug.cfg` (probe) | violated: a rollback is reachable | 653 |
 | `BlockPipelineProbeAllAppliedBug.cfg` (probe) | violated: a run can end with blocks unapplied | 411 |
+| `BlockPipelineProbeDropBug.cfg` (probe, Results fix) | violated: a lagging reader loses a result | 341 |
 
 1. **Yes.** `AppliedInOrderOnce` holds in every passing run. The single runner
    and the `nextSequence` check give the order; `Submit` hands out sequence
@@ -93,6 +96,19 @@ in any order. TLC also checks for deadlock.
    large blocks, because undelivered results also keep their CBOR budget. The
    `Results` doc calls the channel "observational" and chain-sync's
    `Config.Pipeline` doc does not say it must be read.
+
+   The fix (`ResultsNonBlocking = TRUE`) follows the reference, where
+   ChainDB followers pull and never hold back chain selection: handing a
+   result off never waits, and a full results buffer drops its oldest
+   entry. `NoConsumer.cfg`, the `NoConsumerBug` scenario with the fix,
+   has no deadlock. Two new invariants cover readers: `ReadInCommitOrder`
+   (a reader sees committed blocks in commit order, each once) and
+   `ReadLosslessWithoutDrops` (until a result is dropped, a reader has seen
+   exactly the first blocks committed). `ProbeDropBug` shows that drops do
+   happen, so the second is not vacuous. In gOuroboros the bound is
+   `PrefetchBufferSize` results and `MaxRawCborBytes` bytes, separate from
+   the admission budget, and drops are counted in
+   `PipelineStats.ResultsDropped`.
 6. **Only in aggregate.** `Stop` drains `Results` and releases every item, and
    a waiting `Fence` returns `ErrPipelineStopped`, so no caller is left
    waiting (no deadlock with `StopAllowed`). But blocks that `Submit` accepted
@@ -131,6 +147,7 @@ interesting situations are reached: out-of-order arrival, Stop during
 | `fix/pipeline-drain-during-stop` | `1c1e8e8c` | `WaitForDrain` waits for the apply runner to exit before succeeding during `Stop`; test `TestBlockPipelineWaitForDrainDuringStopWaitsForApply` | the fix: "WaitForDrain returned while ApplyFunc was still committing" |
 | `test/pipeline-state-model` | `5d9fc470` | `TestApplyStageCancellationStopsBufferedChain`: the model's `Commit` with `canceled`; the next buffered block is neither applied nor taken | removing `applyPending`'s context check (pending count 1, not 2) |
 | `fix/ledger-body-id-without-cbor` | `625f801c` | the CBOR finding below | the fix: all seven eras fail |
+| `fix/pipeline-results-do-not-block-commits` | `14fe27f8` | the result forwarder always accepts from the runner; undelivered results have their own bound and drop the oldest; tests `TestBlockPipelineFenceDoesNotWaitForResultsReader`, `TestBlockPipelineUnreadResultsDoNotHoldSubmitBudget` | the fix: the fence after block 3 and the second `Submit` time out |
 
 Already covered by existing tests, so not duplicated: sequence-order
 reordering (`TestApplyStageOrdering_OutOfOrderReordering`), the pending bound
@@ -144,8 +161,8 @@ which still passes with the fix, since the runner is idle there).
 The unread-`Results` stall was reproduced with a scratch test (validated
 pipeline, `PrefetchBufferSize(1)`, `Submit` then `Fence` with a 500 ms
 timeout, no reader): the fence after the fourth block times out with three
-blocks applied. It is not fixed: making the commit path independent of the
-observational channel, or requiring a reader, is a design decision.
+blocks applied. `fix/pipeline-results-do-not-block-commits` turns this into
+`TestBlockPipelineFenceDoesNotWaitForResultsReader`.
 
 ## Comparison: reference and gOuroboros
 
@@ -159,7 +176,7 @@ ChainDB add-block queue in ouroboros-consensus.
 | Invalid block | recorded; it and successors ignored, thread continues [R3] | pipeline stops (fatal) | stricter; documented in chain-sync's `Config.Pipeline` |
 | Close with blocks queued | every queued block gets `FailedToAddBlock` [R4] | blocks dropped; waiting `Fence` gets `ErrPipelineStopped` | aggregate report only |
 | Rollback | part of chain selection, serialised with adds | caller's job after `WaitForDrain` | defect during `Stop` (fixed on a branch) |
-| Result consumption | promises are optional to read | unread `Results` stalls the runner | defect (written up) |
+| Result consumption | promises are optional to read; followers pull | unread `Results` stalls the runner | defect (fixed on a branch: bounded, drop-oldest, never blocks commits) |
 
 ## CBOR: preserved bytes and decoder limits
 
@@ -227,6 +244,8 @@ messages in the reference queue.
 ```sh
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipeline.cfg specs/16-pipeline-cbor/BlockPipeline.tla
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineDeep.cfg specs/16-pipeline-cbor/BlockPipeline.tla
+bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineNoConsumer.cfg specs/16-pipeline-cbor/BlockPipeline.tla
+bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineResults.cfg specs/16-pipeline-cbor/BlockPipeline.tla
 # expected to fail:
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineDrainStopBug.cfg specs/16-pipeline-cbor/BlockPipeline.tla
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineNoConsumerBug.cfg specs/16-pipeline-cbor/BlockPipeline.tla
@@ -237,6 +256,7 @@ bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineProbeReorderBu
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineProbeStopApplyingBug.cfg specs/16-pipeline-cbor/BlockPipeline.tla
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineProbeRollbackBug.cfg specs/16-pipeline-cbor/BlockPipeline.tla
 bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineProbeAllAppliedBug.cfg specs/16-pipeline-cbor/BlockPipeline.tla
+bin/tlc -workers auto -config specs/16-pipeline-cbor/BlockPipelineProbeDropBug.cfg specs/16-pipeline-cbor/BlockPipeline.tla
 # or all at once:
 scripts/run-model.sh specs/16-pipeline-cbor
 ```
