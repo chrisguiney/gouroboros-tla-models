@@ -350,6 +350,12 @@ A loop of 2,000 plain `GetCurrentTip`-then-`Jump` rounds with no sync never
 hit the narrow window. The model shows it is reachable, but it is very rarely
 hit.
 
+Reported as gOuroboros issue #3093. Pull request #3094 (in review) makes
+`GetCurrentTip` wait for the answer to its own `MsgFindIntersect`, the design
+`ChainSyncQueriesWaitOwn.cfg` checks. Its test holds both the roll and the
+`MsgIntersectNotFound` at the server, and requires `GetCurrentTip` not to
+return on the roll's tip. It fails 5 runs out of 5 without the change.
+
 ### Spec, reference, and gOuroboros
 
 | Question | Specification | Reference | gOuroboros |
