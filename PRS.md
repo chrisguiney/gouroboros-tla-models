@@ -19,7 +19,7 @@ closes. A PR can draw on more than one model.
 | `chainsync` | #3092 (close the connection when Stop cannot send MsgDone) | #3091 | merged |
 | `chainsync` | #3094 (GetCurrentTip waits for its own answer) | #3093 | open |
 | `chainsync` | #3112 (MustReply timeout, node-to-node message size, state map tests) | #3096, #3097, #3101 | open |
-| `handshake` | #3127 (negotiate before a query reply, simultaneous open, state map tests) | #3115, #3116, #3117 | open |
+| `handshake` | #3127 (negotiate before a query reply, simultaneous open, its proposal written before ending, state map tests) | #3115, #3116, #3117 | open |
 | `handshake` | #3194 (negotiated data in the accept, recognised key order) | #3181, #3182 | open |
 | `blockfetch` | #3114 (Stop, refused requests, Busy timeout, state map tests) | #3107, #3108, #3109, #3110 | open |
 | `txsubmission` | #3128 (txid request blocking rules, state map tests) | #3118, #3119, #3120 | open |

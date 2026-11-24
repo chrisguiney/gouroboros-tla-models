@@ -271,9 +271,9 @@ The spec does not say whether a query must first pass negotiation; main tells a 
 - **What differs.** Reference: supported: a `MsgProposeVersions` received in `Confirm` is read as `MsgReplyVersions`. gOuroboros: main: not supported (a proposal in `Confirm` is an error); PR: supported.
 - **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, "Handshake mini-protocol", lines 447 and 704-709: "The handshake mini protocol is designed to handle simultaneous TCP open."
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Client.hs` 120 (`MsgReplyVersions vMap -> ...`)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/client.go` 113 (`default:` error); PR #3127 head `19c0debbf` `client.go` 125-126, 193. Review: at `78792c96` each side ended with the peer's raw data (reference: the agreed data, `Client.hs` 213-215); fixed at `5826fae1` (model `handshake` `SimAgreedData`, `HandshakeSimOpenRawPeerDataBug.cfg`)
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/client.go` 113 (`default:` error); PR #3127 head `19c0debbf` `client.go` 125-126, 193. Review: at `78792c96` each side ended with the peer's raw data (reference: the agreed data, `Client.hs` 213-215); fixed at `5826fae1` (model `handshake` `SimAgreedData`, `HandshakeSimOpenRawPeerDataBug.cfg`). CI at `8461ae3a`: a side could end before its own proposal was written, and stopping dropped it, so the peer hung (Go test) or saw the connection close; the reference writes the proposal synchronously before it reads (network-mux `Types.hs` 327-330). Fixed at `97708901` (model `handshake` `HandshakeSimOpenDelivery.tla`, `NoDroppedProposal`, `HandshakeSimOpenDeliveryBug.cfg` deadlock)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3127, head `5826fae1`
+- **Status.** Open PR #3127, head `97708901`
 
 Simultaneous open happens when two nodes dial each other at the same moment and TCP joins the two attempts into one connection.
 
