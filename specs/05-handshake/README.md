@@ -67,7 +67,9 @@ table (8): 640 starting pairs.
 | `HandshakeSilentClient.cfg` (node-to-node, client never proposes) | 1,280 | passes: the server times out |
 | `HandshakeSilentNtCBug.cfg` (node-to-client, server never answers) | | **deadlock**, by design |
 | `HandshakeSimOpen.cfg` (reference) | 448 | passes |
-| `HandshakeSimOpenGouroborosBug.cfg` (no `MsgReplyVersions`) | | **fails** `NoViolations` |
+| `HandshakeSimOpenGouroborosBug.cfg` (gOuroboros `61046085`: no `MsgReplyVersions`) | | **fails** `NoViolations` |
+| `HandshakeSimOpenGouroboros.cfg` (gOuroboros after the fix) | 448 | passes |
+| `HandshakeSimOpenEarlyReadBug.cfg` (the fix without the wait in `Client.Start`) | | **fails** `NoViolations` |
 | `HandshakeSimOpenAsymmetricBug.cfg` (one side's data undecodable by the other) | | **fails** `SymmetricOutcome` |
 | `HandshakeTable.cfg`, `HandshakeTableGouroboros.cfg` | | print the receive table |
 
@@ -96,6 +98,7 @@ reset"), and the refusing side closes the connection.
 | `HandshakeClientNoMagicBug.cfg` | the client's magic comparison (rogue server) | `ClientAcceptsOnlyProposed` |
 | `HandshakeGouroborosBug.cfg` | negotiating before a query | `QueryOnlyWhenNegotiable` |
 | `HandshakeSimOpenGouroborosBug.cfg` | `MsgReplyVersions` | `NoViolations` |
+| `HandshakeSimOpenEarlyReadBug.cfg` | proposing before reading | `NoViolations` |
 
 Reachability probes, each expected to fail, show the passing configs reach
 every answer: `HandshakeProbeAcceptBug.cfg`, `HandshakeProbeQueryBug.cfg`,
@@ -150,14 +153,35 @@ Branch `fix/handshake-query-after-negotiation` moves the query check after
 negotiation, as the reference does. Its test fails on `origin/main` for "no
 common version" and "magic mismatch".
 
-Not fixed, written up: simultaneous open. gOuroboros routes segments by
-their direction bit (`muxer/muxer.go`, `readLoop`), so a peer's
+Simultaneous open. On `61046085` gOuroboros routes segments by their
+direction bit (`muxer/muxer.go`, `readLoop`), so a peer's
 `MsgProposeVersions` goes to the handshake server role, which a dialling
 connection does not run; two gOuroboros connections opening at once both
-fail with `connection shutdown initiated: EOF`. Supporting it needs the
-muxer to deliver both directions of mini-protocol 0 to the client before the
-handshake ends, a `Confirm` transition for `MsgProposeVersions`, and the
-client to negotiate itself.
+fail with `connection shutdown initiated: EOF`.
+
+Branch `fix/handshake-simultaneous-open` follows the reference:
+
+- The reference runs the handshake on the bearer before the mux starts,
+  reading every segment whatever its direction bit [R8]. The gOuroboros
+  muxer now gives a mini-protocol 0 segment to whichever role is
+  registered, but only before `Start`, that is during the handshake.
+- `Confirm` gains a transition for `MsgProposeVersions` to `Done`
+  (`MsgReplyVersions` [S2][R1]). The client chooses the highest common
+  version and checks the magic, the server's rule [R2][R3]. A refusal is
+  returned as the typed error and nothing is sent [R1].
+- `Client.Start` returns only once its proposal has moved it to `Confirm`
+  (`protocol.Protocol.WaitForStateExit`). Without that, the connection can
+  start reading while the client still holds agency in `Propose`, and the
+  peer's proposal is rejected on arrival: `HandshakeSimOpenEarlyReadBug.cfg`,
+  and in Go about one run in 150 of `TestSimultaneousOpen` with the wait
+  removed.
+
+Tests: `protocol/handshake/simultaneous_open_test.go` (highest common
+version, a version only one side speaks, no common version, magic
+mismatch, the mismatch lists the side's own versions) and
+`connection_simultaneous_open_test.go` (two connections agree; two on
+different networks both fail, at least one with `RefusedError`). Every one
+fails on `61046085`.
 
 ## Spec, reference, and gOuroboros
 
@@ -169,7 +193,7 @@ client to negotiate itself.
 | Unsolicited `MsgQueryReply` | Not stated | Taken as a query result [R2] | Error | Stricter, harmless |
 | `MsgQueryReply` in the state machine | Absent [S2] | Present [R1] | Present | Spec out of date |
 | Data in `MsgAcceptVersion` | Negotiated data [S4] | Agreed data [R4][R6] | The server's own data; each side's callback gets the peer's data | Differs; the reference client recomputes the agreement, and `connection.go` combines local and remote flags itself, so no wrong outcome was found |
-| Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; design change, written up |
+| Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; fixed on a branch |
 | Proposal keys in ascending order | Required [S5] | Unordered keys fail to decode (`Codec.hs` 217-241) | Accepted in any order; duplicates rejected | gOuroboros more lenient |
 | Size limits | 5760 both states [S3] | 5760 [R5] | 5760 | Agree |
 | Timeouts | 10 s both, NtN; none NtC [S3] | `shortWait` = 10 s [R5] | 10 s NtN (overridable), none NtC | Agree |
@@ -215,6 +239,7 @@ for c in Handshake HandshakeNtC HandshakeStrictQuery HandshakeRogue \
   ../../bin/tlc -config $c.cfg Handshake.tla
 done
 ../../bin/tlc -config HandshakeSimOpen.cfg HandshakeSimOpen.tla
+../../bin/tlc -config HandshakeSimOpenGouroboros.cfg HandshakeSimOpen.tla
 ../../bin/tlc -config HandshakeTable.cfg HandshakeTable.tla | grep '^<<'
 ../../bin/tlc -config HandshakeTableGouroboros.cfg HandshakeTable.tla | grep '^<<'
 # expected to fail:
@@ -226,7 +251,7 @@ for c in HandshakeGouroborosBug HandshakeLowestBug HandshakeNoMagicBug \
   ../../bin/tlc -config $c.cfg Handshake.tla
 done
 for c in HandshakeSimOpenGouroborosBug HandshakeSimOpenAsymmetricBug \
-         HandshakeSimOpenProbeRefusedBug; do
+         HandshakeSimOpenProbeRefusedBug HandshakeSimOpenEarlyReadBug; do
   ../../bin/tlc -config $c.cfg HandshakeSimOpen.tla
 done
 ```
