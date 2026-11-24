@@ -94,6 +94,10 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncQueriesBug.cfg ChainSyncQueries.tla || true
 	$(CHAINSYNC) -config ChainSyncQueriesNoSyncBug.cfg ChainSyncQueries.tla || true
 	$(CHAINSYNC) -config ChainSyncQueriesPopFirstBug.cfg ChainSyncQueries.tla || true
+	$(CHAINSYNC) -config ChainSyncProtocol.cfg ChainSyncProtocol.tla
+	$(CHAINSYNC) -config ChainSyncProtocolFindBug.cfg ChainSyncProtocol.tla || true
+	$(CHAINSYNC) -config ChainSyncProtocolDoneBug.cfg ChainSyncProtocol.tla || true
+	$(CHAINSYNC) -config ChainSyncProtocolAwaitBug.cfg ChainSyncProtocol.tla || true
 
 chainsync-deep: ## Check the chain-sync client with a window of three
 	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla

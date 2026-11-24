@@ -11,7 +11,8 @@ once, and lets the application change course in the middle (`Reintersect`,
 `Stop`, `StopAfterDrain`, `Jump`). This model starts with the part every other
 operation leans on: the **sync window** and **Reintersect** (slice 1), then
 **stopping and restarting** on the same connection (slice 2), then the
-one-shot **queries** `GetCurrentTip` and `Jump` (slice 3).
+one-shot **queries** `GetCurrentTip` and `Jump` (slice 3), and the
+**protocol** itself with its limits and timeouts (slice 4).
 
 Read [Model 03](../03-engine/README.md) first; the pipelining ideas carry over.
 
@@ -145,8 +146,9 @@ and gOuroboros `origin/main` at `c1bc50c6`.
 ### Not in this slice
 
 `Stop`, `StopAfterDrain` and restarting (slice 2); `Jump`, `GetCurrentTip`
-and `MsgIntersectNotFound` (slice 3); `GetAvailableBlockRange`, the block
-pipeline behind `RollForward`, and timeouts.
+and `MsgIntersectNotFound` (slice 3); the protocol itself, limits and
+timeouts (slice 4); `GetAvailableBlockRange` and the block pipeline behind
+`RollForward`.
 
 ## Slice 2: stop and restart (`ChainSyncLifecycle.tla`)
 
@@ -363,6 +365,87 @@ return on the roll's tip. It fails 5 runs out of 5 without the change.
 | How many answers does `MsgFindIntersect` get? | Exactly one, `MsgIntersectFound` or `MsgIntersectNotFound` [C1] | Same | Same on the wire |
 | Who receives it? | The client that sent it; replies are in request order [P1] | The continuation that sent it: `Yield` then `Await` [R2], with no shared registry | Whoever is registered on `wantIntersectFoundChan` when the handler looks |
 | Can a caller move on before its answer? | Not in the state machine: it is in `StIntersect` until the answer | No | Yes: `GetCurrentTip` returns on any tip |
+
+## Slice 4: the protocol, limits and timeouts (`ChainSyncProtocol.tla`)
+
+### What it models
+
+The earlier slices model gOuroboros' client code. This slice models the
+protocol itself, both sides, from the specification's agency and messages
+tables, with `MsgRequestNext` pipelined as the reference client does. The
+client keeps a list of the answers it is owed, oldest first. It pipelines up
+to `Limit` requests, and sends `MsgFindIntersect` and `MsgDone` only when it is
+owed nothing (the reference's "Z" rule). The server takes one message at a
+time, in order, and answers it.
+
+### The answer
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ChainSyncProtocol.cfg` | 209 | `NoViolation`, `OnlyAtZero`, `AgreeWhenQuiet` and `WindowBound` hold |
+| `ChainSyncProtocolAwaitBug.cfg`: the server sends `MsgAwaitReply` twice | | **fails** `NoViolation` |
+| `ChainSyncProtocolDoneBug.cfg`: the client sends `MsgDone` while owed answers | | **fails**; without `OnlyAtZero`, `NoViolation` fails too: a roll reaches a client whose run is over |
+| `ChainSyncProtocolFindBug.cfg`: the client sends `MsgFindIntersect` while owed answers | | **fails** `OnlyAtZero` |
+
+The probes show that the window fills, that the server reaches `StMustReply`,
+and that a pipelined request waits at a server that holds agency.
+
+One honest negative: a `MsgFindIntersect` sent while requests are owed causes
+**no** violation on the wire. The server answers in order, so the answers still
+match. The reference's Z rule keeps the client's view of the state machine
+exact; it does not prevent a wire error. Without `OnlyAtZero`, the mutation
+trips only `WindowBound`, because the model counts the intersect request in
+the window.
+
+### The same table in Go
+
+`protocol/chainsync/statemap_model_test.go`, on the local branch
+`test/chainsync-state-model`, holds the receive table: both roles, every
+active state, every kind of message, 136 cells across `StateMapNtN` and
+`StateMapNtC`. It also checks each state's agency, and every way into each
+state: `StMustReply` only by `MsgAwaitReply` from `StCanAwait`, `StDone` only
+by `MsgDone` from `StIdle`, and nothing leaves `StDone`. gOuroboros judges a
+message on arrival, so a cell where the reference would leave a message
+waiting is a refusal in gOuroboros. This difference is recorded, not treated
+as a defect. Five mutations of the state maps each fail it:
+- `MsgAwaitReply` allowed in `StMustReply`;
+- pipelined `MsgRequestNext` dropped from `StMustReply`;
+- pipelined `MsgRequestNext` admitted in `StIntersect`;
+- `MsgDone` allowed from `StCanAwait`;
+- no size limit in `StIdle`.
+
+### Limits and timeouts: two deviations, both fixed on local branches
+
+The specification's node-to-node tables
+(`miniprotocols.tex` lines 910-950) and the reference agree; gOuroboros
+differs in two places:
+
+| Item | Specification | Reference | gOuroboros `origin/main` | Branch |
+| --- | --- | --- | --- | --- |
+| `StMustReply` timeout | random 601 s to 911 s | `minChainSyncTimeout` 601, `maxChainSyncTimeout` 911 (`ChainSync/Codec.hs` lines 54-63), drawn uniformly in `timeLimitsChainSync` | random 135 s to 269 s | `fix/chainsync-mustreply-timeout` |
+| Size limit per state | 65535 bytes | `byteLimitsChainSync`: `smallByteLimit` (65535) in every state (`ChainSync/Codec.hs` lines 40-51; `Protocol/Limits.hs` line 111) | 462000 bytes, the ingress queue size, used as the message size limit | `fix/chainsync-ntn-message-size` |
+| `StIdle`, `StCanAwait`, `StIntersect` timeouts | 3673 s, 10 s, 10 s | same (`cardano-diffusion/.../ChainSync/Codec/TimeLimits.hs`) | same | none needed |
+| `StMustReply` timeout for a trusted peer | none | none (`IsTrustable` waits forever) | always applied; gOuroboros has no notion of a trusted peer | recorded, not changed |
+| Node-to-client limits and timeouts | none | none | none (`StateMapNtC`) | none needed |
+
+The reference's comment in `TimeLimits.hs` still says "135 - 269", the old
+values. Its code uses 601-911, as the specification does. gOuroboros carried
+the old values, and its own test asserted them as "per spec".
+
+The size fix keeps 462000 bytes as each state's pending-receive budget, so
+the bytes queued while a state is active are bounded as before. The muxer's
+ingress limit does not change (it is at least 655350 bytes either way).
+Branches:
+
+- `fix/chainsync-mustreply-timeout` (`ab81e5aa`): the constants, the
+  existing limits test corrected to the specified values, plus a check that
+  every random draw lands in range. The docs are updated too.
+- `fix/chainsync-ntn-message-size` (`fc33a544`): 65535-byte message limits.
+  The existing map test, which asserted the old single limit, now asserts the
+  split. A new test checks that the ingress queue still holds 462000 bytes.
+  Both fail on `origin/main` where they assert the change.
+
+Neither branch has been pushed or opened as a pull request.
 
 ## Running it
 
