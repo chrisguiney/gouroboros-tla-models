@@ -6,7 +6,9 @@
 #     or a deadlock;
 #   - every other config must pass.
 # A config names its module on a "\* SPEC: Name.tla" line; without one, the
-# module with the config's own name is used.
+# module whose name is the longest prefix of the config's name is used.
+# A Bug config only counts as failing if TLC reports a violated property or
+# a deadlock: a parse or evaluation error is a broken model, not a finding.
 #
 # Usage: scripts/run-model.sh specs/06-blockfetch
 set -uo pipefail
@@ -20,11 +22,23 @@ wrong=0
 for cfg in *.cfg; do
   name="${cfg%.cfg}"
   tla="$(sed -n 's/^\\\* *SPEC: *//p' "$cfg")"
-  tla="${tla:-$name.tla}"
+  if [[ -z "$tla" ]]; then
+    best=0
+    for candidate in *.tla; do
+      base="${candidate%.tla}"
+      if [[ "$name" == "$base"* && ${#base} -gt $best ]]; then
+        tla="$candidate"
+        best=${#base}
+      fi
+    done
+    tla="${tla:-$name.tla}"
+  fi
   if "$root/bin/tlc" -workers auto -config "$cfg" "$tla" >"/tmp/run-model.$$.out" 2>&1; then
     passed=yes
-  else
+  elif grep -qE 'is violated|Deadlock reached' "/tmp/run-model.$$.out"; then
     passed=no
+  else
+    passed=broken
   fi
   rm -rf states
   case "$name" in
@@ -36,7 +50,11 @@ for cfg in *.cfg; do
     [[ "$expected" == yes ]] && echo "  pass   $cfg" || echo "  fails  $cfg (as expected)"
   else
     wrong=$((wrong + 1))
-    echo "  WRONG  $cfg: expected $([[ $expected == yes ]] && echo pass || echo failure)"
+    if [[ "$passed" == broken ]]; then
+      echo "  WRONG  $cfg: TLC could not check it (parse or evaluation error)"
+    else
+      echo "  WRONG  $cfg: expected $([[ $expected == yes ]] && echo pass || echo failure)"
+    fi
     grep -E 'violated|Deadlock|Error' "/tmp/run-model.$$.out" | head -3 | sed 's/^/         /'
   fi
 done
