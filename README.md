@@ -77,6 +77,67 @@ Read these in order. Each one builds on the last.
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
 
+## Reading a formula literally
+
+Each definition in the models carries two English readings:
+
+- **In English** says what the definition means, in everyday words.
+- **Literally** reads the formula symbol by symbol, so you can match each
+  word to the symbol it came from.
+
+For example:
+
+```tla
+\* In English: "Message type t is legal in state s if some row of the
+\* table starts with s and t."
+\* Literally: "IsLegal of s and t is defined as: there exists a tr that
+\*   is a member of Transitions such that element 1 of tr equals s and
+\*   element 2 of tr equals t."
+IsLegal(s, t) == \E tr \in Transitions : tr[1] = s /\ tr[2] = t
+```
+
+The literal readings use these words for each symbol:
+
+| Symbol | Read as |
+| --- | --- |
+| `A == e` | "A is defined as e" |
+| `F(x, y)` | "F of x and y" |
+| `x \in S` | "x is a member of S" |
+| `x \notin S` | "x is not a member of S" |
+| `S \subseteq T` | "S is a subset of T" |
+| `S \cup T`, `S \cap T`, `S \ T` | "the union of S and T", "the intersection of S and T", "S without the members of T" |
+| `\A x \in S : P` | "for all x in S, P" |
+| `\E x \in S : P` | "there exists an x in S such that P" |
+| `CHOOSE x \in S : P` | "the x, chosen from S, such that P" |
+| `P /\ Q`, `P \/ Q`, `~P` | "P and Q", "P or Q", "P is not true" |
+| `P => Q` | "if P, then Q" |
+| `P <=> Q` | "P if and only if Q" |
+| `x = y`, `x /= y` | "x equals y", "x does not equal y" |
+| `x'` | "x in the next state" |
+| `UNCHANGED x` | "x is unchanged" |
+| `IF a THEN b ELSE c` | "if a then b, else c" |
+| `CASE a -> x [] b -> y [] OTHER -> z` | "in the case a, x; in the case b, y; in every other case, z" |
+| `LET n == e IN body` | "letting n be e: body" |
+| `{a, b}` | "the set containing a and b" |
+| `{e : x \in S}` | "the set of e, for every x that is a member of S" |
+| `{x \in S : P}` | "the set of every x in S such that P" |
+| `[x \in S \|-> e]` | "the function that maps every x in S to e" |
+| `[S -> T]` | "the set of functions from S to T" |
+| `f[x]` | "f of x" (for a tuple or sequence: "element x of f") |
+| `[f EXCEPT ![k] = v]` | "f except that its k entry is v" (`@` is "the old entry") |
+| `[a \|-> 1, b \|-> 2]`, `r.a` | "the record whose field a is 1 and field b is 2", "r's a" |
+| `<<a, b>>` | "the tuple of a and b" |
+| `DOMAIN f` | "the domain of f" |
+| `Cardinality(S)` | "the number of members of S" |
+| `a..b` | "a through b" |
+| `Seq(S)` | "the set of sequences of members of S" |
+| `Append(s, x)`, `Head(s)`, `Tail(s)`, `Len(s)` | "s with x appended", "the head of s", "the tail of s", "the length of s" |
+| `ENABLED A` | "A is enabled" |
+| `[][A]_v` | "always, every step is an A step or a step that leaves v unchanged" |
+| `<>P` | "eventually P" |
+| `P ~> Q` | "P leads to Q" |
+| `WF_v(A)`, `SF_v(A)` | "weak fairness of A", "strong fairness of A" |
+
 ## What is in the repository
 
 | Path | What it is |
