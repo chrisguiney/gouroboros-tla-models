@@ -57,14 +57,20 @@ Read these in order. Each one builds on the last.
     proposals, voting, ratification, enactment and refunds.
 18. [Model 16: block pipeline and CBOR](specs/16-pipeline-cbor/README.md):
     ordered apply, rollback fencing, drain, and preserved bytes.
-19. [Model 18: Genesis density](specs/18-consensus-genesis/README.md):
+19. [Model 17: the UTXO rule](specs/17-ledger-utxo/README.md): value,
+    fees, outputs, validity intervals, collateral and IsValid from Shelley
+    to Babbage.
+20. [Model 18: Genesis density](specs/18-consensus-genesis/README.md):
     the density rule beside the reference's GDD governor and Limit on
     Eagerness.
-20. [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
+21. [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
     UTxO rule, fees and heavyweight delegation.
-21. [Model 21: the epoch nonce](specs/21-consensus-nonce/README.md): the
+22. [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
+    certification, endorser-block application, rollback and the
+    certificate's committee.
+23. [Model 21: the epoch nonce](specs/21-consensus-nonce/README.md): the
     evolving and candidate nonces, the freeze window and the tick.
-22. [Glossary](docs/glossary.md): keep it open while you read anything else.
+24. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
