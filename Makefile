@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/01-keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -62,12 +62,19 @@ connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 
 ENGINE := cd specs/03-engine && ../../bin/tlc
 
-engine: ## Check the protocol engine's admission rule, and why each part matters
+engine: ## Check the protocol engine: admission and pipelining
 	$(ENGINE) -config EngineAdmissionKeepAlive.cfg EngineAdmission.tla
 	$(ENGINE) -config EngineAdmissionChainSync.cfg EngineAdmission.tla
 	$(ENGINE) -config EngineAdmissionBlockFetch.cfg EngineAdmission.tla
 	$(ENGINE) -config EngineAdmissionNoContinueBug.cfg EngineAdmission.tla || true
 	$(ENGINE) -config EngineAdmissionNoReserveBug.cfg EngineAdmission.tla || true
+	$(ENGINE) -config EnginePipeliningBlockFetch.cfg EnginePipelining.tla
+	$(ENGINE) -config EnginePipeliningChainSync.cfg EnginePipelining.tla
+	$(ENGINE) -config EnginePipeliningNoReservationBug.cfg EnginePipelining.tla || true
+
+engine-deep: ## Check pipelining with two requests in flight (a few minutes)
+	$(ENGINE) -workers auto -config EnginePipeliningBlockFetchDeep.cfg EnginePipelining.tla
+	$(ENGINE) -workers auto -config EnginePipeliningChainSyncDeep.cfg EnginePipelining.tla
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \

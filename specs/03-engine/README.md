@@ -12,8 +12,7 @@ The engine is modelled in slices, simplest first:
 | Slice | Module | What it covers |
 | --- | --- | --- |
 | 1 | `EngineAdmission.tla` | Admission for protocols that do not pipeline |
-| 2 | (next) | Pipelined sends, with state changes applied later |
-| 3 | (next) | Pipelined replies and their reservations |
+| 2 | `EnginePipelining.tla` | Pipelined requests end to end: sends, deferred state changes, the agency token, and replies that arrive early |
 
 Read [Model 01](../01-keepalive/README.md) first.
 
@@ -113,6 +112,107 @@ drift of two refused - is not among them.
 
 ### Not in this slice
 
-Pipelining: `PipelinedMessageTypes`, pipelined requests and their deferred
-state changes, pipelined replies and their reservations, and
-`pipelinedTypeGenerations`. Those are slices 2 and 3.
+Pipelining, which slice 2 covers.
+
+## Slice 2: pipelined requests (`EnginePipelining.tla`)
+
+Slices 2 and 3 were planned separately - sends, then replies - but they
+cannot be checked apart: a reply to a pipelined request can arrive before the
+client has applied that request's state change, so the send side's deferred
+changes and the receive side's reply reservations only make sense together.
+
+### Three ways to describe pipelining
+
+**The specification** ([P1](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/miniprotocols.tex#L2180-L2208),
+`miniprotocols.tex` lines 2180-2208, PDF section "Pipelining of Mini
+Protocols"): a client sends several requests without waiting; the server
+follows its state machine and handles them in turn, unaware of pipelining;
+the mux keeps order, so replies match requests in order; a client must never
+overrun the server's ingress buffer.
+
+**The reference implementation** (R1, IntersectMBO/typed-protocols `8fa4ed2f`,
+`Peer.hs` and `Driver.hs` `runPipelinedPeerSender`): the client sends with
+`YieldPipelined` from a state where **it has agency**, and its view jumps to
+the end of that round trip. A counter `n` counts outstanding requests; a
+receiver thread handles their replies in order. Plain `Yield`, `Await`, and
+`Done` are allowed only at `n = Zero`, so the client's final message waits
+for every reply.
+
+**gOuroboros** (G1, `protocol/protocol.go`): the client sends a pipelined
+message from a state where **the peer has agency**, if that state sets
+`AllowPipelinedSend` and lists the type in `PipelinedMessageTypes`. The
+message is written at once and its state change is **deferred**: queued,
+counted (`pendingPipelinedRequests`), and applied in send order each time
+agency returns. Agency is signalled by a **token** in `sendReadyChan`. A
+message that cannot go now but is legal later is **held**. A reply that
+arrives while the client still has agency - before its request's deferred
+change - is admitted against an unanswered pipelined request
+(`reservePipelinedReply`), waits in `recvLoop` until the peer has agency, and
+is applied then. Block-fetch turns pipelining on with its `RequestPipelining`
+option; chain-sync allows it in `StCanAwait` (G2).
+
+The question is whether gOuroboros's mechanism behaves like the reference's
+against a server that follows the specification.
+
+### Run it
+
+```sh
+make engine         # small configs, seconds
+make engine-deep    # two requests pipelined at once, minutes
+```
+
+| Config | Result |
+| --- | --- |
+| `EnginePipeliningBlockFetch.cfg` | **Passes: 10,091 distinct states.** |
+| `EnginePipeliningChainSync.cfg` | **Passes: 3,563 distinct states.** |
+| `EnginePipeliningBlockFetchDeep.cfg` | **Passes: 105,743 distinct states**, three requests, two in flight at once, three-message batches. |
+| `EnginePipeliningChainSyncDeep.cfg` | **Passes: 30,812 distinct states**, likewise. |
+| `EnginePipeliningNoReservationBug.cfg` | Fails without reply reservations: a reply that arrives before its request's deferred change is refused. |
+
+Each passing config checks that nothing fails (`NothingFails`: no honest
+reply refused, no state change applied where it is illegal, no message the
+client may send rejected, nothing illegal reaching the server), that the
+final message never goes out while pipelined requests are outstanding
+(`FinalOnlyWhenNothingOutstanding`, the reference's `n = Zero` rule), that
+both sides agree whenever nothing is in flight, and that nothing deadlocks.
+
+Every interesting path is reached, which was checked by asserting each never
+happens and watching TLC find it: pipelined sends, replies admitted before
+their request's change, held messages, and the flush that runs when the state
+changes under `resolvePipelinedDequeue`, including a flush that stops at a
+change not yet legal.
+
+### What slice 2 found
+
+- **No bug.** Against a server that follows the specification, gOuroboros's
+  deferred changes, token, held messages, and reply reservations behave like
+  the reference's: replies are accepted in order, and the final message waits
+  for every reply, as `n = Zero` requires.
+- **The specification disagrees with the reference.** P1 says "pipelining is
+  used by the clients of all mini-protocols except Chain-Sync", but the
+  reference has a pipelined chain-sync client
+  (`ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/ChainSync/ClientPipelined.hs`
+  and `PipelineDecision.hs`). gOuroboros follows the reference.
+- **An inconsistency, not a bug.** `resolvePipelinedDequeue` checks only
+  `PipelinedMessageTypes`, not `AllowPipelinedSend`. Chain-sync lists
+  `MsgRequestNext` in `StMustReply` for receiving, without allowing pipelined
+  sends there, so a `MsgRequestNext` dequeued in `StCanAwait` is still sent,
+  pipelined, if the state has moved to `StMustReply` meanwhile. The model
+  includes this, and it is harmless: the server handles requests in turn, as
+  P1 says.
+
+### Two mistakes in the model, worth learning from
+
+Twice TLC reported a failure that was the model's fault, not gOuroboros's:
+
+1. `haveAgency` is reset to false at the top of **every** pass of
+   `sendLoop`'s wait loop. The first version kept it from an earlier pass, so
+   a pipelined message was treated as an ordinary one and applied in the
+   wrong state.
+2. When `stateLoop` refuses a state change, it **only returns an error**;
+   nothing changes. During a flush that is a harmless probe: the flush stops
+   and keeps the rest queued, and `resolvePipelinedDequeue` decides whether
+   it matters. The first version treated every refused change as a failure.
+
+Both were found by reading the trace step by step against the code. A model
+that disagrees with the code is wrong until the code says otherwise.
