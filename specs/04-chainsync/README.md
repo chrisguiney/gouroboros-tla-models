@@ -235,7 +235,7 @@ The reference never leaves chain-sync half-finished on a connection it keeps:
   `ouroboros-network/lib/Ouroboros/Network/PeerSelection/PeerStateActions.hs`
   lines 109-117 and 998-1030; `Diffusion/Policies.hs` lines 31-32).
 
-Pull request #3092 (in review) does the same. When `Stop` cannot deliver
+Pull request #3092 (merged) does the same. When `Stop` cannot deliver
 `MsgDone`, the client reports `ErrStoppedWithoutDone` and the connection
 closes.
 
