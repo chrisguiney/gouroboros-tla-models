@@ -51,11 +51,16 @@ CONSTANTS
     Mutation       \* "none", "ReapFirst" (POOLREAP before SNAP), or
                    \* "RewardFromSet" (the reward update reads set, not go)
 
+\* In English: the epochs the model runs through.
+\* Literally: "Epochs is defined as 0 through MaxEpoch."
 Epochs == 0..MaxEpoch
+\* Literally: "None is defined as negative 1."
 None == -1        \* "not recorded yet"
 
 \* A snapshot records the stake and VRF key it saw, and the epoch whose
 \* starting boundary took it (0 for the genesis snapshot).
+\* Literally: "Snap of s, k and t is defined as the record whose field stake is
+\*   s, whose field vrf is k, and whose field taken is t."
 Snap(s, k, t) == [stake |-> s, vrf |-> k, taken |-> t]
 
 VARIABLES
@@ -73,11 +78,27 @@ VARIABLES
     acceptedVrf,  \* acceptedVrf[e]: the key gOuroboros accepts, per LeaderSource
     rewardSnap    \* rewardSnap[x]: the snapshot paying for epoch x's blocks
 
+\* Literally: "vars is defined as the tuple of epoch, stake, vrf, futureVrf,
+\*   nextKey, regEpoch, stakeAt, mark, set, go, leaderSnap, leaderStake,
+\*   leaderVrf, acceptedVrf and rewardSnap."
 vars == <<epoch, stake, vrf, futureVrf, nextKey, regEpoch, stakeAt, mark,
           set, go, leaderSnap, leaderStake, leaderVrf, acceptedVrf, rewardSnap>>
 
 \* In English: at the start all three snapshots are the genesis one, taken
 \* "at epoch 0", with the pool's first key. Epoch 0's leaders come from it.
+\* Literally: "Init is defined as: epoch equals 0, and stake equals 1, and vrf
+\*   equals 1, and futureVrf equals 0, and nextKey equals 2, and regEpoch equals
+\*   the function that maps every k in 1 through MaxKeys to (if k equals 1 then
+\*   0, else None), and stakeAt equals the function that maps every e in Epochs
+\*   to (if e equals 0 then 1, else None), and mark equals Snap of 1, 1 and 0,
+\*   and set equals Snap of 1, 1 and 0, and go equals Snap of 1, 1 and 0, and
+\*   leaderSnap equals the function that maps every e in Epochs to (if e equals
+\*   0 then 0, else None), and leaderStake equals the function that maps every e
+\*   in Epochs to (if e equals 0 then 1, else None), and leaderVrf equals the
+\*   function that maps every e in Epochs to (if e equals 0 then 1, else None),
+\*   and acceptedVrf equals the function that maps every e in Epochs to (if e
+\*   equals 0 then 1, else None), and rewardSnap equals the function that maps
+\*   every e in Epochs to None."
 Init ==
     /\ epoch = 0
     /\ stake = 1
@@ -96,6 +117,11 @@ Init ==
     /\ rewardSnap  = [e \in Epochs |-> None]
 
 \* In English: during the epoch, delegations move the pool's stake.
+\* Literally: "ChangeStake is defined as: epoch is less than MaxEpoch, and there
+\*   exists an s in 0 through MaxStake such that s does not equal stake and
+\*   stake in the next state equals s, and epoch, vrf, futureVrf, nextKey,
+\*   regEpoch, stakeAt, mark, set, go, leaderSnap, leaderStake, leaderVrf,
+\*   acceptedVrf and rewardSnap are unchanged."
 ChangeStake ==
     /\ epoch < MaxEpoch
     /\ \E s \in 0..MaxStake :
@@ -107,6 +133,12 @@ ChangeStake ==
 
 \* In English: the pool re-registers with a fresh VRF key. The key waits in
 \* the future parameters until the next boundary (Pool-reReg, [R8]).
+\* Literally: "ReRegister is defined as: epoch is less than MaxEpoch, and
+\*   nextKey is less than or equal to MaxKeys, and futureVrf in the next state
+\*   equals nextKey, and nextKey in the next state equals nextKey plus 1, and
+\*   regEpoch in the next state equals regEpoch except that its nextKey entry is
+\*   epoch, and epoch, stake, vrf, stakeAt, mark, set, go, leaderSnap,
+\*   leaderStake, leaderVrf, acceptedVrf and rewardSnap are unchanged."
 ReRegister ==
     /\ epoch < MaxEpoch
     /\ nextKey <= MaxKeys
@@ -121,6 +153,24 @@ ReRegister ==
 \* then POOLREAP makes a re-registered key current [R6]. The set snapshot
 \* now elects epoch e's leaders [R9]. The reward update that runs during e
 \* reads go and pays for the blocks of epoch e-1 [R10].
+\* Literally: "Boundary is defined as: letting e be epoch plus 1; adopted be: if
+\*   futureVrf does not equal 0 then futureVrf, else vrf; markVrf be: if
+\*   Mutation equals "ReapFirst" then adopted, else vrf; newMark be Snap of
+\*   stake, markVrf and e; newSet be mark; newGo be set; payFrom be: if Mutation
+\*   equals "RewardFromSet" then newSet, else newGo: epoch is less than
+\*   MaxEpoch, and epoch in the next state equals e, and mark in the next state
+\*   equals newMark, and set in the next state equals newSet, and go in the next
+\*   state equals newGo, and vrf in the next state equals adopted, and futureVrf
+\*   in the next state equals 0, and stakeAt in the next state equals stakeAt
+\*   except that its e entry is stake, and leaderSnap in the next state equals
+\*   leaderSnap except that its e entry is newSet's taken, and leaderStake in
+\*   the next state equals leaderStake except that its e entry is newSet's
+\*   stake, and leaderVrf in the next state equals leaderVrf except that its e
+\*   entry is newSet's vrf, and acceptedVrf in the next state equals acceptedVrf
+\*   except that its e entry is: if LeaderSource equals "Set" then newSet's vrf,
+\*   else adopted; and rewardSnap in the next state equals rewardSnap except
+\*   that its e minus 1 entry is payFrom's taken, and stake, nextKey and
+\*   regEpoch are unchanged."
 Boundary ==
     LET e        == epoch + 1
         adopted  == IF futureVrf # 0 THEN futureVrf ELSE vrf
@@ -147,12 +197,21 @@ Boundary ==
     /\ UNCHANGED <<stake, nextKey, regEpoch>>
 
 \* In English: at the last epoch the model stops without deadlock.
+\* Literally: "Done is defined as: epoch equals MaxEpoch, and vars is
+\*   unchanged."
 Done ==
     /\ epoch = MaxEpoch
     /\ UNCHANGED vars
 
+\* In English: "Each step changes the stake, re-registers, crosses a boundary,
+\* or stops."
+\* Literally: "Next is defined as: ChangeStake or ReRegister or Boundary or
+\*   Done."
 Next == ChangeStake \/ ReRegister \/ Boundary \/ Done
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* Literally: "Spec is defined as: Init holds at the start, and always, every
+\*   step is a Next step or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
@@ -160,6 +219,9 @@ Spec == Init /\ [][Next]_vars
 
 \* In English: the blocks of every epoch are paid from the same snapshot
 \* that elected that epoch's leaders.
+\* Literally: "SameSnapshotElectsAndPays is defined as: for all x in Epochs, if
+\*   rewardSnap of x does not equal None, then rewardSnap of x equals leaderSnap
+\*   of x."
 SameSnapshotElectsAndPays ==
     \A x \in Epochs :
         rewardSnap[x] # None => rewardSnap[x] = leaderSnap[x]
@@ -167,6 +229,9 @@ SameSnapshotElectsAndPays ==
 \* In English: leaders of epoch e (e >= 2) are elected with the stake the
 \* pool had at the boundary into e-1, that is, at the end of epoch e-2. A
 \* change of delegation in epoch d counts for leader election from d+2.
+\* Literally: "LeaderStakeAge is defined as: for all e in Epochs, if e is
+\*   greater than or equal to 2 and leaderStake of e does not equal None, then
+\*   leaderStake of e equals stakeAt of e minus 1."
 LeaderStakeAge ==
     \A e \in Epochs :
         (e >= 2 /\ leaderStake[e] # None) => leaderStake[e] = stakeAt[e - 1]
@@ -174,22 +239,32 @@ LeaderStakeAge ==
 \* In English: a VRF key registered in epoch r is required in block headers
 \* no earlier than epoch r+3. Until then the previous key stays the leader
 \* key.
+\* Literally: "VrfKeyDelay is defined as: for all e in Epochs and all k in 1
+\*   through MaxKeys, if leaderVrf of e equals k and k is greater than 1, then e
+\*   is greater than or equal to regEpoch of k plus 3."
 VrfKeyDelay ==
     \A e \in Epochs, k \in 1..MaxKeys :
         (leaderVrf[e] = k /\ k > 1) => e >= regEpoch[k] + 3
 
 \* In English: the key gOuroboros accepts in a header is the key the ledger
 \* requires: the caller answers LeaderPoolVrfKeyHash from the set snapshot.
+\* Literally: "GoLeaderVrfMatches is defined as: for all e in Epochs,
+\*   acceptedVrf of e equals leaderVrf of e."
 GoLeaderVrfMatches ==
     \A e \in Epochs : acceptedVrf[e] = leaderVrf[e]
 
 \* Reachability probe: claims a fresh key is never required in a header.
 \* Expected to fail, so VrfKeyDelay is not vacuous.
+\* Literally: "ProbeNewKeyNeverUsed is defined as: for all e in Epochs, if
+\*   leaderVrf of e does not equal None, then leaderVrf of e equals 1."
 ProbeNewKeyNeverUsed ==
     \A e \in Epochs : leaderVrf[e] # None => leaderVrf[e] = 1
 
 \* Reachability probe: claims the leader stake never differs from the live
 \* stake, which fails as soon as a delegation moves between snapshots.
+\* Literally: "ProbeLeaderStakeAlwaysLive is defined as: for all e in Epochs, if
+\*   e equals epoch and leaderStake of e does not equal None, then leaderStake
+\*   of e equals stake."
 ProbeLeaderStakeAlwaysLive ==
     \A e \in Epochs : (e = epoch /\ leaderStake[e] # None) => leaderStake[e] = stake
 =============================================================================
