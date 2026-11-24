@@ -28,6 +28,9 @@ Read [Model 01](../01-keepalive/README.md) first: the receive table, the
   query call acquires a snapshot first if it has none, and leaves it
   acquired. `Acquire()` sends `[1]` from Idle or from Acquired; from
   Acquired those bytes are `MsgAwaitAcquire` [R2]. `Stop()` sends `MsgDone`.
+  `Stop()` takes the same `busyMutex`; on PR #3154 it first closes a
+  channel that ends any call waiting for the server, and then closes the
+  protocol without `MsgDone`, because the server holds agency.
   `NewClient` puts `AcquireTimeout` (5 s) on Acquiring and `QueryTimeout`
   (30 s) on Busy.
 - The server (`server.go`) answers inside its message handler: an acquire,
@@ -49,7 +52,11 @@ Read [Model 01](../01-keepalive/README.md) first: the receive table, the
    message of the client's next run, which only a restarted server reads.
    Written as `ENABLED Recv("Server")`, so it says nothing about how the
    server restarts, only that it can read.
-6. Does anything get stuck? (TLC's deadlock check; a client waiting for a
+6. **`StopNeverWaitsOnPeer`**: can a `Stop()` that has been called always
+   take its next step without the server doing anything? The call lock is
+   modelled (`lock`): every call holds it from its send until the client
+   holds agency again, the protocol fails, or Stop cancels it.
+7. Does anything get stuck? (TLC's deadlock check; a client waiting for a
    mempool change that the model has run out of is an allowed end,
    `WaitsForever`.)
 
@@ -61,16 +68,17 @@ Two constants model the version gate on `MsgGetMeasures` [R6]:
 
 | Config | Setting | States (distinct) | Result |
 | --- | --- | --- | --- |
-| `LocalTxMonitor.cfg` | reference client and node; 2 runs, 2 queries, 2 mempool changes | 3,492 | all hold |
-| `LocalTxMonitorGouroboros.cfg` | gOuroboros client and server, with the Stop fix; 1 run, 3 queries | 3,583 | all hold |
-| `LocalTxMonitorRogue.cfg` | one rogue message | 50,067 | `RepliesMatchQueries` holds |
+| `LocalTxMonitor.cfg` | reference client and node; 2 runs, 2 queries, 2 mempool changes | 10,647 | all hold |
+| `LocalTxMonitorGouroboros.cfg` | gOuroboros client and server, with the Stop fixes; 1 run, 3 queries | 11,602 | all hold |
+| `LocalTxMonitorRogue.cfg` | one rogue message | 160,884 | `RepliesMatchQueries` holds |
 | `LocalTxMonitorTable.cfg` | prints the receive table (192 rows) | 12 | passes |
-| `LocalTxMonitorTimeoutBug.cfg` | **gOuroboros client against the node** | 140 | `NoFailures` violated in 8 steps |
-| `LocalTxMonitorStopBug.cfg` | **gOuroboros `Stop()` after a query** | 35 | `NoFailures` violated |
+| `LocalTxMonitorTimeoutBug.cfg` | **gOuroboros client against the node** | 664 | `NoFailures` violated in 8 steps |
+| `LocalTxMonitorStopBug.cfg` | **gOuroboros `Stop()` after a query** | 209 | `NoFailures` violated |
+| `LocalTxMonitorStopWaitBug.cfg` | **gOuroboros `Stop()` at PR #3154 `e9996ade`, waiting on the call lock** | 6 | `StopNeverWaitsOnPeer` violated |
 | `LocalTxMonitorMeasuresBug.cfg` | reference client against gOuroboros server | 59 | `NoFailures` violated |
 | `LocalTxMonitorRestartBug.cfg` | gOuroboros server on main, second run | 21 | `NewRunServed` violated |
 | `LocalTxMonitorAwaitBug.cfg` | gOuroboros server answers await at once | 50 | `AwaitGetsNewSnapshot` violated |
-| `LocalTxMonitorFixed.cfg` | gOuroboros with the get-measures, await and restart fixes, plus the open Stop and await-timeout client fixes; as the reference config | 3,492 | all hold |
+| `LocalTxMonitorFixed.cfg` | gOuroboros with the get-measures, await and restart fixes, plus the open Stop and await-timeout client fixes and Stop ending a waiting call; as the reference config | 10,647 | all hold |
 | `LocalTxMonitorOldNode.cfg` | fixed client against a node before `NodeToClientV_20` | 452 | all hold |
 | `LocalTxMonitorOldNodeBug.cfg` | the same, client does not check the version | 369 | `NoFailures` violated |
 
@@ -88,6 +96,22 @@ reference pair. gOuroboros has two defects and three deviations:
   Acquired, so the client's own send loop refuses it and reports a protocol
   error. Reproduced in Go: "message \*localtxmonitor.MsgDone not allowed in
   current protocol state Acquired".
+- **Stop waits for the server (defect, found in review of PR #3154).**
+  With the re-acquire untimed, `Acquire()` holds `busyMutex` while
+  `MsgAwaitAcquire` waits for a mempool change, and `Stop()` took the same
+  mutex before acting, so only the node's answer let it return. The model
+  shared the defect: its `ClientStop` started "only while the client holds
+  agency", so it never had Stop called during a wait. It now models the
+  lock and Stop's request, cancel and run as separate steps, and
+  `StopNeverWaitsOnPeer` fails in two steps (acquire, then Stop) when Stop
+  cannot cancel (`StopCancelsWait = FALSE`). Any call waiting for the server
+  shows it; the await is the case with no bound. PR #3154 head `615e2a84`
+  closes a channel before taking the mutex: a waiting call returns
+  `ErrProtocolShuttingDown`, and Stop closes the protocol without
+  `MsgDone`, as a reference client thread that is cancelled sends nothing
+  (`StopCancelsWait = TRUE`, the `Closed` client view). Go:
+  `TestStopDoesNotWaitForPeer` (re-acquire and each query; fails before the
+  fix with "Stop waited for the node to answer").
 - **No `MsgGetMeasures`, no restart, await answered at once
   (deviations).** See the comparison table. Branches fix all three (see
   Go tests); `LocalTxMonitorFixed.cfg` is gOuroboros with them, and checks
@@ -107,6 +131,7 @@ reference pair. gOuroboros has two defects and three deviations:
 | `LocalTxMonitorBusyKindsBug.cfg` | Busy remembers its query (`matchReply`) | `RepliesMatchQueries` |
 | `LocalTxMonitorAgencyBug.cfg` | the same | `NeverBothHaveAgency` |
 | `LocalTxMonitorStopBug.cfg` | Stop releases first | `NoFailures` |
+| `LocalTxMonitorStopWaitBug.cfg` | Stop ends a waiting call | `StopNeverWaitsOnPeer` |
 | `LocalTxMonitorAwaitBug.cfg` | the server waits for a change | `AwaitGetsNewSnapshot` |
 | `LocalTxMonitorRestartBug.cfg` | the server restarts | `NewRunServed` |
 | `LocalTxMonitorOldNodeBug.cfg` | the client checks the version | `NoFailures` |
@@ -115,8 +140,9 @@ Reachability probes, each violated on the reference config, so the passing
 run does reach: the server blocked on an await
 (`ProbeServerNeverBlocks`), an answered await (`ProbeAwaitNeverAnswered`),
 `StBusy GetMeasures` (`ProbeNoGetMeasures`), a second run
-(`ProbeNoSecondRun`), and Stop's release-then-done
-(`ProbeNoReleaseThenDone`). One config each,
+(`ProbeNoSecondRun`), Stop's release-then-done
+(`ProbeNoReleaseThenDone`), and Stop cancelling a waiting
+`MsgAwaitAcquire` (`ProbeNoCancelledAwait`). One config each,
 `LocalTxMonitorProbe*Bug.cfg`.
 
 The rogue configs set `CHECK_DEADLOCK FALSE`: a rogue `MsgAcquire` to a
@@ -179,6 +205,12 @@ Probes on the reference config: `ProbeServerNeverBlocks`,
 
 ## The modelling mistakes
 
+- `ClientStop` was enabled only while the client held agency, on the
+  assumption that Stop waits for the call in progress. That hid the hang
+  in review of PR #3154: with the await untimed, the wait has no bound.
+  The call lock is now a variable, Stop is called at any time, and
+  `StopNeverWaitsOnPeer` checks it.
+
 - The first `LocalTxMonitorRogue.cfg` run reported a deadlock: a rogue
   `MsgAcquire` restarted a server whose client was done, and the answer was
   never read. That is a stuck connection, not a protocol property; the rogue
@@ -225,6 +257,7 @@ callers, `MsgDone` from Idle in submission, and accept/reject round trips.
 | `MsgGetMeasures` before `NodeToClientV_20` | not stated | the encoder refuses both messages [R6]; the node now negotiates only V_23, so it never arises there | with the fix: the client returns an error without sending; the server fails the protocol | Follows the reference |
 | Timeouts | "No timeouts" [S4], [S3 submission] | none defined | monitor: 5 s / 30 s; submission: 30 s | Deviation; harmful where the node may wait (await; full mempool) |
 | `MsgDone` from Acquired | not allowed [S3] | not expressible [R4] | `Stop()` sends it and fails | **Defect** (fixed) |
+| Stop while waiting for the server | no client message from `StAcquiring` or `StBusy` [S2] | the client thread is cancelled; nothing is sent [R4] | PR #3154 `e9996ade`: `Stop()` waits for the answer under `busyMutex`, forever for an await; `615e2a84`: ends the wait and closes without `MsgDone` | **Defect** (fixed on PR #3154) |
 | Server after `MsgDone` | restarts [S5] | inbound governor restarts it [R7] | stays done | Deviation; fixed for both servers on `fix/localtxmonitor-server-restart` and `fix/localtxsubmission-server-restart` |
 | Receiving while holding agency | not stated | not read until peer has agency | refused at once | Deviation, as in Model 01 |
 

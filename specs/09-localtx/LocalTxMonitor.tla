@@ -84,6 +84,10 @@ CONSTANTS
                          \* FALSE: no timeouts, as [S4] and [R1] say
     StopReleases,        \* TRUE: Stop from StAcquired sends MsgRelease then MsgDone
                          \* FALSE: gOuroboros's Stop, which sends MsgDone from any state
+    StopCancelsWait,     \* TRUE: Stop ends a call that waits for the server, then closes
+                         \* the protocol without a message (a reference client is a thread
+                         \* that is cancelled; it cannot send in StAcquiring or StBusy [R4])
+                         \* FALSE: Stop takes the call lock first, so it waits for the reply
     ClientSendsMeasures, \* TRUE: the client may send MsgGetMeasures (a reference client may)
                          \* FALSE: gOuroboros's client, which has no call for it
     ServerKnowsMeasures, \* TRUE: the server understands MsgGetMeasures [R2][R3]
@@ -213,10 +217,16 @@ VARIABLES
     result,     \* <<query, reply>> the client last handed to its caller
     queries,    \* queries sent so far
     runs,       \* client runs started so far on this connection
-    rogueLeft   \* rogue messages the misbehaving peer may still inject
+    rogueLeft,  \* rogue messages the misbehaving peer may still inject
+    lock,       \* the client's call lock (busyMutex): "free", or held by a "call" or by "stop"
+    stop,       \* the client's Stop: "no", "requested" (called, not yet returned), or "done"
+    cancelled   \* TRUE once Stop ended a call that was waiting for the server
 
 vars == <<view, inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
-          sameSnap, result, queries, runs, rogueLeft>>
+          sameSnap, result, queries, runs, rogueLeft, lock, stop, cancelled>>
+
+\* The variables only the client's call lock and Stop touch.
+stopVars == <<lock, stop, cancelled>>
 
 \* In English: "At the start both sides think it is StIdle, nothing is in
 \* flight, the mempool is snapshot 0, and nothing has been answered."
@@ -233,6 +243,9 @@ Init ==
     /\ queries = 0
     /\ runs = 1
     /\ rogueLeft = RogueMessages
+    /\ lock = "free"
+    /\ stop = "no"
+    /\ cancelled = FALSE
 
 \* In English: "The server is waiting, as [R5] says it must, for the mempool
 \* to change: it serves an MsgAwaitAcquire and the mempool is still the
@@ -247,6 +260,7 @@ ServerBlocked ==
 \* are done and the client may start no more runs."
 Ended ==
     \/ \E r \in Roles : view[r] \in Failures
+    \/ view["Client"] = "Closed" /\ stop = "done"
     \/ /\ view["Client"] = "StDone" /\ runs = MaxRuns
        /\ view["Server"] = "StDone" /\ inbox["Server"] = <<>>
 
@@ -265,11 +279,13 @@ WaitsForever ==
 \* sends the same bytes in both states."
 ClientAcquire ==
     /\ view["Client"] \in {"StIdle", "StAcquired"}
+    /\ lock = "free" /\ stop = "no"
+    /\ lock' = "call"
     /\ cliAwait' = (view["Client"] = "StAcquired")      \* next, remember whether this is an await
     /\ view' = [view EXCEPT !["Client"] = "StAcquiring"]
     /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgAcquire", 0))]
     /\ UNCHANGED <<mempool, srvSnap, srvAwait, cliSnap, sameSnap, result,
-                   queries, runs, rogueLeft>>
+                   queries, runs, rogueLeft, stop, cancelled>>
 
 \* In English: "The client may send MsgGetMeasures: it has a call for it,
 \* and either the handshake agreed NodeToClientV_20 or later or the client
@@ -283,41 +299,79 @@ ClientQuery(q) ==
     /\ view["Client"] = "StAcquired"
     /\ queries < MaxQueries
     /\ q /= "MsgGetMeasures" \/ MayAskMeasures
+    /\ lock = "free" /\ stop = "no"
+    /\ lock' = "call"
     /\ view' = [view EXCEPT !["Client"] = BusyOf(q)]
     /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg(q, 0))]
     /\ queries' = queries + 1
     /\ UNCHANGED <<mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap,
-                   result, runs, rogueLeft>>
+                   result, runs, rogueLeft, stop, cancelled>>
 
 \* In English: "From StAcquired the client can release the snapshot."
 ClientRelease ==
     /\ view["Client"] = "StAcquired"
+    /\ lock = "free" /\ stop = "no"
     /\ view' = [view EXCEPT !["Client"] = "StIdle"]
     /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgRelease", 0))]
     /\ UNCHANGED <<mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap,
-                   result, queries, runs, rogueLeft>>
+                   result, queries, runs, rogueLeft, stopVars>>
 
-\* In English: "Stop. From StIdle the client sends MsgDone [R4]. From
-\* StAcquired: with StopReleases it sends MsgRelease and then MsgDone; without
-\* it (gOuroboros's Stop) it tries to send MsgDone, which has no row from
-\* StAcquired, so its own send loop refuses it and tears the connection
-\* down." Stop waits for the call in progress, so it starts only while the
-\* client holds agency.
+\* In English: "Stop is called. It may be called at any time during a run,
+\* including while another call waits for the server."
+StopRequest ==
+    /\ stop = "no"
+    /\ view["Client"] \in States \ {"StDone"}
+    /\ stop' = "requested"
+    /\ UNCHANGED <<view, inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
+                   sameSnap, result, queries, runs, rogueLeft, lock, cancelled>>
+
+\* In English: "With StopCancelsWait, Stop ends a call that holds the lock
+\* waiting for the server's answer; the call returns, freeing the lock."
+StopCancel ==
+    /\ StopCancelsWait
+    /\ stop = "requested"
+    /\ lock = "call"
+    /\ lock' = "free"
+    /\ cancelled' = TRUE
+    /\ UNCHANGED <<view, inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
+                   sameSnap, result, queries, runs, rogueLeft, stop>>
+
+\* In English: "Stop runs once it holds the call lock. If it cancelled a
+\* waiting call, the client may not send (the server has agency), so it
+\* closes the protocol without a message. If the protocol already failed,
+\* there is nothing to send. From StIdle the client sends MsgDone [R4]. From
+\* StAcquired: with StopReleases it sends MsgRelease and then MsgDone;
+\* without it (gOuroboros's Stop on main) it tries to send MsgDone, which
+\* has no row from StAcquired, so its own send loop refuses it and tears the
+\* connection down." Taking and freeing the lock is one step: nothing in
+\* Stop waits for the server once it holds it.
 ClientStop ==
-    \/ /\ view["Client"] = "StIdle"
-       /\ view' = [view EXCEPT !["Client"] = "StDone"]
-       /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgDone", 0))]
-    \/ /\ view["Client"] = "StAcquired"
-       /\ StopReleases
-       /\ view' = [view EXCEPT !["Client"] = "StDone"]
-       /\ inbox' = [inbox EXCEPT !["Server"] =
-                        @ \o <<Msg("MsgRelease", 0), Msg("MsgDone", 0)>>]
-    \/ /\ view["Client"] = "StAcquired"
-       /\ ~StopReleases
-       /\ view' = [view EXCEPT !["Client"] = "Violation"]   \* refused by its own send loop
-       /\ UNCHANGED inbox
+    /\ stop = "requested"
+    /\ lock = "free"
+    /\ stop' = "done"
+    /\ \/ /\ cancelled
+          /\ view["Client"] \in States
+          /\ view' = [view EXCEPT !["Client"] = "Closed"]
+          /\ UNCHANGED inbox
+       \/ /\ view["Client"] \in Failures
+          /\ UNCHANGED <<view, inbox>>
+       \/ /\ ~cancelled
+          /\ view["Client"] = "StIdle"
+          /\ view' = [view EXCEPT !["Client"] = "StDone"]
+          /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgDone", 0))]
+       \/ /\ ~cancelled
+          /\ view["Client"] = "StAcquired"
+          /\ StopReleases
+          /\ view' = [view EXCEPT !["Client"] = "StDone"]
+          /\ inbox' = [inbox EXCEPT !["Server"] =
+                           @ \o <<Msg("MsgRelease", 0), Msg("MsgDone", 0)>>]
+       \/ /\ ~cancelled
+          /\ view["Client"] = "StAcquired"
+          /\ ~StopReleases
+          /\ view' = [view EXCEPT !["Client"] = "Violation"]   \* refused by its own send loop
+          /\ UNCHANGED inbox
     /\ UNCHANGED <<mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap,
-                   result, queries, runs, rogueLeft>>
+                   result, queries, runs, rogueLeft, lock, cancelled>>
 
 \* In English: "When the client's run is over and it may start another, it
 \* can."
@@ -326,8 +380,9 @@ ClientRestart ==
     /\ runs < MaxRuns
     /\ view' = [view EXCEPT !["Client"] = "StIdle"]
     /\ runs' = runs + 1
+    /\ stop' = "no"
     /\ UNCHANGED <<inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
-                   sameSnap, result, queries, rogueLeft>>
+                   sameSnap, result, queries, rogueLeft, lock, cancelled>>
 
 \* --- The server. ---------------------------------------------------------
 
@@ -342,7 +397,7 @@ ServerAcquired ==
     /\ srvSnap' = mempool
     /\ srvAwait' = FALSE
     /\ UNCHANGED <<mempool, cliSnap, cliAwait, sameSnap, result, queries,
-                   runs, rogueLeft>>
+                   runs, rogueLeft, stopVars>>
 
 \* In English: "In a busy state the server answers with that state's reply
 \* [R4] ServerStBusy."
@@ -352,7 +407,7 @@ ServerReply ==
     /\ inbox' = [inbox EXCEPT !["Client"] =
                      Append(@, Msg(ReplyOf(QueryOf(view["Server"])), 0))]
     /\ UNCHANGED <<mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap,
-                   result, queries, runs, rogueLeft>>
+                   result, queries, runs, rogueLeft, stopVars>>
 
 \* --- The node's mempool. -------------------------------------------------
 
@@ -362,7 +417,7 @@ MempoolChange ==
     /\ mempool < MaxChanges
     /\ mempool' = mempool + 1
     /\ UNCHANGED <<view, inbox, srvSnap, srvAwait, cliSnap, cliAwait,
-                   sameSnap, result, queries, runs, rogueLeft>>
+                   sameSnap, result, queries, runs, rogueLeft, stopVars>>
 
 \* --- Reading. ------------------------------------------------------------
 
@@ -372,7 +427,9 @@ MempoolChange ==
 \* that reads MsgAcquire notes whether it came in StAcquired (an await). A
 \* client that reads MsgAcquired notes the snapshot, and whether an await
 \* was answered with the snapshot it already held. A client that reads a
-\* reply in a busy state hands <<query, reply>> to its caller."
+\* reply in a busy state hands <<query, reply>> to its caller. A call
+\* waiting on the client returns, freeing the lock, once the client holds
+\* agency again or the protocol failed."
 Recv(r) ==
     /\ inbox[r] /= <<>>
     /\ \/ Awaiting(r, view[r])
@@ -391,8 +448,12 @@ Recv(r) ==
                            /\ next = "StAcquired" /\ cliAwait /\ m.snap = cliSnap
          /\ result' = IF r = "Client" /\ s \in BusyStates /\ next = "StAcquired"
                           THEN <<QueryOf(s), m.type>> ELSE result
+         /\ lock' = IF r = "Client" /\ lock = "call"
+                        /\ (next \in Failures \/ Agency(next) = "Client")
+                        THEN "free" ELSE lock
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]
-    /\ UNCHANGED <<mempool, srvSnap, cliAwait, queries, runs, rogueLeft>>
+    /\ UNCHANGED <<mempool, srvSnap, cliAwait, queries, runs, rogueLeft,
+                   stop, cancelled>>
 
 \* In English: "While the rogue peer has allowance left, it can put any
 \* message into r's inbox."
@@ -401,7 +462,7 @@ Inject(r, m) ==
     /\ inbox' = [inbox EXCEPT ![r] = Append(@, m)]
     /\ rogueLeft' = rogueLeft - 1
     /\ UNCHANGED <<view, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
-                   sameSnap, result, queries, runs>>
+                   sameSnap, result, queries, runs, stopVars>>
 
 \* --- Timeouts. -----------------------------------------------------------
 \* [S4] and [R1] set no timeouts. gOuroboros's client sets AcquireTimeout on
@@ -410,21 +471,25 @@ Inject(r, m) ==
 \* to change: that wait has no bound, so any finite timer can run out.
 \*
 \* In English: "With client timeouts, a client waiting in StAcquiring or a
-\* busy state, with nothing to read, gives up while the server is blocked."
+\* busy state, with nothing to read, gives up while the server is blocked.
+\* The waiting call then returns, freeing the lock."
 Timeout ==
     /\ ClientTimeouts
     /\ view["Client"] \in {"StAcquiring"} \cup BusyStates
     /\ inbox["Client"] = <<>>
     /\ ServerBlocked
     /\ view' = [view EXCEPT !["Client"] = "TimedOut"]
+    /\ lock' = IF lock = "call" THEN "free" ELSE lock
     /\ UNCHANGED <<inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
-                   sameSnap, result, queries, runs, rogueLeft>>
+                   sameSnap, result, queries, runs, rogueLeft, stop, cancelled>>
 
-\* In English: "A step is a client call, a server answer, a mempool change,
-\* a read, a timeout, a rogue injection, or, once nothing more can happen,
-\* nothing changing (so that TLC does not report the end as a deadlock)."
+\* In English: "A step is a client call, a step of Stop, a server answer, a
+\* mempool change, a read, a timeout, a rogue injection, or, once nothing
+\* more can happen, nothing changing (so that TLC does not report the end as
+\* a deadlock)."
 Next ==
-    \/ ClientAcquire \/ ClientRelease \/ ClientStop \/ ClientRestart
+    \/ ClientAcquire \/ ClientRelease \/ ClientRestart
+    \/ StopRequest \/ StopCancel \/ ClientStop
     \/ \E q \in Queries : ClientQuery(q)
     \/ ServerAcquired \/ ServerReply
     \/ MempoolChange
@@ -439,7 +504,7 @@ Spec == Init /\ [][Next]_vars
 (* Invariants. *)
 
 TypeOK ==
-    /\ view \in [Roles -> States \cup Failures]
+    /\ view \in [Roles -> States \cup Failures \cup {"Closed"}]
     /\ inbox \in [Roles -> Seq(Messages)]
     /\ mempool \in Snaps /\ srvSnap \in Snaps /\ cliSnap \in Snaps
     /\ srvAwait \in BOOLEAN /\ cliAwait \in BOOLEAN /\ sameSnap \in BOOLEAN
@@ -447,6 +512,9 @@ TypeOK ==
     /\ queries \in 0..MaxQueries
     /\ runs \in 1..MaxRuns
     /\ rogueLeft \in 0..RogueMessages
+    /\ lock \in {"free", "call", "stop"}
+    /\ stop \in {"no", "requested", "done"}
+    /\ cancelled \in BOOLEAN
 
 \* In English: "No side has hung up or given up."
 NoFailures == \A r \in Roles : view[r] \notin Failures
@@ -479,7 +547,15 @@ NeverBothHaveAgency ==
 \* say to another query, before the answer arrives."
 BusyViewsAgree ==
     view["Server"] \in BusyStates =>
-        view["Client"] \in BusyStates \cup Failures
+        view["Client"] \in BusyStates \cup Failures \cup {"Closed"}
+
+\* In English: "A Stop that has been called can always take its next step
+\* without the server doing anything: it never waits on the peer." A Stop
+\* that has to wait for the lock while a call waits for an answer the
+\* server may withhold (an MsgAwaitAcquire with no mempool change, or a
+\* query with no QueryTimeout) violates this.
+StopNeverWaitsOnPeer ==
+    stop = "requested" => ENABLED (StopCancel \/ ClientStop)
 
 \* In English: "In every step, a side that has hung up stays hung up."
 FailuresAreFinal ==
@@ -502,6 +578,9 @@ ProbeNoGetMeasures == \A r \in Roles : view[r] /= "StBusyGetMeasures"
 
 \* In English: "The client never starts a second run."
 ProbeNoSecondRun == runs = 1
+
+\* In English: "Stop never cancels a waiting MsgAwaitAcquire."
+ProbeNoCancelledAwait == ~(cancelled /\ cliAwait /\ view["Client"] = "Closed")
 
 \* In English: "Stop never releases a snapshot before MsgDone."
 ProbeNoReleaseThenDone ==
