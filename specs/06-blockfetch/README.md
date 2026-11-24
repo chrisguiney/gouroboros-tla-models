@@ -63,6 +63,7 @@ Three callers, an honest server that may answer any range with
 | `BlockFetchQueue.cfg`: gOuroboros today, questions 1-4 | 7,702 | passes |
 | `BlockFetchQueueRefusedBug.cfg`: gOuroboros today, question 5 | | **fails** |
 | `BlockFetchQueueSkipUnsent.cfg`: the drain leaves unsent requests to their callers, all five | 6,657 | passes |
+| `BlockFetchQueueDeferSending.cfg`: the fix on branch `fix/blockfetch-no-callback-for-unsent`, all five | 62,932 | passes |
 
 Questions 1-4 hold. Answer order is wire order, so the head of the queue is
 always the request being answered, and `MsgNoBlocks` mid-pipeline resolves
@@ -78,8 +79,25 @@ a protocol fault: the wire is never involved. Dingo already works around it
 a queued request during protocol shutdown while its send is still failing"),
 by leaving a marker that the failing `RequestRange` path then never removes.
 `BlockFetchQueueSkipUnsent.cfg` shows one design that closes it; returning the
-id with a nil error once the request has been resolved is another. Either
-changes what `RequestRange` promises, so it is written up, not fixed.
+id with a nil error once the request has been resolved is another.
+
+### Fixed
+
+Branch `fix/blockfetch-no-callback-for-unsent` (gOuroboros) marks a request
+as sending from its queue append until its send returns. A drain that finds
+a request still sending takes it out of the queue without resolving it and
+records the drain's error on it; the caller then drops it if its send failed,
+or resolves it with that error if its send succeeded, before returning the
+id. In the model (`DrainDefersSending`) the send's outcome and the caller
+clearing its mark are separate steps (`Send`, `SendFinish`), because in Go a
+drain can run between them; `BlockFetchQueueDeferSending.cfg` passes all
+five questions, and `ProbeNeverHandedOverAndSent` shows the path where the
+caller resolves a handed-over request is reached.
+`TestRequestRangeRefusedAtShutdownGetsNoRangeDone` fails on `61046085` with
+`RangeDoneFunc` called for the refused request;
+`TestRequestRangeDrainedBeforeSendIsResolvedOnce` guards the other outcome.
+`RangeDoneFunc`'s doc comment now says it runs exactly once for each id
+`RequestRange` returned and never for a call that returned an error.
 
 ### Checking the checks
 
@@ -92,12 +110,15 @@ Each safeguard has a switch; turning it off must break an invariant:
 | `BlockFetchQueueKeepHeadTwiceBug.cfg` | the same | `ResolvedAtMostOnce` |
 | `BlockFetchQueueNoStartBug.cfg` | `MsgStartBatch` marks its request started | `HonestAnswersAccepted` |
 | `BlockFetchQueueNoDrainBug.cfg` | the shutdown drain | `EveryReturnedIdResolved` |
+| `BlockFetchQueueDeferSendingNoResolveBug.cfg` | with the fix, the caller resolves a request a drain handed to it | `EveryReturnedIdResolved` |
 
 The probes at the bottom of the `.tla` each claim something never happens,
 and TLC finds each one with the `BlockFetchQueue.cfg` constants: more than one
 request queued (`ProbeNeverPipelined`), a refused caller
 (`ProbeNeverRefused`), and `MsgNoBlocks` arriving with another request
-queued behind it (`ProbeNoBlocksMidPipeline`). To run one, copy the config and
+queued behind it (`ProbeNoBlocksMidPipeline`); with the
+`BlockFetchQueueDeferSending.cfg` constants, a request handed over by a drain
+whose send then succeeds (`ProbeNeverHandedOverAndSent`). To run one, copy the config and
 replace its `INVARIANT` lines with the probe's name.
 
 ### Covered by existing Go tests
@@ -177,7 +198,7 @@ after it; removing only the `Start` refusal fails the second test again.
 | Size limit, `StBusy` | 65,535 [B1] | `smallByteLimit` 65,535 [R2] | 2,500,000: an early `MsgBlock` can be judged against `StBusy` | Deviation, needed by gOuroboros's engine |
 | Size limit, `StStreaming` | 2,500,000 [B1] | `largeByteLimit` 2,500,000 [R2] | 2,500,000 | Agree |
 | Timeout, `StIdle` | none [B1] | `waitForever` [R2] | none | Agree |
-| Timeout, `StBusy` | 60 s [B1] | `longWait` 60 s [R2] | `StateMap` 60 s, but `NewConfig`'s `BatchStartTimeout` default of **5 s** replaces it in both client and server | Deviation: stricter; an honest server slower than 5 s loses the connection |
+| Timeout, `StBusy` | 60 s [B1] | `longWait` 60 s [R2] | `StateMap` 60 s, but `NewConfig`'s `BatchStartTimeout` default of **5 s** replaces it in both client and server | Deviation: stricter; an honest server slower than 5 s loses the connection. Fixed on branch `fix/blockfetch-busy-timeout`: the default is `BusyTimeout`, 60 s (`TestNewConfigTimeoutsMatchReference`) |
 | Timeout, `StStreaming` | 60 s [B1] | `longWait` 60 s [R2] | 60 s (`BlockTimeout`) | Agree |
 | Who is timed? | "how much time the receiver side can wait" [B1] | Only `recvMessage` arms the timer [R5] | The engine arms it in every state with agency, so a **server** whose `RequestRangeFunc` takes longer than `BatchStartTimeout` times itself out (checked: "timeout waiting on transition from protocol state Busy" on the server) | Deviation, engine-wide; reported, not fixed |
 | Server reading a pipelined `MsgRequestRange` | The server follows its state machine, unaware of pipelining [P1] | Read when back in `StIdle` | Admitted at once (`PipelinedMessageTypes`), served after the current range | Agree in effect |
@@ -243,6 +264,7 @@ after `Stop` has queued `MsgClientDone`.
 cd specs/06-blockfetch
 ../../bin/tlc -config BlockFetchQueue.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueSkipUnsent.cfg BlockFetchQueue.tla
+../../bin/tlc -config BlockFetchQueueDeferSending.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchLifecycleRefuse.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleCloseOnlyLive.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleClose.cfg BlockFetchLifecycle.tla
@@ -253,6 +275,7 @@ cd specs/06-blockfetch
 ../../bin/tlc -config BlockFetchQueueKeepHeadTwiceBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueNoStartBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueNoDrainBug.cfg BlockFetchQueue.tla
+../../bin/tlc -config BlockFetchQueueDeferSendingNoResolveBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchLifecycleStopBug.cfg BlockFetchLifecycle.tla
 ../../bin/tlc -config BlockFetchLifecycleCloseOnlyBug.cfg BlockFetchLifecycle.tla
 ```
