@@ -49,7 +49,11 @@ gOuroboros (`origin/main` at `61046085`):
 9. Simultaneous open (`HandshakeSimOpen.tla`): when both sides dial at once,
    do both pick the same version (`SymmetricOutcome`, `SimAcceptsHighest`,
    `SameStateWhenQuiet`), and end with the same agreed version data
-   (`SimAgreedData`)?
+   (`SimAgreedData`)? At goroutine and pipe granularity
+   (`HandshakeSimOpenDelivery.tla`), is every proposal written
+   (`NoDroppedProposal`), does each side report its own decision
+   (`EndsWithOwnDecision`), and do both sides end (`BothSidesEnd`, and TLC's
+   deadlock check)?
 10. Does `MsgAcceptVersion` carry the negotiated data
     (`AcceptCarriesNegotiatedData`)?
 11. Does every receiver reject a version table whose recognised keys are
@@ -85,6 +89,13 @@ client table (288) against every server table (24), 6,912 starting pairs
 | `HandshakeSimOpenEarlyReadBug.cfg` (the fix without the wait in `Client.Start`) | | **fails** `NoViolations` |
 | `HandshakeSimOpenAsymmetricBug.cfg` (one side's data undecodable by the other) | | **fails** `SymmetricOutcome` |
 | `HandshakeSimOpenRawPeerDataBug.cfg` (PR #3127 at `78792c96`: each side ends with the peer's raw data) | | **fails** `SimAgreedData` |
+| `HandshakeSimOpenDelivery.cfg` (PR #3127 at `97708901`, the Go test harness: nothing closes the pipe) | 61 | passes, `BothSidesEnd` included |
+| `HandshakeSimOpenDeliveryClose.cfg` (the same, the connection closes on refusal) | 61 | passes |
+| `HandshakeSimOpenDeliveryCommon.cfg` (the same, a common version) | 61 | passes |
+| `HandshakeSimOpenDeliveryBug.cfg` (PR #3127 at `8461ae3a`, the Go test harness) | | **deadlock**: the hang CI saw |
+| `HandshakeSimOpenDeliveryCloseBug.cfg` (`8461ae3a`, the connection closes on refusal) | | **fails** `EndsWithOwnDecision` |
+| `HandshakeSimOpenDeliveryCommonBug.cfg` (`8461ae3a`, a common version) | | **deadlock** (in Go, until the handshake timeout) |
+| `HandshakeSimOpenDeliveryDropBug.cfg` (`8461ae3a`) | | **fails** `NoDroppedProposal` |
 | `HandshakeTable.cfg`, `HandshakeTableGouroboros.cfg` | | print the receive table |
 
 The gOuroboros failure is short: the client proposes only version 1 with the
@@ -144,6 +155,8 @@ reset"), and the refusing side closes the connection.
 | `HandshakeGouroborosBug.cfg` | negotiating before a query | `QueryOnlyWhenNegotiable` |
 | `HandshakeSimOpenGouroborosBug.cfg` | `MsgReplyVersions` | `NoViolations` |
 | `HandshakeSimOpenEarlyReadBug.cfg` | proposing before reading | `NoViolations` |
+| `HandshakeSimOpenDeliveryBug.cfg` | ending only once the proposal is written | deadlock |
+| `HandshakeSimOpenDeliveryDropBug.cfg` | the same | `NoDroppedProposal` |
 | `HandshakeAcceptOwnDataBug.cfg` | sending the agreed data | `AcceptCarriesNegotiatedData` |
 | `HandshakeKeyOrderBug.cfg` | the key-order check | `UnorderedMapsRejected` |
 | `HandshakeKeyOrderEveryBug.cfg` | skipping unrecognised keys | `UnknownKeysTolerated` |
@@ -153,7 +166,8 @@ every answer: `HandshakeProbeAcceptBug.cfg`, `HandshakeProbeQueryBug.cfg`,
 `HandshakeProbeMismatchBug.cfg`, `HandshakeProbeDecodeErrorBug.cfg`,
 `HandshakeProbeRefusedBug.cfg`, `HandshakeProbeAcceptBelowProposedBug.cfg`
 (an accept below a version the client proposed), and
-`HandshakeSimOpenProbeRefusedBug.cfg`.
+`HandshakeSimOpenProbeRefusedBug.cfg`, and
+`HandshakeSimOpenDeliveryProbeEndBug.cfg` (both sides end refusing).
 
 ### The modelling mistake
 
@@ -262,6 +276,34 @@ Branch `fix/handshake-simultaneous-open` follows the reference:
   `TestServerAcceptsWithNegotiatedVersionData` fail without it) and PR #3127
   at `8461ae3a` (pointer case of `TestSimultaneousOpen` fails without it).
   The function stays identical on both branches.
+- PR #3127 at `8461ae3a`, CI (`go-test (1.26.x, 386)`):
+  `TestSimultaneousOpenVersionMismatchListsOwnVersions` timed out waiting
+  for one side. A library defect, not the test: under stress about 4 runs
+  in 1,500 hang. `Client.Start` returns at `Confirm`, which the send loop
+  enters when it hands the proposal to the muxer, before the write. Over
+  `net.Pipe` the write waits for the peer's read, so a side can read and
+  handle the peer's proposal first; it then ends, stops its protocol, and
+  the muxer drops its unwritten proposal ("protocol unregistered"). The
+  peer never hears it: the Go test hangs because its harness leaves the
+  pipe open, and a real connection, which closes on refusal, makes the
+  peer report the close instead of its own refusal. The reference cannot
+  end first: `bearerAsChannel`'s send is a synchronous bearer write
+  (network-mux `src/Network/Mux/Types.hs` 327-330, [R8]) and the client
+  yields its proposal before it awaits (Client.hs 117-121 [R2]). The model
+  shared the gap: `HandshakeSimOpen.tla` treats a sent proposal as heard.
+  `HandshakeSimOpenDelivery.tla` follows it through the send queue, the
+  muxer writer and the pipe rendezvous, with Stop dropping what is not yet
+  being written. Its `HandshakeSimOpenDeliveryBug.cfg` deadlock trace is the
+  Go goroutine dump of the CI hang: one side's read loop waits on the pipe,
+  the other's has used its one `StartOnce` segment and its proposal is
+  dropped. Fixed at `97708901`: `Start` awaits the proposal's write in the
+  background (`SendMessageAndWait`), and `handleReplyVersions` waits for it
+  before ending (`WaitForProposal`).
+  `TestSimultaneousOpenEndsOnlyAfterProposalWritten` holds the side's
+  write and fails 20 of 20 without the fix; the stress run passes 4,500 of
+  4,500. PR #3194 has no exposure: its client ends only on the server's
+  answer, which needs the proposal written, and its server waits for each
+  reply's write (`SendMessageAndWait`).
 - PR #3194 at `2a27ae97`, CI's nil-safety check on
   `connection_agreed_mode_test.go`: test-only, the test now checks the
   segment it builds before sending it; nothing in the model changes.
@@ -283,7 +325,7 @@ fails on `61046085`.
 | Unsolicited `MsgQueryReply` | Not stated | Taken as a query result [R2] | Error | Stricter, harmless |
 | `MsgQueryReply` in the state machine | Absent [S2] | Present [R1] | Present | Spec out of date |
 | Data in `MsgAcceptVersion` | Negotiated data [S7] | Agreed data [R9][R6] | The server's own data; each side's callback gets the peer's data | **Differs**, no wrong outcome found (the reference client recomputes the agreement); fixed on a branch, pointer-held entries included (PR #3194 `97039771`) |
-| Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; fixed on a branch |
+| Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2]; the proposal is written before the client reads [R8] | Not supported | **Differs**; fixed on a branch (PR #3127 `97708901`, which also writes the proposal before ending) |
 | Proposal keys in ascending order | Required for every key [S7] | Recognised keys out of order fail to decode; unrecognised keys skipped [R10] | Accepted in any order; duplicates rejected | **Differs** (lenient); fixed on a branch, which follows the reference |
 | Size limits | 5760 both states [S3] | 5760 [R5] | 5760 | Agree |
 | Timeouts | 10 s both, NtN; none NtC [S3] | `shortWait` = 10 s [R5] | 10 s NtN (overridable), none NtC | Agree |
@@ -349,4 +391,6 @@ for c in HandshakeSimOpenGouroborosBug HandshakeSimOpenAsymmetricBug \
          HandshakeSimOpenProbeRefusedBug HandshakeSimOpenEarlyReadBug; do
   ../../bin/tlc -config $c.cfg HandshakeSimOpen.tla
 done
+# HandshakeSimOpenDelivery*.cfg: the plain, Close and Common configs pass,
+# every *Bug.cfg fails; scripts/run-model.sh specs/handshake runs them all.
 ```
