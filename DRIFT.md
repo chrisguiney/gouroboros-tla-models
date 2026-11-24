@@ -447,7 +447,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../MiniProtocol/LocalTxMonitor/Server.hs` 85
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/server.go` 83, 105-125
 - **Verdict.** does not conform
-- **Status.** Not fixed; needs a mempool-change signal from the application
+- **Status.** Fixed opt-in on local branch `fix/localtxmonitor-await-acquire` (`35b8ee61`): `Config.AwaitMempoolFunc` gets the held snapshot and blocks until the mempool differs; unset, the server answers at once as before. The default should not change until the client stops timing an await (PR #3154), and only an application with a mempool-change signal can supply the function. Model: `specs/09-localtx/LocalTxMonitorFixed.cfg`
 
 ### N28
 
@@ -458,7 +458,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/LocalTxMonitor/Codec.hs` 78
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/messages.go` 28-39 (tags 0-10 only)
 - **Verdict.** does not conform
-- **Status.** Not fixed; a missing feature
+- **Status.** Fixed on local branch `fix/localtxmonitor-get-measures` (`55bdab2e`): both messages, `Client.GetMeasures`, and the server's answer, gated on `NodeToClientV_20` as the reference encoder is (`Codec.hs` 57, 78-86, 102-113). Model: `LocalTxMonitorOldNode.cfg`, `LocalTxMonitorOldNodeBug.cfg`
 
 ### N29
 
@@ -504,7 +504,7 @@ A node holds `MsgSubmitTx` while its mempool is full, and a state query can be s
 - **Reference.** ouroboros-network `5f356486ab3e` `.../InboundGovernor.hs` 455-470
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/server.go` 164-172, `protocol/localtxsubmission/server.go` 112-120, `protocol/messagesubmission/server.go` 511-520, `protocol/localmessagesubmission/server.go` 315-324 (log only); Peras `protocol/perasvotes/server.go` 59
 - **Verdict.** does not conform
-- **Status.** Not fixed. Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main
+- **Status.** Fixed on local branches `fix/<protocol>-server-restart`, one per server (local-tx-monitor `7f07099a`, local-tx-submission `ed1d2769`; the DMQ and Peras servers on their own branches). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main. Model invariant `NewRunServed` in `specs/09-localtx`
 
 ### N33
 
