@@ -18,8 +18,10 @@
 (*   Stopper, one of:                                                      *)
 (*     "Server":     Server.Stop() - under protocolMu, record the request  *)
 (*                   and read the current instance; then stop it.          *)
-(*     "Connection": Connection shutdown (connection.go stopProtocols) -   *)
-(*                   read ProtocolInstance(), stop it, then muxer.Stop().  *)
+(*     "Connection": Connection shutdown (connection.go stopProtocols),    *)
+(*                   then muxer.Stop(). With ShutdownStopsServer it calls  *)
+(*                   Server.Stop() like "Server" does; without, it read    *)
+(*                   ProtocolInstance() and stopped only that instance.    *)
 (*                                                                         *)
 (* Facts about instances (protocol/protocol.go):                           *)
 (*   - Stop and StopForRestart only act once per instance (onceStop).      *)
@@ -51,7 +53,10 @@ CONSTANTS
     MaxDones,           \* how many MsgDone the client sends (each triggers a restart)
     Stopper,            \* "Server" or "Connection": who stops the server
     StopGuard,          \* TRUE: Server.Stop sets a flag that a later restart honours
-    CancelUnregisters   \* TRUE: a restart cancelled by the guard unregisters the slot
+    CancelUnregisters,  \* TRUE: a restart cancelled by the guard unregisters the slot
+    ShutdownStopsServer \* TRUE (gOuroboros since the fix for issue 3085): connection
+                        \* shutdown calls the server's Stop. FALSE (before it): shutdown
+                        \* stops only the instance it reads, and records no request.
 
 \* The instances that can exist: the first one, plus one per restart.
 Instances == 1..(MaxDones + 1)
@@ -164,12 +169,12 @@ StartNew ==
 (* The stopper. *)
 
 \* In English: "The stopper reads which instance is current. Server.Stop
-\* also records that Stop was requested; connection shutdown records
-\* nothing."
+\* also records that Stop was requested; so does connection shutdown, once
+\* it calls Server.Stop (ShutdownStopsServer)."
 StopRead ==
     /\ stopper = "idle"                         \* the stopper has not started
     /\ snap' = current                          \* next, it holds the current instance
-    /\ stopRequested' = (Stopper = "Server")    \* next, the flag is set if this is Server.Stop
+    /\ stopRequested' = (Stopper = "Server" \/ ShutdownStopsServer)  \* next, the flag is set if this is Server.Stop
     /\ stopper' = "stop"                        \* next, its second step is due
     /\ UNCHANGED <<status, current, nextId, muxer, slot, restart, old, dones,
                    lateError>>

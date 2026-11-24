@@ -286,7 +286,8 @@ make keepalive-lifecycle
 | `KeepAliveLifecycleStopBug.cfg` | The fix as first written: `Server.Stop()` racing a restart. | **Fails after 5 steps**: the restart stops the old instance; `Stop` reads that same, already stopped, instance and stops it again, which does nothing; the restart installs and starts a new instance. `Stop` returned, and keep-alive is still served. |
 | `KeepAliveLifecycleSlotBug.cfg` | The guard as first written. | **Fails after 5 steps**: `StopForRestart` suspends the slot; `Stop` then cancels the restart, and nothing releases the slot. It keeps buffering the client's bytes, charged against the connection's ingress budget, until the connection closes. |
 | `KeepAliveLifecycle.cfg` | With `StopGuard` and `CancelUnregisters`: `Stop` sets a flag under the lock, and a restart that sees it installs nothing and unregisters the slot. | Passes: 33 distinct states. Never two instances running; `Stop` always wins; nothing stays registered. |
-| `KeepAliveLifecycleCloseBug.cfg` | Connection shutdown racing a restart, guard on. | **Fails**: shutdown stops the old instance and the muxer while the restart is between its steps; the restart then starts its new instance on a stopped muxer, which fails to register and raises "could not register protocol with muxer". |
+| `KeepAliveLifecycleCloseBug.cfg` | Connection shutdown racing a restart, as gOuroboros did before the fix for issue #3085 (`ShutdownStopsServer = FALSE`). | **Fails**: shutdown stops the old instance and the muxer while the restart is between its steps; the restart then starts its new instance on a stopped muxer, which fails to register and raises "could not register protocol with muxer". |
+| `KeepAliveLifecycleClose.cfg` | The same with the fix: connection shutdown calls the server's `Stop`. | Passes: 44 distinct states. No restart starts an instance after shutdown. |
 
 The first result changed the gOuroboros fix before it was published: the
 guard was added, with a Go test (`TestServerStopWinsOverRestart`) that calls
@@ -301,19 +302,20 @@ receiver. Adding the slot to the model reproduced it, and
 before the fix. A model only checks what it represents: leave out a piece of
 state and every bug in that state passes.
 
-The second result is not specific to keep-alive. Connection shutdown never
-calls a server's `Stop`, so no guard inside the server can see it, and every
-gOuroboros server that restarts after `MsgDone` (chain-sync, block-fetch,
-tx-submission, peer-sharing, and the Leios servers) has the same window.
+The second result is not specific to keep-alive. Connection shutdown used to
+stop only the instance it read, never a server's `Stop`, so no guard inside
+the server could see it, and every gOuroboros server that restarts after
+`MsgDone` (chain-sync, block-fetch, tx-submission, peer-sharing, and the
+Leios servers) had the same window.
 
-It is a window, not a demonstrated bug. Reading `connection.go` past what this
-model covers: the connection closes its `doneChan` before shutdown starts, and
-the goroutine that forwards protocol errors returns on `doneChan`, so the
-error is dropped unread. Nothing is left running once the muxer stops, and
-`RegisterProtocol` refuses a stopped muxer by design. What remains is a new
-instance that may run briefly between `stopProtocols` and `muxer.Stop()`.
-Whether that can do harm needs the connection itself in a model, which this
-module does not have.
+At first it looked harmless: the error the late start raises is dropped, and
+nothing is left running once the muxer stops. Model 02 put bytes and the
+connection around it and showed the harm: the restarted instance can handle a
+message, running application callbacks, after `stopProtocols`. A Go test then
+reproduced it with chain-sync on gOuroboros's `main`, 10 times out of 10.
+Reported as gOuroboros issue #3085 and fixed by pull request #3087: each
+restarting server has its own guarded `Stop`, and `stopProtocols` calls it.
+The constant `ShutdownStopsServer` switches between the two behaviors.
 
 ## The Go tests this model drove
 
@@ -347,9 +349,11 @@ limit.
   (caught before publishing), and a restart cancelled by `Stop` left its
   muxer receiver suspended (caught in review, then modelled). See
   [The restart lifecycle](#the-restart-lifecycle-keepalivelifecycletla).
-- **A shutdown window in every restarting server**: during a connection
-  close, a restart can start an instance after the old one was stopped. The
-  error it raises is dropped, and no harm is shown yet. Same section.
+- **A shutdown bug in every restarting server**: during a connection close, a
+  restart could start an instance after the old one was stopped, and serve a
+  message. Reproduced in Go, reported as gOuroboros issue #3085, fixed by
+  pull request #3087. Same section, and
+  [Model 02, part 2](../02-connection/README.md#part-2-stop-and-shutdown-during-a-restart-muxhandovertla).
 - **gOuroboros follows the specification** on every within-run cell,
   including cookies and size limits.
 - **The gOuroboros client never sends `MsgDone`.** The reference client sends

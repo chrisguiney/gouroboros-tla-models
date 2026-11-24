@@ -46,8 +46,10 @@
 (*   protocol/keepalive/server.go handleDone and Stop - StopForRestart;    *)
 (*     under protocolMu, if Stop was requested, unregister and stop;       *)
 (*     otherwise install a new instance; then Start it.                    *)
-(*   connection.go stopProtocols - reads ProtocolInstance(), stops it,     *)
-(*     then the muxer is stopped.                                          *)
+(*   connection.go stopProtocols - calls each restarting server's Stop    *)
+(*     (restartingServersLocked), then the muxer is stopped. Before the    *)
+(*     fix for issue 3085 it read ProtocolInstance() and stopped only that *)
+(*     instance (ShutdownStopsServer = FALSE).                             *)
 (*                                                                         *)
 (* Not modelled: byte-size limits, timeouts, and the server-to-client      *)
 (* direction, which is shortened to a single step.                         *)
@@ -62,7 +64,10 @@ CONSTANTS
     CarryReadBuffer,    \* TRUE (gOuroboros): unprocessed bytes go to the next instance
     AdmitOneAtATime,    \* TRUE (gOuroboros): a message waits until the last one is handled
     ResumeReceiver,     \* TRUE (gOuroboros): the new instance gets the old receiver back
-    Stopper             \* "None", "Server" (Server.Stop), or "Connection" (shutdown)
+    Stopper,            \* "None", "Server" (Server.Stop), or "Connection" (shutdown)
+    ShutdownStopsServer \* TRUE (gOuroboros since the fix for issue 3085): connection
+                        \* shutdown calls the server's Stop. FALSE (before it): shutdown
+                        \* stops only the instance it reads, and records no request.
 
 \* The protocol, as in KeepAlive.tla.
 Agency(s) == CASE s = "StClient" -> "Client"
@@ -371,11 +376,12 @@ StartNew ==
 (* The stopper: Server.Stop, or connection shutdown. *)
 
 \* In English: "Read the current instance. Server.Stop also records that
-\* Stop was requested, under the same lock; connection shutdown does not."
+\* Stop was requested, under the same lock; so does connection shutdown,
+\* once it calls Server.Stop (ShutdownStopsServer)."
 StopRead ==
     /\ stopper = "idle"
     /\ snap' = inst
-    /\ stopReq' = (Stopper = "Server")
+    /\ stopReq' = (Stopper = "Server" \/ ShutdownStopsServer)
     /\ stopper' = "act"
     /\ UNCHANGED cutoff
     /\ UNCHANGED clientVars /\ UNCHANGED <<muxer, slot, rx>> /\ UNCHANGED serverVars
