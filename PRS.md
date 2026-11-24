@@ -70,6 +70,10 @@ closes. A PR can draw on more than one model.
 | --- | --- | --- |
 | none (race detector, CONCURRENCY B4) | `fix/blockfetch-client-protocol-race` | `GetBlockRange`/`GetBlock` read the instance under `protocolMu` |
 | none (race detector, CONCURRENCY B5, B8-B10) | `fix/server-restart-protocol-race` | four restarting servers stop embedding the protocol instance (breaking) |
+| none (goleak, CONCURRENCY C8) | `fix/leiosfetch-range-delivery-leak` | a finished range's delivery stops when its caller leaves |
+| none (race detector, CONCURRENCY C9, C12, C20) | `fix/leios-server-protocol-race` | three leios servers stop embedding the protocol instance (breaking) |
+| none (CONCURRENCY C14, C15) | `fix/perasvotes-op-lock-and-await-panic` | `Done` and requests honour their context during `Sync`; `AwaitObjectIDsFunc` panics are contained |
+| none (CONCURRENCY C19, overturned) | `test/leiosnotify-request-order` | pipelined requests answered one at a time, in order |
 
 ## Not yet attributed
 

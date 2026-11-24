@@ -1997,6 +1997,113 @@ hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
   which can fire on `recvLoop`. The `DoneChan` arm stays dead and the comment
   still credits it; a wording fix for that PR.
 
+### Status: C8-C26, D1, D2
+
+Re-checked on gOuroboros `origin/main` `5c4f31c1` (2026-11-24) and against
+open #3160, #3130, #3197 and merged #3165. One line per hazard: disposition,
+evidence, branch or PR. Branches are local and unpushed.
+
+- **C8: leak, fixed.** Confirmed: the last range reply clears `waiter` and
+  frees the slot in `deliverRange` (`leiosfetch/client.go:255-258`) while the
+  caller may still have a reply unread; its later `abandon(w)`/`release(w)`
+  match nothing (`:332`, `:360`) and `requestDelivery.run` blocks at `:143`.
+  `TestRangeDeliveryEndsWhenCallerLeavesAfterLastReply` (slot-level, no
+  timing: three replies queued, one read, then the caller's exit call)
+  fails on `origin/main` for both `abandon` and `release` (delivery not
+  stopped; goleak finds `run`), passes `-race -count=3`. Fix: the slot keeps
+  a finished range's delivery keyed by its waiter until that caller's
+  `abandon`/`release`, which stop it. Every `BlockRangeRequest` exit calls one
+  of them. Branch `fix/leiosfetch-range-delivery-leak` `ab7787eb`. #3160 does
+  not touch `leiosfetch/client.go`.
+- **C9, C12, C20: race, fixed (API change).** Confirmed at
+  `leiosfetch/server.go:71`, `leiosvotes/server.go:85`,
+  `leiosnotify/server.go:116`. `TestServerMethodsDuringRestart` in each
+  package (restart window held, a reader goroutine calling `DoneChan`/`IsDone`
+  until the instance has changed) fails under `-race` on `origin/main` in all
+  three, passes `-race -count=3`. A single read sometimes escaped the
+  detector in leiosfetch and leiosnotify, since the receive loop reads the
+  field itself many times; the reader loops. Same shape as the B5 change:
+  unexported `proto` under `protocolMu`; `Start`, `EnsureRegistered`,
+  `DoneChan`, `StopChan`, `IsDone` read under the lock; the rest through
+  `ProtocolInstance()`. Branch `fix/leios-server-protocol-race` `6089eb5e`
+  (`fix(leios)!`). Test call sites updated in the three packages'
+  `server_test.go`; `leiosfetch/server_test.go:197-199` also changes on
+  `fix/server-restart-protocol-race` (expect a trivial conflict). Dingo
+  `95332bba1` builds and `go vet ./...` (tests included) is clean against the
+  branch through a `replace`: no Dingo use of a removed field or method on
+  these servers.
+- **C10: bounded.** `RequestNext` holds `busyMutex` across the vote waits
+  (`leiosvotes/client.go:139-155`), but each wait ends on `DoneChan`, and the
+  Busy state's timeout (`clientStateMap`, `:74-80`) is always positive:
+  `normalizeConfig` defaults it to 60 s and `validate` rejects `<= 0`
+  (`leiosvotes.go:190`, `:238`). Serializing callers is required: replies
+  carry no id.
+- **C11, C18, C21: unjoined, needs the callback-context API.** Still true on
+  `origin/main` (`leiosvotes/client.go:189`, `leiosnotify/server.go:141`,
+  `:196`, `:210`, `:252`, `leiosnotify/client.go:128`): these run through
+  `RunLoop`, which nothing waits for. The `Stop(ctx)` work in progress on
+  `fix/protocol-callback-context` waits for the four engine loops only
+  (`loopsDoneChan`); `RunLoop` goroutines are not counted. Fix there: count
+  `RunLoop` goroutines in the instance's loop group so the connection-teardown
+  join covers them. C18 adds a decision: a `RequestNextFunc` that ignores
+  `QuitChan` would then hold up teardown until the join's context ends.
+- **C13: by design, documented.** Re-entering the client from `VoteFunc`
+  waits for `Sync` (which holds the exchange) to end. On the C14 branch the
+  wait now ends with the caller's context, and `Sync`'s doc says to return an
+  error or cancel `Sync`'s context instead. A call with a context that never
+  ends still waits forever; detecting the re-entry needs the callback
+  instance marker (decision).
+- **C14: defect, fixed.** `Done(ctx)` waited on `opMu` held by `Sync`
+  (`perasvotes/client.go:207`, `:251`). `TestDoneHonoursContextWhileSyncRuns`
+  (server's `ObjectIDsFunc` gated so `Sync` is known to hold the exchange,
+  `Done` with a cancelled context) fails on `origin/main` (5 s failure bound),
+  passes `-race -count=3`. Fix: `opMu` becomes a one-slot channel acquired
+  with the caller's context. Branch `fix/perasvotes-op-lock-and-await-panic`
+  `7ae53cc0`. #3165 (merged) did not change it; #3197 touches only
+  `server.go`.
+- **C15: defect, fixed (panic); unjoined part as C11.**
+  `go s.awaitObjectIDs` (`perasvotes/server.go:102`) had no `recoverLoop`.
+  `TestAwaitObjectIDsPanicIsContained` crashes the test binary on
+  `origin/main`; on the branch the panic arrives on `ErrorChan` as
+  `ErrHandlerPanic`. Fix: start it through `RunLoop`. Same branch as C14.
+  #3197 rewrites this line (`go s.awaitObjectIDs(proto, ...)`): one-line
+  conflict, use `proto.RunLoop` there.
+- **C16, C17: covered by #3160** (`9341da42` `sendMutex` held from the
+  `quitting` check through the sends; `abaecd8a` refuses `MsgCanceled`
+  before `MsgQuit`).
+- **C19: not reachable (inventory overturned).** The engine hands a
+  pipelined `NotificationRequestNext` to `messageHandler` only once the
+  previous reply has returned the state to Idle, so at most one
+  `RequestNextFunc` runs per instance and replies go out in request order,
+  as the reference's lookahead server does
+  (`LeiosDemoOnlyTestNotify.hs` `leiosNotifyServerPeerLookahead`).
+  `TestServerAnswersPipelinedRequestsInOrder` (second source would finish
+  first) passes on `origin/main` with no overlap; kept as a regression test on
+  `test/leiosnotify-request-order` `173907f8`. Its passing case waits a
+  bounded 500 ms for an overlap that must not happen.
+- **C22: by design.** Holding the `Config`-wide replay lock across
+  `PrepareMessages` (`localmessagenotification/client.go:281-323`) is what
+  makes check, authenticate and record one step across connections sharing
+  the `Config`. Option if lookups can be slow: the server's
+  reserve/release-by-token scheme (`localmessagesubmission/server.go:76-108`).
+- **C23: bounded.** The cleaner also ends on `ConnectionDoneChan`
+  (`localmessagenotification/server.go:340`), which `Connection` always sets
+  (`connection.go:737`). Only a `Server` built outside a `Connection` and never
+  stopped keeps it. Unchanged on #3197.
+- **C24, C26: covered by #3197** (`242cc3cd`, `c43632a9`: restart after
+  `MsgClientDone`/`MsgDone`).
+- **C25: by design (API).** Unchanged on `origin/main`
+  (`localmessagesubmission/client.go:99`); the dmq model's write-up stands.
+  Following the reference (submit returns its own answer, as
+  `localtxsubmission.SubmitTx` does) changes `SubmitMessage`'s signature:
+  decision.
+- **D1: covered** by `fix/ledger-scoped-memo-panic` `2c619f5d` (retries a
+  build after a panic; `rules.go:250` path).
+- **D2: by design.** `<-entry.done` (`ledger/common/rules.go:241`) waits only
+  for the first caller's `build`; the one caller (`script/needed.go:143`)
+  does not re-enter the memo for the same key, and its work is CPU-bound over
+  the fixed UTxO view.
+
 ## 7. Model plan
 
 ### What the existing models already cover
