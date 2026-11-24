@@ -57,7 +57,9 @@ Read these in order. Each one builds on the last.
     proposals, voting, ratification, enactment and refunds.
 18. [Model 16: block pipeline and CBOR](specs/16-pipeline-cbor/README.md):
     ordered apply, rollback fencing, drain, and preserved bytes.
-19. [Glossary](docs/glossary.md): keep it open while you read anything else.
+19. [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
+    UTxO rule, fees and heavyweight delegation.
+20. [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
