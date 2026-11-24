@@ -39,6 +39,12 @@ Plain-language definitions, with a Go comparison where one helps.
 : A copy of function `f` with key `k` changed to `v`. Inside, `@` means the
   old value of `f[k]`. Like copying a Go map and setting one key.
 
+**Epoch nonce** (Cardano term)
+: The random value every VRF check in an epoch uses. Each block folds its VRF
+  output into an evolving nonce; a candidate copy stops following it a window
+  of slots before the epoch ends, and the next epoch's nonce is made from that
+  candidate. See [model 21](../specs/21-consensus-nonce/README.md).
+
 **Fairness**
 : An assumption that a step which keeps being possible eventually happens.
   Needed for liveness checks. You will not need it for a while.
