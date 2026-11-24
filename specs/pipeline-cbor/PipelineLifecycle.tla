@@ -67,13 +67,23 @@ CONSTANTS
                    \*   "returns": it returns
                    \*   "blocks": it never returns (it has no context to watch)
                    \*   "callsStop": it calls Stop, then returns
-                   \*   "callsDrain": it calls WaitForDrain(context.Background()), then returns
+                   \*   "callsDrain": it calls WaitForDrain with the item's context, then returns
+                   \*   "callsStopOther": it calls Stop with a context that does not carry
+                   \*      this pipeline's marker (for example another pipeline's)
     Reader,        \* TRUE: someone reads Results until it is closed
     OwnerStop,     \* TRUE: the owner may call Stop at any time
     SecondStop,    \* TRUE: another goroutine may also call Stop
     ParentCancel,  \* TRUE: the context passed to Start may be cancelled
     Drainer,       \* TRUE: a client calls WaitForDrain, then rolls back
     PR3161,        \* TRUE: PR #3161's forwarder, Stop and WaitForDrain
+    CallbackMarker,\* TRUE: the fix: ApplyFunc's item context carries this pipeline's
+                   \*   marker, and Stop or WaitForDrain given it skips the self-wait
+    NewStop,       \* TRUE: the fix on fix/pipeline-callback-stop: Stop(ctx) signals,
+                   \*   one teardown goroutine does the work, and Stop waits for it
+                   \*   or for ctx. FALSE: Stop does the work holding mu
+    StopTimeout,   \* TRUE: a waiting Stop(ctx) caller's ctx may end, so it returns
+    CancelCleanup, \* TRUE: the fix on fix/pipeline-cancel-cleanup: a watcher started by
+                   \*   Start tears the pipeline down when the parent context ends
     Mutation       \* "None", or a deliberate defect:
                    \*   "CloseBeforeJoin": Stop closes decodedChan without joining the workers
                    \*   "SkipRunnerJoin": Stop does not wait for the runner
@@ -81,16 +91,25 @@ CONSTANTS
                    \*   "ReleaseTwice": Stop's Release of a drained result returns its
                    \*      budget again (no reserveOnce), clamped at zero as in
                    \*      releaseRawCborBytes 414-418
+                   \*   "MarkerForAll": every Stop(ctx) caller skips the join
+                   \*   "NoWatchJoin": Stop does not wait for the cancel watcher
 
-ASSUME ApplyMode \in {"returns", "blocks", "callsStop", "callsDrain"}
+ASSUME ApplyMode \in {"returns", "blocks", "callsStop", "callsDrain", "callsStopOther"}
 ASSUME Mutation \in {"None", "CloseBeforeJoin", "SkipRunnerJoin",
-                     "NoReleaseActive", "ReleaseTwice"}
+                     "NoReleaseActive", "ReleaseTwice", "MarkerForAll", "NoWatchJoin"}
+ASSUME ~(NewStop /\ CancelCleanup)   \* the two fixes are on separate branches
 
-\* In English: the goroutines that may call Stop: the owner, a second
-\* goroutine, and ApplyFunc itself ("cb").
-\* Literally: "StopIds is defined as the set containing "owner", "second"
-\*   and "cb"."
-StopIds == {"owner", "second", "cb"}
+\* In English: the goroutines that may run Stop's steps: the owner, a
+\* second goroutine, ApplyFunc itself ("cb"), the teardown goroutine of
+\* NewStop ("td"), and the parent-cancel watcher of CancelCleanup ("watch").
+\* Literally: "StopIds is defined as the set containing "owner", "second",
+\*   "cb", "td" and "watch"."
+StopIds == {"owner", "second", "cb", "td", "watch"}
+
+\* In English: ApplyFunc's Stop call carries this pipeline's marker.
+\* Literally: "CbMarked is defined as: ApplyMode equals "callsStop" and
+\*   CallbackMarker."
+CbMarked == ApplyMode = "callsStop" /\ CallbackMarker
 
 \* Literally: "Seqs is defined as 0 through N minus 1."
 Seqs == 0 .. N - 1
@@ -196,7 +215,8 @@ TypeOK ==
 \*   "recv", and wItem equals 0, and rPc equals "recv", and rItem equals 0,
 \*   and completed equals 0, and fPc equals "select", and fItem equals 0,
 \*   and fPending equals the empty sequence, and readerPc equals "recv",
-\*   and stopPc maps every s in StopIds to "idle", and waiterPc equals
+\*   and stopPc maps every s in StopIds to (if s equals "watch" and
+\*   CancelCleanup then "watchWait" else "idle"), and waiterPc equals
 \*   "none", and metricsPc equals "running", and canceled, stopping and
 \*   stopped equal FALSE, and dPc equals "idle", and dTarget and dBoundary
 \*   equal 0, and lateCommit and panicked equal FALSE."
@@ -210,7 +230,7 @@ Init ==
     /\ wPc = "recv" /\ wItem = 0
     /\ rPc = "recv" /\ rItem = 0 /\ completed = 0
     /\ fPc = "select" /\ fItem = 0 /\ fPending = <<>> /\ readerPc = "recv"
-    /\ stopPc = [s \in StopIds |-> "idle"]
+    /\ stopPc = [s \in StopIds |-> IF s = "watch" /\ CancelCleanup THEN "watchWait" ELSE "idle"]
     /\ waiterPc = "none" /\ metricsPc = "running"
     /\ canceled = FALSE /\ stopping = FALSE /\ stopped = FALSE
     /\ dPc = "idle" /\ dTarget = 0 /\ dBoundary = 0 /\ lateCommit = FALSE
@@ -399,24 +419,26 @@ RunnerRecv ==
 \* In English: [G apply_stage.go 321-326] applyPending checks the context
 \* first: if it is done the item is dropped (it stays in activeItems) and
 \* the runner goes back to its select. Otherwise ApplyFunc is called; with
-\* ApplyMode "callsStop" it calls Stop as goroutine "cb".
+\* ApplyMode "callsStop" or "callsStopOther" it calls Stop as goroutine "cb".
 \* Literally: "RunnerCheck is defined as: rPc equals "check", and if
 \*   canceled, then (rPc in the next state equals "recv", and stopPc is
 \*   unchanged), else (rPc in the next state equals, in the case ApplyMode
-\*   equals "callsStop", "applyStop"; in the case ApplyMode equals
-\*   "callsDrain", "applyDrain"; in every other case, "apply"; and stopPc in
-\*   the next state equals (if ApplyMode equals "callsStop" then stopPc
-\*   except that its "cb" entry is "lockMu", else stopPc)); and every other
-\*   variable is unchanged."
+\*   is a member of the set containing "callsStop" and "callsStopOther",
+\*   "applyStop"; in the case ApplyMode equals "callsDrain", "applyDrain";
+\*   in every other case, "apply"; and stopPc in the next state equals (if
+\*   ApplyMode is a member of that set, then stopPc except that its "cb"
+\*   entry is (if NewStop then "signal" else "lockMu"), else stopPc)); and
+\*   every other variable is unchanged."
 RunnerCheck ==
     /\ rPc = "check"
     /\ IF canceled
          THEN /\ rPc' = "recv" /\ UNCHANGED stopPc
-         ELSE /\ rPc' = CASE ApplyMode = "callsStop" -> "applyStop"
+         ELSE /\ rPc' = CASE ApplyMode \in {"callsStop", "callsStopOther"} -> "applyStop"
                           [] ApplyMode = "callsDrain" -> "applyDrain"
                           [] OTHER -> "apply"
-              /\ stopPc' = IF ApplyMode = "callsStop"
-                             THEN [stopPc EXCEPT !["cb"] = "lockMu"]
+              /\ stopPc' = IF ApplyMode \in {"callsStop", "callsStopOther"}
+                             THEN [stopPc EXCEPT !["cb"] =
+                                     IF NewStop THEN "signal" ELSE "lockMu"]
                              ELSE stopPc
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, completed, fV,
                    waiterPc, metricsPc, canceled, stopping, stopped, dV, panicked>>
@@ -442,29 +464,38 @@ RunnerApply ==
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, fV, lifeV,
                    dPc, dTarget, dBoundary, panicked>>
 
-\* In English: ApplyFunc's own call to Stop has returned; ApplyFunc then
-\* returns.
+\* In English: ApplyFunc's own call to Stop has returned (joined, only
+\* signalled, or given up when its ctx ended); ApplyFunc then returns.
 \* Literally: "RunnerApplyStop is defined as: rPc equals "applyStop", and
-\*   stopPc of "cb" equals "returned", and Commit, and every other variable
-\*   is unchanged."
+\*   stopPc of "cb" is a member of the set containing "returned",
+\*   "requested" and "timedOut", and Commit, and every other variable is
+\*   unchanged."
 RunnerApplyStop ==
-    /\ rPc = "applyStop" /\ stopPc["cb"] = "returned"
+    /\ rPc = "applyStop" /\ stopPc["cb"] \in {"returned", "requested", "timedOut"}
     /\ Commit
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, fV, lifeV,
                    dPc, dTarget, dBoundary, panicked>>
 
-\* In English: ApplyFunc's own WaitForDrain(Background) returns, then
-\* ApplyFunc returns. Its Fence boundary includes the block being applied,
-\* so the Fence can only end when the pipeline context is done. Then
-\* gOuroboros returns nil (stopping) or an error; with PR3161, once Stop has
-\* begun, it waits for the runner to exit, that is, for itself.
+\* In English: ApplyFunc's own WaitForDrain returns, then ApplyFunc
+\* returns. Its Fence boundary includes the block being applied, so the
+\* Fence can only end when the pipeline context is done. Then gOuroboros
+\* returns nil (stopping) or an error; with PR3161, once Stop has begun, it
+\* waits for the runner to exit, that is, for itself. With the marker,
+\* PR3161 skips that wait (nil once stopping), and NewStop's
+\* WaitForDrain does not wait at all (nil while stopping, an error
+\* otherwise).
 \* Literally: "RunnerApplyDrain is defined as: rPc equals "applyDrain", and
-\*   if PR3161, then (canceled is true and stopping is not true), else
-\*   (canceled is true or stopping is true); and Commit, and every other
+\*   in the case CallbackMarker and NewStop, TRUE; in the case
+\*   CallbackMarker and PR3161, canceled is true or stopping is true; in the
+\*   case PR3161, canceled is true and stopping is not true; in every other
+\*   case, canceled is true or stopping is true; and Commit, and every other
 \*   variable is unchanged."
 RunnerApplyDrain ==
     /\ rPc = "applyDrain"
-    /\ IF PR3161 THEN canceled /\ ~stopping ELSE canceled \/ stopping
+    /\ CASE CallbackMarker /\ NewStop -> TRUE
+         [] CallbackMarker /\ PR3161 -> canceled \/ stopping
+         [] PR3161 -> canceled /\ ~stopping
+         [] OTHER -> canceled \/ stopping
     /\ Commit
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, fV, lifeV,
                    dPc, dTarget, dBoundary, panicked>>
@@ -596,39 +627,45 @@ ReaderExit ==
 \*   containing "owner" and "second", and (s equals "owner" and OwnerStop,
 \*   or s equals "second" and SecondStop), and stopPc of s equals "idle",
 \*   and stopPc in the next state equals stopPc except that its s entry is
-\*   "lockMu", and every other variable is unchanged."
+\*   (if NewStop then "signal" else "lockMu"), and every other variable is
+\*   unchanged."
 StopCall(s) ==
     /\ s \in {"owner", "second"}
     /\ (s = "owner" /\ OwnerStop) \/ (s = "second" /\ SecondStop)
     /\ stopPc[s] = "idle"
-    /\ stopPc' = [stopPc EXCEPT ![s] = "lockMu"]
+    /\ stopPc' = [stopPc EXCEPT ![s] = IF NewStop THEN "signal" ELSE "lockMu"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc,
                    metricsPc, canceled, stopping, stopped, dV, panicked>>
 
-\* In English: [G 959-964] p.mu.Lock(); a pipeline already stopped returns
-\* at once (unlocking).
+\* In English: [G 959-964] p.mu.Lock(); a pipeline already stopped
+\* unlocks at once, and then (CancelCleanup) waits for the watcher; the
+\* watcher itself just exits.
 \* Literally: "StopLock of s is defined as: stopPc of s equals "lockMu",
 \*   and mu equals "none", and if stopped, then (stopPc in the next state
-\*   equals stopPc except that its s entry is "returned", and mu is
-\*   unchanged), else (mu in the next state equals s, and stopPc in the
-\*   next state equals stopPc except that its s entry is "cancel"); and
-\*   every other variable is unchanged."
+\*   equals stopPc except that its s entry is (if s equals "watch" then
+\*   "exited" else "joinWatch"), and mu is unchanged), else (mu in the next
+\*   state equals s, and stopPc in the next state equals stopPc except that
+\*   its s entry is "cancel"); and every other variable is unchanged."
 StopLock(s) ==
     /\ stopPc[s] = "lockMu" /\ mu = "none"
     /\ IF stopped
-         THEN /\ stopPc' = [stopPc EXCEPT ![s] = "returned"] /\ UNCHANGED mu
+         THEN /\ stopPc' = [stopPc EXCEPT ![s] = IF s = "watch" THEN "exited" ELSE "joinWatch"]
+              /\ UNCHANGED mu
          ELSE /\ mu' = s /\ stopPc' = [stopPc EXCEPT ![s] = "cancel"]
     /\ UNCHANGED <<subV, budV, gate, chanV, wV, rV, fV, waiterPc, metricsPc,
                    canceled, stopping, stopped, dV, panicked>>
 
-\* In English: [G 968-971] stopping, then cancel.
+\* In English: [G 968-971] stopping, then cancel. The cancel watcher does
+\* not set stopping: no explicit Stop was asked for, so a drain still
+\* reports the cancellation as an error.
 \* Literally: "StopCancel of s is defined as: stopPc of s equals "cancel",
-\*   and stopping in the next state equals TRUE, and canceled in the next
-\*   state equals TRUE, and stopPc in the next state equals stopPc except
-\*   that its s entry is "gate", and every other variable is unchanged."
+\*   and stopping in the next state equals (stopping, or s does not equal
+\*   "watch"), and canceled in the next state equals TRUE, and stopPc in the
+\*   next state equals stopPc except that its s entry is "gate", and every
+\*   other variable is unchanged."
 StopCancel(s) ==
     /\ stopPc[s] = "cancel"
-    /\ stopping' = TRUE /\ canceled' = TRUE
+    /\ stopping' = (stopping \/ s /= "watch") /\ canceled' = TRUE
     /\ stopPc' = [stopPc EXCEPT ![s] = "gate"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc,
                    metricsPc, stopped, dV, panicked>>
@@ -754,16 +791,83 @@ StopReleaseActive(s) ==
                    canceled, stopping, stopped, dV, panicked>>
 
 \* In English: [G 1035-1037] wg.Wait for the metrics collector, then the
-\* deferred unlock of mu, and Stop returns.
+\* unlock of mu. The watcher and the teardown goroutine are then done; a
+\* Stop caller goes on to join the watcher.
 \* Literally: "StopReturn of s is defined as: stopPc of s equals "wgWait",
-\*   and metricsPc equals "exited", and mu in the next state equals "none",
-\*   and stopPc in the next state equals stopPc except that its s entry is
-\*   "returned", and every other variable is unchanged."
+\*   and metricsPc equals "exited", and mu in the next state equals (if mu
+\*   equals s then "none" else mu), and stopPc in the next state equals
+\*   stopPc except that its s entry is (if s is a member of the set
+\*   containing "watch" and "td" then "returned" else "joinWatch"), and
+\*   every other variable is unchanged."
 StopReturn(s) ==
     /\ stopPc[s] = "wgWait" /\ metricsPc = "exited"
-    /\ mu' = "none"
-    /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
+    /\ mu' = IF mu = s THEN "none" ELSE mu
+    /\ stopPc' = [stopPc EXCEPT ![s] = IF s \in {"watch", "td"} THEN "returned" ELSE "joinWatch"]
     /\ UNCHANGED <<subV, budV, gate, chanV, wV, rV, fV, waiterPc, metricsPc,
+                   canceled, stopping, stopped, dV, panicked>>
+
+\* In English: [fix/pipeline-cancel-cleanup] after unlocking mu, Stop waits
+\* for the cancel watcher to exit, so the watcher is joined too. Without
+\* CancelCleanup there is no watcher and this step is immediate.
+\* Literally: "StopJoinWatch of s is defined as: stopPc of s equals
+\*   "joinWatch", and (stopPc of "watch" is a member of the set containing
+\*   "idle", "exited" and "returned", or Mutation equals "NoWatchJoin"), and
+\*   stopPc in the next state equals stopPc except that its s entry is
+\*   "returned", and every other variable is unchanged."
+StopJoinWatch(s) ==
+    /\ stopPc[s] = "joinWatch"
+    /\ stopPc["watch"] \in {"idle", "exited", "returned"} \/ Mutation = "NoWatchJoin"
+    /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
+    /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
+                   canceled, stopping, stopped, dV, panicked>>
+
+\* In English: [fix/pipeline-cancel-cleanup] the watcher wakes when the
+\* pipeline context is done. If an explicit Stop has begun it exits;
+\* otherwise it runs Stop's teardown itself.
+\* Literally: "WatchWake is defined as: stopPc of "watch" equals
+\*   "watchWait", and canceled is true, and stopPc in the next state equals
+\*   stopPc except that its "watch" entry is (if stopping then "exited" else
+\*   "lockMu"), and every other variable is unchanged."
+WatchWake ==
+    /\ stopPc["watch"] = "watchWait" /\ canceled
+    /\ stopPc' = [stopPc EXCEPT !["watch"] = IF stopping THEN "exited" ELSE "lockMu"]
+    /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
+                   canceled, stopping, stopped, dV, panicked>>
+
+\* In English: [fix/pipeline-callback-stop] Stop(ctx) signals: stopping,
+\* cancel, and start the one teardown goroutine if it has not started. A
+\* caller whose ctx carries this pipeline's ApplyFunc marker returns at
+\* once (it may be the runner itself); any other caller waits.
+\* Literally: "StopSignal of s is defined as: stopPc of s equals "signal",
+\*   and stopping in the next state equals TRUE, and canceled in the next
+\*   state equals TRUE, and stopPc in the next state equals stopPc except
+\*   that its s entry is (if (s equals "cb" and CbMarked) or Mutation
+\*   equals "MarkerForAll" then "requested" else "waitTd"), and its "td"
+\*   entry is (if the old entry equals "idle" then "gate" else the old
+\*   entry), and every other variable is unchanged."
+StopSignal(s) ==
+    /\ stopPc[s] = "signal"
+    /\ stopping' = TRUE /\ canceled' = TRUE
+    /\ stopPc' = [stopPc EXCEPT
+                    ![s] = IF (s = "cb" /\ CbMarked) \/ Mutation = "MarkerForAll"
+                             THEN "requested" ELSE "waitTd",
+                    !["td"] = IF @ = "idle" THEN "gate" ELSE @]
+    /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
+                   stopped, dV, panicked>>
+
+\* In English: [fix/pipeline-callback-stop] a waiting Stop(ctx) returns nil
+\* once the teardown goroutine has finished, or ctx.Err() once its ctx
+\* ends (with StopTimeout).
+\* Literally: "StopWaitTd of s is defined as: stopPc of s equals "waitTd",
+\*   and either (stopPc of "td" equals "returned" and stopPc in the next
+\*   state equals stopPc except that its s entry is "returned") or
+\*   (StopTimeout and stopPc in the next state equals stopPc except that
+\*   its s entry is "timedOut"); and every other variable is unchanged."
+StopWaitTd(s) ==
+    /\ stopPc[s] = "waitTd"
+    /\ \/ stopPc["td"] = "returned" /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
+       \/ StopTimeout /\ stopPc' = [stopPc EXCEPT ![s] = "timedOut"]
+    /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
                    canceled, stopping, stopped, dV, panicked>>
 
 \* In English: [G 1097-1107] the metrics collector exits once the context
@@ -873,13 +977,15 @@ DrainWaitRunner ==
 \* is not inside a call back into the pipeline. Goroutines the pipeline
 \* started may still be parked; NoLeakWhenQuiescent judges those.
 \* Literally: "CallersFinished is defined as: for all s in StopIds, stopPc
-\*   of s is a member of the set containing "idle" and "returned"; and
+\*   of s is a member of the set containing "idle", "returned",
+\*   "requested", "timedOut", "exited" and "watchWait"; and
 \*   (subPc equals "done", or subPc equals "idle" and subSeq equals N); and
 \*   dPc is a member of the set containing "idle", "ok" and "failed"; and
 \*   rPc is not a member of the set containing "applyStop" and
 \*   "applyDrain"."
 CallersFinished ==
-    /\ \A s \in StopIds : stopPc[s] \in {"idle", "returned"}
+    /\ \A s \in StopIds :
+         stopPc[s] \in {"idle", "returned", "requested", "timedOut", "exited", "watchWait"}
     /\ subPc = "done" \/ (subPc = "idle" /\ subSeq = N)
     /\ dPc \in {"idle", "ok", "failed"}
     /\ rPc \notin {"applyStop", "applyDrain"}
@@ -893,7 +999,8 @@ CallersFinished ==
 \*   StopIds such that StopCall of s, or StopLock of s, or StopCancel of s,
 \*   or StopGate of s, or StopJoinDecode of s, or StopSpawn of s, or
 \*   StopJoinRunner of s, or StopCloseQueue of s, or StopDrainDone of s, or
-\*   StopReleaseActive of s, or StopReturn of s."
+\*   StopReleaseActive of s, or StopReturn of s, or StopJoinWatch of s, or
+\*   StopSignal of s, or StopWaitTd of s; or WatchWake."
 Progress ==
     \/ SubCall \/ SubReserve \/ SubGate \/ SubCapacity \/ SubTrack \/ SubSend
     \/ WorkerRecv \/ WorkerSend
@@ -906,7 +1013,8 @@ Progress ==
          \/ StopCall(s) \/ StopLock(s) \/ StopCancel(s) \/ StopGate(s)
          \/ StopJoinDecode(s) \/ StopSpawn(s) \/ StopJoinRunner(s)
          \/ StopCloseQueue(s) \/ StopDrainDone(s) \/ StopReleaseActive(s)
-         \/ StopReturn(s)
+         \/ StopReturn(s) \/ StopJoinWatch(s) \/ StopSignal(s) \/ StopWaitTd(s)
+    \/ WatchWake
 
 \* In English: nothing can move, but no caller is waiting: a legitimate
 \* end. Any other state with no step is a deadlock that TLC reports.
@@ -935,10 +1043,15 @@ NoPanic == ~panicked
 BudgetMatchesActive ==
     budget = Cardinality(active) + (IF subHeld THEN 1 ELSE 0)
 
-\* In English: some Stop has returned.
+\* In English: some Stop has returned nil as a join: any caller that
+\* finished, or a caller other than ApplyFunc's own that returned without
+\* waiting. Only ApplyFunc's marked call may return without the join.
 \* Literally: "StopReturned is defined as: there exists an s in StopIds
-\*   such that stopPc of s equals "returned"."
-StopReturned == \E s \in StopIds : stopPc[s] = "returned"
+\*   such that stopPc of s equals "returned", or s does not equal "cb" and
+\*   stopPc of s equals "requested"."
+StopReturned ==
+    \E s \in StopIds :
+        stopPc[s] = "returned" \/ (s /= "cb" /\ stopPc[s] = "requested")
 
 \* In English: once Stop has returned, no item holds a reservation and the
 \* only budget in use is a Submit's that has not yet seen the stop.
@@ -948,15 +1061,18 @@ StopReturned == \E s \in StopIds : stopPc[s] = "returned"
 AllReleasedAfterStop ==
     StopReturned => (active = {} /\ budget = IF subHeld THEN 1 ELSE 0)
 
-\* In English: once Stop has returned, every goroutine Start or Stop
-\* started has exited (the join).
+\* In English: once Stop has returned nil, every goroutine Start or Stop
+\* started has exited (the join), the cancel watcher included.
 \* Literally: "JoinedAfterStop is defined as: if StopReturned, then wPc
 \*   equals "exited", and rPc equals "exited", and fPc equals "exited", and
-\*   metricsPc equals "exited", and waiterPc does not equal "waiting"."
+\*   metricsPc equals "exited", and waiterPc does not equal "waiting", and
+\*   stopPc of "watch" is a member of the set containing "idle", "exited"
+\*   and "returned"."
 JoinedAfterStop ==
     StopReturned =>
         /\ wPc = "exited" /\ rPc = "exited" /\ fPc = "exited"
         /\ metricsPc = "exited" /\ waiterPc /= "waiting"
+        /\ stopPc["watch"] \in {"idle", "exited", "returned"}
 
 \* In English: after a successful WaitForDrain, no block below its boundary
 \* is committed.
