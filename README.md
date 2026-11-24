@@ -81,6 +81,9 @@ protocol.
   evolving and candidate nonces, the freeze window and the tick.
 - [Model 25: eras](specs/25-consensus-eras/README.md): era transitions,
   the hard-fork era history, and the order of the header checks.
+- [Model 27: Tachys](specs/27-consensus-tachys/README.md): the CIP-0177
+  public leader schedule, its cumulative stake distribution, and the
+  header and forging checks it changes.
 
 ### Ledger
 

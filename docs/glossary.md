@@ -27,6 +27,12 @@ Plain-language definitions, with a Go comparison where one helps.
 : A state where no action is possible but the system has not finished. TLC
   reports it by default.
 
+**Cumulative stake distribution** (Cardano term)
+: The stake distribution laid end to end: pools in ID order, each owning an
+  interval as wide as its stake. A uniform sample then lands in a pool's
+  interval with probability equal to its stake share. See
+  [model 27](../specs/27-consensus-tachys/README.md).
+
 **Distinct states**
 : How many different states TLC found. A measure of model size, and of how
   many situations a test suite should think about.
@@ -100,6 +106,15 @@ Plain-language definitions, with a Go comparison where one helps.
 **Primed variable (`x'`)**
 : The value of `x` in the **next** state. `x' = x + 1` means "after this step,
   x is one bigger".
+
+**Public leader schedule** (Ouroboros Tachys)
+: A schedule anyone can compute that names exactly one pool for every slot,
+  replacing Praos's private VRF lottery. See
+  [model 27](../specs/27-consensus-tachys/README.md).
+
+**`RECURSIVE F(_)`**
+: Declares an operator that calls itself, like a recursive Go function.
+  Model 27's `Sum` adds up a set this way.
 
 **Record (`[a |-> x, b |-> y]`)**
 : A value with named fields, like a Go struct. `m.a` reads a field. The
