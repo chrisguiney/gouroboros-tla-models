@@ -102,7 +102,11 @@ for a reference client: it recomputes `acceptableVersion` with its own data
 sharing `<>`, query `||`, Peras `min`) is idempotent and commutative, so
 `agree(c, agree(s, c)) = agree(c, s)`. The fix
 (`fix/handshake-accept-negotiated-data`) sends the agreed data; the
-`FinishedFunc` callback still receives the peer's data.
+`FinishedFunc` callback still receives the peer's data. PR #3194 at
+`77deeda7` only moves `agreedVersionData` into
+`protocol/handshake/version_data.go`, the same file the simultaneous-open
+fix uses, so the two PRs share one agreement: no model change, as the
+rule `Agree` already models is unchanged.
 
 **Key order.** The specification requires every key unique and ascending
 [S7]. The reference codec is narrower [R10]: it skips a key its version
