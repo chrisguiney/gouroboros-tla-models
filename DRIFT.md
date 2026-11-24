@@ -56,7 +56,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | [N1](#n1) | network | A message from a peer that does not have agency | Not read until the peer has agency, then judged against that state | Judged on arrival and refused | Silent on when the judgement happens | conforms (stricter) | Recorded, no change planned (models 01, 07, 08, 09, 10) |
-| [N2](#n2) | network | Which side a state's timeout applies to | Only the side waiting to receive is timed | main: the side holding agency is timed too, so a slow local callback times itself out; PR: receiver only | Timeouts bound how long the receiver waits | conforms (implementation choice) → conforms | Open PR #3159 |
+| [N2](#n2) | network | Which side a state's timeout applies to | Only the side waiting to receive is timed | main: the side holding agency is timed too, so a slow local callback times itself out; PR: receiver only, timed from when its handler for the previous message returns | Timeouts bound how long the receiver waits | conforms (implementation choice) → conforms | Open PR #3159 at `18e0418a` |
 | [N3](#n3) | network | Bytes that arrive after a client's `MsgDone` | Kept on the mini-protocol's queue for a later run | Refused (no agency in `Done`); never replayed into a new run | Silent | conforms | Recorded (model 01); no visible effect while gOuroboros clients never restart a finished run |
 | [N4](#n4) | network | Keep-alive client wait for the server's reply | 60 s, with a `TODO` asking for 10 s | 10 s by default (`WithTimeout` changes it) | 60 s in `StServer` | conforms (stricter) | Recorded; deliberate |
 | [N5](#n5) | network | Clients that never send `MsgDone` | Keep-alive, peer-sharing and local-state-query clients send `MsgDone` when told to terminate | No API sends it; `Stop` unregisters and the connection closes later | The client may terminate; it is not required to | conforms | Recorded (models 01, 08, 10). A node holds an acquired local state until the connection closes |
@@ -153,12 +153,12 @@ Only a misbehaving peer sends early. The reference sometimes answers such a peer
 
 **Which side a state's timeout applies to** (kind 1: open PR moves to the reference)
 
-- **What differs.** Reference: only the side waiting to receive is timed. gOuroboros: main: the side holding agency is timed too, so a slow local callback times itself out; PR: receiver only.
+- **What differs.** Reference: only the side waiting to receive is timed. gOuroboros: main: the side holding agency is timed too, so a slow local callback times itself out; PR: receiver only, and its timer starts once the handler for the previous message returns (at `c0a5ca9c3` a slow inbound handler still counted against the peer: review finding, model 03 `EngineTimerAtTransitionBug.cfg`).
 - **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, block-fetch "Timeouts per state", lines 1227-1228 (same sentence in every N2N protocol): "These limits bound how much time the receiver side can wait for the arrival of a message."
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/framework/lib/Ouroboros/Network/Driver/Limits.hs` 109-131 (`sendMessage` untimed, `recvMessage` wrapped in `timeoutFn`)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/protocol.go` 2322-2362 (timer armed for `agencyLocal` too); PR #3159 head `c0a5ca9c3` `protocol/protocol.go` 2323-2328 (`skipTimeout = true` for `agencyLocal`)
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/protocol.go` 2322-2362 (timer armed for `agencyLocal` too); PR #3159 head `18e0418a` `protocol/protocol.go` (`stateLoop`: `skipTimeout` for `agencyLocal`, `handling` and `handlerDoneChan`; `recvLoop` reports the handler's return)
 - **Verdict.** conforms (implementation choice) → conforms
-- **Status.** Open PR #3159
+- **Status.** Open PR #3159 at `18e0418a` (model 03 slice 3, `EngineTimer.tla`)
 
 The spec only describes the receiver's wait; timing the sender is extra. Its visible effect on main is a server that drops a healthy connection because its own callback was slow (seen with block-fetch and peer-sharing servers).
 

@@ -13,6 +13,7 @@ The engine is modelled in slices, simplest first:
 | --- | --- | --- |
 | 1 | `EngineAdmission.tla` | Admission for protocols that do not pipeline |
 | 2 | `EnginePipelining.tla` | Pipelined requests end to end: sends, deferred state changes, the agency token, and replies that arrive early |
+| 3 | `EngineTimer.tla` | When a state's timeout is armed: only while this side waits for the peer, never while it holds agency or handles the peer's message |
 
 Read [Model 01](../01-keepalive/README.md) first.
 
@@ -223,3 +224,58 @@ Twice TLC reported a failure that was the model's fault, not gOuroboros's:
 
 Both were found by reading the trace step by step against the code. A model
 that disagrees with the code is wrong until the code says otherwise.
+
+## Slice 3: when a state's timer runs (`EngineTimer.tla`)
+
+The specification bounds "how much time the receiver side can wait for the
+arrival of a message" (`miniprotocols.tex` 1227-1228), and the reference
+driver wraps only `recvMessage` in its timeout (`Driver/Limits.hs` 109-131).
+So neither the time this side holds agency nor the time its own code spends
+on a received message counts against the peer.
+
+gOuroboros `d0b95845` armed a timer on entering any state with a timeout,
+including one where this side holds agency. PR #3159 at `c0a5ca9c` stopped
+that, but still armed the timer at the inbound transition, which `recvLoop`
+makes before running `MessageHandlerFunc`; a slow `BlockFunc` in block-fetch
+Streaming, where the peer keeps agency, counted against `BlockTimeout`
+(review finding: a 300 ms handler under a 20 ms timeout closed the
+connection, 5/5). No earlier slice modelled timers, so nothing could catch it.
+
+The fix at `8cea43c7`: while a handler runs, no transition arms a timer,
+whether made by the received message or by a message the handler sends;
+when the handler returns, `recvLoop` tells `stateLoop`, which arms the
+current state's timer if the peer has agency. Switch `TimerArm` selects the
+version. Time is not modelled: the timer may fire at any step while armed.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `EngineTimer.cfg` (`afterHandler`, the fix) | 26 | passes `OnlyThePeerIsTimed` and `PeerWaitIsTimed` |
+| `EngineTimerAtTransitionBug.cfg` (`c0a5ca9c`) | | `OnlyThePeerIsTimed` violated: fires while the handler runs |
+| `EngineTimerEveryStateBug.cfg` (`d0b95845`) | | `OnlyThePeerIsTimed` violated |
+| `EngineTimerNeverArmBug.cfg` (mutation: nothing armed after a handler) | | `PeerWaitIsTimed` violated: a silent peer is never timed out |
+| `EngineTimerProbeFiresBug.cfg` | | probe violated: the fix still times a slow peer |
+| `EngineTimerProbeHandlingBug.cfg` | | probe violated: a handler runs while the peer keeps agency |
+
+The first version of the fix deferred only the inbound transition's timer;
+TLC found a handler that sends a message handing agency to the peer and is
+then timed out while still running, so the fix defers every arming made
+while a handler runs.
+
+Go test `TestStateTimeoutExcludesInboundHandler` (`protocol/protocol_test.go`)
+handles a message that leaves the peer with agency for 500 ms under a 100 ms
+timeout: it fails at `c0a5ca9c` and passes at `8cea43c7`, which also checks
+that the timer then runs. Commit `18e0418a` removes the Leios Votes server's
+Busy timeout, dead since the server holds agency in Busy, and corrects the
+Leios Votes, Peer Sharing and `PROTOCOL_LIMITS.md` timeout text: it cannot
+affect the model, which already never times the side holding agency.
+
+### Run it
+
+```sh
+cd specs/03-engine
+../../bin/tlc -config EngineTimer.cfg EngineTimer.tla
+# expected to fail
+../../bin/tlc -config EngineTimerAtTransitionBug.cfg EngineTimer.tla
+../../bin/tlc -config EngineTimerEveryStateBug.cfg EngineTimer.tla
+../../bin/tlc -config EngineTimerNeverArmBug.cfg EngineTimer.tla
+```
