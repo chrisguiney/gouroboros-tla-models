@@ -60,7 +60,7 @@ Read these in order. Each one builds on the last.
 19. [Model 18: Genesis density](specs/18-consensus-genesis/README.md):
     the density rule beside the reference's GDD governor and Limit on
     Eagerness.
-20. [Glossary](docs/glossary.md): keep it open while you read anything else.
+20. . [Glossary](docs/glossary.md): keep it open while you read anything else.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
