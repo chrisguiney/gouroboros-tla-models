@@ -299,6 +299,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/handshake-accept-negotiated-data`; model `handshake` `HandshakeAcceptOwnDataBug.cfg` reproduces main. No wrong outcome found: the reference client recomputes the agreement, and every combining rule is idempotent and commutative
 - **Review follow-up.** PR #3194 at `8ab16c0f`: the server's `FinishedFunc` also gets the agreed data (reference `Server.hs` 42-44); model `handshake` `AgreedDataBothSides`, `HandshakeServerRawPeerDataBug.cfg`
+- **Review follow-up.** PR #3194 at `97039771` and PR #3127 at `8461ae3a`: a version table entry held as a pointer now agrees like a value; before, it came back unchanged as the side's own data. Verdict: conforms on both branches. Model `handshake` `AgreeHeld`, `HandshakePointerUnagreedBug.cfg`, `HandshakeSimOpenPointerUnagreedBug.cfg`
 
 ### N14
 
