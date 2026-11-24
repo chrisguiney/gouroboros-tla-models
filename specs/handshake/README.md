@@ -247,6 +247,24 @@ Branch `fix/handshake-simultaneous-open` follows the reference:
   Fixed on PR #3194 at `8ab16c0f`: the callback gets the agreed data;
   `TestServerEndsWithAgreedDiffusionMode` fails without it, both on the
   callback data and, alone, on the muxer refusing a responder's segment.
+- Review of PR #3194 (head `8ab16c0f`, bot finding on
+  `protocol/handshake/version_data.go:31`): the version data methods have
+  value receivers, so a version table may hold a pointer, and
+  `agreedVersionData` matched value types only. A pointer entry came back
+  unchanged: the accept and the end data were the side's own data, not the
+  agreement. The reference has no such form [R6]. The model shared the gap:
+  it had no notion of how an entry is held. `AgreeHeld` now stands for the
+  agreement as gOuroboros computes it, and Mutation `"PointerUnagreed"`
+  reproduces the defect (`HandshakePointerUnagreedBug.cfg` breaks
+  `AgreedDataBothSides`, `HandshakeSimOpenPointerUnagreedBug.cfg` breaks
+  `SimAgreedData`). Fixed by reading through the pointer to a copy, without
+  changing the caller's entry: PR #3194 at `97039771` (pointer cases of
+  `TestServerAcceptsWithNegotiatedVersionData` fail without it) and PR #3127
+  at `8461ae3a` (pointer case of `TestSimultaneousOpen` fails without it).
+  The function stays identical on both branches.
+- PR #3194 at `2a27ae97`, CI's nil-safety check on
+  `connection_agreed_mode_test.go`: test-only, the test now checks the
+  segment it builds before sending it; nothing in the model changes.
 
 Tests: `protocol/handshake/simultaneous_open_test.go` (highest common
 version, a version only one side speaks, no common version, magic
@@ -264,7 +282,7 @@ fails on `61046085`.
 | When is a query answered? | Query "will send back all supported versions" [S4] | Only if acceptOrRefuse accepts and the agreed data asks [R4] | If any decodable proposed version asks, before negotiating | **Differs**; fixed on a branch |
 | Unsolicited `MsgQueryReply` | Not stated | Taken as a query result [R2] | Error | Stricter, harmless |
 | `MsgQueryReply` in the state machine | Absent [S2] | Present [R1] | Present | Spec out of date |
-| Data in `MsgAcceptVersion` | Negotiated data [S7] | Agreed data [R9][R6] | The server's own data; each side's callback gets the peer's data | **Differs**, no wrong outcome found (the reference client recomputes the agreement); fixed on a branch |
+| Data in `MsgAcceptVersion` | Negotiated data [S7] | Agreed data [R9][R6] | The server's own data; each side's callback gets the peer's data | **Differs**, no wrong outcome found (the reference client recomputes the agreement); fixed on a branch, pointer-held entries included (PR #3194 `97039771`) |
 | Simultaneous open | Supported [S2][S6] | `MsgReplyVersions` [R1][R2] | Not supported | **Differs**; fixed on a branch |
 | Proposal keys in ascending order | Required for every key [S7] | Recognised keys out of order fail to decode; unrecognised keys skipped [R10] | Accepted in any order; duplicates rejected | **Differs** (lenient); fixed on a branch, which follows the reference |
 | Size limits | 5760 both states [S3] | 5760 [R5] | 5760 | Agree |

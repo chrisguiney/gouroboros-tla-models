@@ -58,14 +58,14 @@ VARIABLE data   \* data[r]: the version data side r ends with, NoParams until it
 simVars == <<vars, data>>
 
 \* In English: "The data side r ends with after accepting version v: the
-\* peer's own data for v under RawPeerData, else the agreement of r's data
-\* with the peer's."
+\* peer's own data for v under RawPeerData, else the agreement of r's data,
+\* however it is held, with the peer's."
 \* Literally: "EndData of r and v is defined as: if RawPeerData then table of
-\*   Peer of r, applied to v; else Agree of table of r applied to v and table of
-\*   Peer of r applied to v."
+\*   Peer of r, applied to v; else AgreeHeld of table of r applied to v and
+\*   table of Peer of r applied to v."
 EndData(r, v) ==
     IF RawPeerData THEN table[Peer(r)][v]
-    ELSE Agree(table[r][v], table[Peer(r)][v])
+    ELSE AgreeHeld(table[r][v], table[Peer(r)][v])
 
 \* Both sides' data never asks for a query. With AsymmetricDecode the `ok`
 \* flag varies: one side may send data the other cannot decode.

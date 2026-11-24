@@ -133,6 +133,17 @@ Agree(l, r) == [magic |-> l.magic, query |-> l.query \/ r.query, ok |-> TRUE,
 \*   of subsets of Versions."
 Tables(P) == UNION {[D -> P] : D \in SUBSET Versions}
 
+\* A table entry may be held as a value or as a pointer to one; the
+\* reference has no such distinction, and the agreement reads through the
+\* pointer, so either form agrees alike [R6]. Mutation "PointerUnagreed"
+\* models a table holding a pointer that the agreement passes back
+\* unchanged, as gOuroboros did at 8ab16c0f.
+\* In English: "The agreement of a local entry l, however it is held, with
+\* a remote entry r; under the mutation, l itself."
+\* Literally: "AgreeHeld of l and r is defined as: if Mutation equals
+\*   "PointerUnagreed" then l, else Agree of l and r."
+AgreeHeld(l, r) == IF Mutation = "PointerUnagreed" THEN l ELSE Agree(l, r)
+
 \* The client proposes any non-empty table. The server's own data is
 \* always decodable and never asks for a query: only a client queries [S4].
 \* Literally: "ClientTables is defined as Tables of Params without the members
@@ -375,18 +386,19 @@ ServerDecision(local, remote) ==
 \* [S7][R9]; gOuroboros main (AcceptOwnData) sends the server's own data.
 \* The client checks only its magic, which agreed data inherits [S4].
 \* Literally: "AcceptData of local, remote and v is defined as: if
-\*   AcceptOwnData then local of v, else Agree of local of v and remote of v."
+\*   AcceptOwnData then local of v, else AgreeHeld of local of v and remote
+\*   of v."
 AcceptData(local, remote, v) ==
-    IF AcceptOwnData THEN local[v] ELSE Agree(local[v], remote[v])
+    IF AcceptOwnData THEN local[v] ELSE AgreeHeld(local[v], remote[v])
 
 \* In English: "The version data the server ends with after accepting v:
 \* the client's own data under ServerRawPeerData, else the agreement of the
 \* two." The reference server ends with the agreed data (Server.hs 42-44).
 \* Literally: "ServerEndData of local, remote and v is defined as: if
-\*   ServerRawPeerData then remote of v, else Agree of local of v and remote
-\*   of v."
+\*   ServerRawPeerData then remote of v, else AgreeHeld of local of v and
+\*   remote of v."
 ServerEndData(local, remote, v) ==
-    IF ServerRawPeerData THEN remote[v] ELSE Agree(local[v], remote[v])
+    IF ServerRawPeerData THEN remote[v] ELSE AgreeHeld(local[v], remote[v])
 
 \* In English: "The message that carries decision d."
 \* Literally: "ReplyMsg of d, local and remote is defined as: in the case d's
