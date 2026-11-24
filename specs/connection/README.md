@@ -355,6 +355,25 @@ channel is closed, goleak is clean), and, since a connection does not carry
 them, `protocol/handshake` and `protocol/messagesubmission` tests that stop
 their own instance from a callback.
 
+### Part 5, fourth pass: `Muxer.Stop(ctx)`
+
+`Muxer.Stop` then took a context too, closing the rest of inventory A6: it
+waits for the muxer's cleanup goroutine, which waits for the read loop, the
+forwarders and the senders, unless the context carries the muxer's own
+callback marker (`Muxer.CallbackContext`). Fix `muxerStop` adds that join to
+`Stop` itself; shutdown's `Stop` carries no marker, so it joins as
+`muxerJoin` did. A `Metrics` callback (`mcb`), which runs on a forwarder, may
+stop its own muxer (`MetricsStopKinds`): with its marker (`"own"`) or without
+(`"plain"`). The cleanup goroutine cannot exit while that callback runs. New
+invariant: `NoMetricsCallbackAfterClose`.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ConnectionTeardownMuxerStop.cfg` (every fix with `muxerStop` instead of `muxerJoin`, a callback stops its muxer with its marker) | 29,350 | passes all eight |
+| `ConnectionTeardownMetricsAfterCloseBug.cfg` (neither join: `Stop` only signals) | | `NoMetricsCallbackAfterClose` violated |
+| `ConnectionTeardownMuxerStopPlainBug.cfg` (the callback's `Stop` carries no marker) | | deadlock: the callback waits for the goroutine running it, which is why the marker exists |
+| `ConnectionTeardownMuxerStopNoMarkerBug.cfg` (mutation: `Stop` ignores the marker) | | deadlock |
+
 ## What model `connection` found
 
 - **Messages survive restarts.** Carrying the read buffer, admitting one

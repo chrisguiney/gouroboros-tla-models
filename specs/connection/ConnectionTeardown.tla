@@ -44,6 +44,11 @@
 (* loops, including one the instance starts after the excuse (a RunLoop  *)
 (* goroutine, OwnerLateLoop).                                             *)
 (*                                                                         *)
+(* Muxer.Stop(ctx) (same branch, "muxerStop") makes the muxer's own Stop   *)
+(* wait for its cleanup goroutine, and so for the forwarders that run the  *)
+(* Metrics callbacks, unless ctx carries the muxer's callback marker. A    *)
+(* Metrics callback (mcb) may stop its own muxer (MetricsStopKinds).       *)
+(*                                                                         *)
 (* No specification source: this is gOuroboros's own Go API.               *)
 (* Symbols are explained in specs/keepalive/KeepAlive.tla's header.        *)
 (***************************************************************************)
@@ -65,12 +70,25 @@ CONSTANTS
                         \* (RunLoop), which returns only after the callback
                         \* has (the leios-notify late-notification loop
                         \* waits for the source's result)
+    MetricsStopKinds,   \* how a Metrics callback, which runs on one of
+                        \* the muxer's goroutines, may stop its own
+                        \* muxer, a subset of {"own", "plain"}: "own":
+                        \* Stop with the muxer's CallbackContext; "plain":
+                        \* Stop with a context without that marker. Empty:
+                        \* no Metrics callback runs.
     UserMarker,         \* the user's Close: "none" (Close), or "foreign"
                         \* (CloseContext called from another connection's
                         \* callback, with that callback's context)
     Fix                 \* a subset of {"fence", "muxerGuard", "join",
                         \* "closeEarly", "anyMarker", "muxerJoin",
-                        \* "excuseEntries"}:
+                        \* "excuseEntries", "muxerStop",
+                        \* "muxerStopNoMarker"}:
+                        \* "muxerStop": Muxer.Stop(ctx) waits for the
+                        \*   muxer's cleanup goroutine unless ctx carries
+                        \*   the muxer's callback marker; shutdown's Stop
+                        \*   carries none, so it joins as muxerJoin does.
+                        \* "muxerStopNoMarker" (mutation, with
+                        \*   "muxerStop"): Stop ignores the marker.
                         \* "muxerJoin": shutdown waits for the muxer's
                         \*   goroutines after muxer.Stop.
                         \* "excuseEntries" (mutation, with "join"): the
@@ -99,7 +117,9 @@ CONSTANTS
                         \*   closes the conn and makes setup give up.
 
 ASSUME Fix \subseteq {"fence", "muxerGuard", "join", "closeEarly", "anyMarker",
-                      "muxerJoin", "excuseEntries"}
+                      "muxerJoin", "excuseEntries", "muxerStop",
+                      "muxerStopNoMarker"}
+ASSUME MetricsStopKinds \subseteq {"own", "plain"}
 ASSUME CloseCtxMayEnd \in BOOLEAN
 ASSUME OwnerLateLoop \in BOOLEAN
 ASSUME CallbackCloseKinds \subseteq {"own", "plain"}
@@ -134,17 +154,21 @@ VARIABLES
     exempt,     \* the callback's goroutine is excused from the shutdown join
     closeReq,   \* a Close came before doneChan existed
     userExcept, \* the user's Close skips waiting for the callback's loop
-    loopLate    \* the loop the callback's instance starts while the
+    loopLate,   \* the loop the callback's instance starts while the
                 \* callback is in Close: "none", "running" or "exited"
+    mcb,        \* a Metrics callback on a muxer goroutine: "idle",
+                \* "running", "stopping" (in Muxer.Stop) or "done"
+    mcbKind     \* the context its Stop carries: "none", "own", "plain"
 
 chans == <<doneChan, errorChan, connClosed, conn, muxer>>
 wgv   == <<wg, waitBegan, lateAdd, wgMu>>
 prot  == <<hs, hsErr, protoErr, muxErr, muxErrUsed, proto, cb>>
 flags == <<panicked, gaveUp, hsLate>>
 joinv == <<loopCb, loopOther, cbClose, exempt, closeReq, userExcept, loopLate>>
+muxv  == <<mcb, mcbKind>>
 \* Literally: "vars is defined as the tuple of pc, chans, wgv, prot,
-\*   flags and joinv."
-vars  == <<pc, chans, wgv, prot, flags, joinv>>
+\*   flags, joinv and muxv."
+vars  == <<pc, chans, wgv, prot, flags, joinv, muxv>>
 
 \* Literally: "Procs is defined as the set containing "setup", "user",
 \*   "sd", "mf", "pf" and "mc"."
@@ -160,7 +184,8 @@ Procs == {"setup", "user", "sd", "mf", "pf", "mc"}
 \*   and proto equals "none", and cb equals "idle", and panicked, gaveUp
 \*   and hsLate equal FALSE, and loopCb and loopOther equal "none", and
 \*   cbClose equals "none", and exempt, closeReq and userExcept equal
-\*   FALSE, and loopLate equals "none"."
+\*   FALSE, and loopLate equals "none", and mcb equals "idle", and
+\*   mcbKind equals "none"."
 Init ==
     /\ pc = [p \in Procs |-> CASE p = "setup" -> "mkDone"
                                [] p = "user"  -> "idle"
@@ -175,6 +200,7 @@ Init ==
     /\ loopCb = "none" /\ loopOther = "none" /\ cbClose = "none"
     /\ exempt = FALSE /\ closeReq = FALSE /\ userExcept = FALSE
     /\ loopLate = "none"
+    /\ mcb = "idle" /\ mcbKind = "none"
 
 \* In English: "Goroutine p moves to step s."
 \* Literally: "Goto of p and s is defined as: pc in the next state equals pc
@@ -623,18 +649,19 @@ AfterMuxer ==
         THEN Goto("sd", "join") /\ UNCHANGED waitBegan
         ELSE AfterJoin
 
-\* In English: "If c.muxer is set, muxer.Stop (which only closes the
-\* muxer's doneChan). Then, under muxerJoin, wait for the muxer's
-\* goroutines; otherwise go straight on."
+\* In English: "If c.muxer is set, muxer.Stop: it closes the muxer's
+\* doneChan, and under muxerStop also waits for the muxer's goroutines,
+\* since shutdown's context carries no marker. Under muxerJoin, shutdown
+\* waits for them itself. Otherwise go straight on."
 \* Literally: "SdMuxer is defined as: pc of "sd" equals "readMuxer", and
 \*   muxer in the next state equals (if muxer equals "running" then
-\*   "stopped" else muxer), and if "muxerJoin" is a member of Fix then
-\*   Goto of "sd" and "muxJoin" and waitBegan is unchanged, else
-\*   AfterMuxer; and the rest is unchanged."
+\*   "stopped" else muxer), and if "muxerJoin" or "muxerStop" is a member
+\*   of Fix then Goto of "sd" and "muxJoin" and waitBegan is unchanged,
+\*   else AfterMuxer; and the rest is unchanged."
 SdMuxer ==
     /\ pc["sd"] = "readMuxer"
     /\ muxer' = IF muxer = "running" THEN "stopped" ELSE muxer
-    /\ IF "muxerJoin" \in Fix
+    /\ IF "muxerJoin" \in Fix \/ "muxerStop" \in Fix
           THEN Goto("sd", "muxJoin") /\ UNCHANGED waitBegan
           ELSE AfterMuxer
     /\ UNCHANGED <<doneChan, errorChan, connClosed, conn, wg, lateAdd, wgMu, prot,
@@ -751,16 +778,85 @@ ProtoFwd ==
     /\ UNCHANGED joinv
 
 \* In English: "The muxer cleanup goroutine closes the conn once the muxer
-\* is stopped. Under muxerJoin, shutdown waits for it."
+\* is stopped, and exits once the forwarders have, so not while a Metrics
+\* callback runs on one. Under muxerJoin or muxerStop, shutdown waits for
+\* it."
 \* Literally: "MuxCleanup is defined as: pc of "mc" equals "wait", and muxer
-\*   equals "stopped", and conn in the next state equals "closed", and Goto
-\*   of "mc" and "exited", and the rest is unchanged."
+\*   equals "stopped", and mcb is not a member of the set containing
+\*   "running" and "stopping", and conn in the next state equals "closed",
+\*   and Goto of "mc" and "exited", and the rest is unchanged."
 MuxCleanup ==
     /\ pc["mc"] = "wait" /\ muxer = "stopped"
+    /\ mcb \notin {"running", "stopping"}
     /\ conn' = "closed"
     /\ Goto("mc", "exited")
     /\ UNCHANGED <<doneChan, errorChan, connClosed, muxer, wgv, prot, flags>>
     /\ UNCHANGED joinv
+
+-----------------------------------------------------------------------------
+(* A Metrics callback on one of the muxer's goroutines *)
+
+\* In English: "A Metrics callback begins on a forwarder of the running
+\* muxer; none begins once it is stopping."
+\* Literally: "MetricsCb is defined as: MetricsStopKinds is not empty, and
+\*   mcb equals "idle", and muxer equals "running", and mcb in the next
+\*   state equals "running", and the rest is unchanged."
+MetricsCb ==
+    /\ MetricsStopKinds /= {}
+    /\ mcb = "idle" /\ muxer = "running"
+    /\ mcb' = "running"
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, joinv, mcbKind>>
+
+\* In English: "The callback returns without stopping the muxer."
+\* Literally: "MetricsCbReturn is defined as: mcb equals "running", and mcb
+\*   in the next state equals "done", and the rest is unchanged."
+MetricsCbReturn ==
+    /\ mcb = "running"
+    /\ mcb' = "done"
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, joinv, mcbKind>>
+
+\* In English: "The callback calls Muxer.Stop with a context of kind k: the
+\* muxer's doneChan closes at once."
+\* Literally: "MetricsCbStop is defined as: mcb equals "running", and there
+\*   is some k in MetricsStopKinds such that mcbKind in the next state
+\*   equals k, and muxer in the next state equals (if muxer equals
+\*   "running" then "stopped" else muxer), and mcb in the next state equals
+\*   "stopping", and the rest is unchanged."
+MetricsCbStop ==
+    /\ mcb = "running"
+    /\ \E k \in MetricsStopKinds : mcbKind' = k
+    /\ muxer' = IF muxer = "running" THEN "stopped" ELSE muxer
+    /\ mcb' = "stopping"
+    /\ UNCHANGED <<pc, doneChan, errorChan, connClosed, conn, wgv, prot, flags,
+                   joinv>>
+
+\* In English: "That Stop skips the join when it only signals (without
+\* muxerStop), or when its context carries the muxer's own marker and the
+\* marker is honoured."
+\* Literally: "MetricsStopSkipsJoin is defined as: "muxerStop" is not a
+\*   member of Fix, or (mcbKind equals "own" and "muxerStopNoMarker" is
+\*   not a member of Fix)."
+MetricsStopSkipsJoin ==
+    \/ "muxerStop" \notin Fix
+    \/ mcbKind = "own" /\ "muxerStopNoMarker" \notin Fix
+
+\* In English: "Stop returns, and the callback with it, once it skips the
+\* join or the cleanup goroutine has exited; that goroutine waits for the
+\* callback, so a Stop that waits for it from the callback never returns."
+\* Literally: "MetricsCbStopReturn is defined as: mcb equals "stopping",
+\*   and (MetricsStopSkipsJoin, or pc of "mc" is a member of the set
+\*   containing "notStarted" and "exited"), and mcb in the next state
+\*   equals "done", and the rest is unchanged."
+MetricsCbStopReturn ==
+    /\ mcb = "stopping"
+    /\ MetricsStopSkipsJoin \/ pc["mc"] \in {"notStarted", "exited"}
+    /\ mcb' = "done"
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, joinv, mcbKind>>
+
+\* Literally: "MetricsStep is defined as: MetricsCb, or MetricsCbReturn, or
+\*   MetricsCbStop, or MetricsCbStopReturn."
+MetricsStep ==
+    \/ MetricsCb \/ MetricsCbReturn \/ MetricsCbStop \/ MetricsCbStopReturn
 
 -----------------------------------------------------------------------------
 
@@ -774,7 +870,8 @@ MuxCleanup ==
 \*   containing "notStarted" and "exited", and cb does not equal "running",
 \*   and hsErr does not equal "checked", and loopCb and loopOther do not
 \*   equal "running", and cbClose does not equal "waiting", and loopLate
-\*   does not equal "running"."
+\*   does not equal "running", and mcb is not a member of the set
+\*   containing "running" and "stopping"."
 Finished ==
     /\ pc["setup"] \in {"returned", "failed"}
     /\ pc["user"] \in {"returned", "returnedEarly", "returnedErr"}
@@ -783,6 +880,7 @@ Finished ==
     /\ cb /= "running" /\ hsErr /= "checked"
     /\ loopCb /= "running" /\ loopOther /= "running" /\ cbClose /= "waiting"
     /\ loopLate /= "running"
+    /\ mcb \notin {"running", "stopping"}
 
 \* In English: "A step is one step of one goroutine or one event; once
 \* everything is over, nothing changes. Any other state with no step is a
@@ -792,9 +890,9 @@ Finished ==
 \*   LoopExit, or LateLoopStart, or LateLoopExit, or SdJoin, or SdMuxJoin,
 \*   or SetupStep, or UserClose, or UserReturn,
 \*   or SdBegin, or SdMuxer, or SdFenceLock, or SdFenceUnlock, or SdRest,
-\*   or MuxFwd, or ProtoFwd, or MuxCleanup, or (Finished and vars is
-\*   unchanged)."
-Next ==
+\*   or MuxFwd, or ProtoFwd, or MuxCleanup (together ConnStep), each with
+\*   muxv unchanged; or MetricsStep; or (Finished and vars is unchanged)."
+ConnStep ==
     \/ HsFinish \/ HsErrCheck \/ HsErrSend \/ MuxError \/ Callback
     \/ CallbackClose \/ CallbackCloseReturn \/ LoopExit \/ SdJoin
     \/ LateLoopStart \/ LateLoopExit \/ SdMuxJoin
@@ -802,6 +900,10 @@ Next ==
     \/ UserClose \/ UserReturn
     \/ SdBegin \/ SdMuxer \/ SdFenceLock \/ SdFenceUnlock \/ SdRest
     \/ MuxFwd \/ ProtoFwd \/ MuxCleanup
+
+Next ==
+    \/ ConnStep /\ UNCHANGED muxv
+    \/ MetricsStep
     \/ Finished /\ UNCHANGED vars
 
 \* Literally: "Spec is defined as: Init holds at the start, and always,
@@ -861,6 +963,14 @@ CloseTearsDown ==
 \*   "notStarted" and "exited"."
 MuxerJoinedAfterClose ==
     pc["user"] = "returned" => pc["mc"] \in {"notStarted", "exited"}
+
+\* In English: "After Close returns without an error, no Metrics callback
+\* runs, nor is one in Muxer.Stop."
+\* Literally: "NoMetricsCallbackAfterClose is defined as: if pc of "user"
+\*   equals "returned", then mcb is not a member of the set containing
+\*   "running" and "stopping"."
+NoMetricsCallbackAfterClose ==
+    pc["user"] = "returned" => mcb \notin {"running", "stopping"}
 
 (* Reachability probes: each is expected to be violated. *)
 
