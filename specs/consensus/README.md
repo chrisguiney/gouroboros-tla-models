@@ -202,6 +202,31 @@ Byron is not covered by this slice. Its first block names the genesis
 file's hash, which gOuroboros' Byron validator does not hold, so the Byron
 validator still accepts any predecessor after Origin.
 
+## Slice 4: the Byron envelope and its predecessor kind (`ByronEnvelope.tla`)
+
+The Byron slot and block-number rules [B1][R8], over every predecessor
+kind (Origin, main, EBB), every way the caller passes the predecessor (as a
+header or as a whole block), every header kind, and slots and numbers
+around the predecessor's. The reference takes the predecessor's kind from
+the block itself (`getTipInfo` reads `byronHeaderIsEBB`, [B1] 30-32).
+
+| Config | gOuroboros | Result |
+| --- | --- | --- |
+| `ByronEnvelope` | PR #3111 at `b137d455` | `EnvelopeAgrees`, `ReprIrrelevant` hold |
+| `ByronEnvelopeEBBHeaderOnlyBug` | PR #3111 at `094aeac6`: only a `*ByronEpochBoundaryBlockHeader` counts as an EBB | `EnvelopeAgrees` fails: a main block after an EBB block in the same slot is refused |
+| `ByronEnvelopeProbeSharedSlotBug` | probe | `NoMainSharesEBBSlot` fails: the shared slot is reachable |
+
+**The modelling gap.** The earlier Byron work was a Go table only
+(`TestByronEnvelopeMatchesReferenceTable`), and it passed every predecessor
+as a header, so it shared the defect: `ValidateByronBlockHeader` accepts
+any value with a slot, number and hash, and a `*ByronEpochBoundaryBlock`
+predecessor counted as a main block. Review (CodeRabbit on
+`consensus/byron/validate.go:1242`) found it. The table now runs with the
+predecessor as a header and as a block; at `094aeac6` the block run fails
+three rows (EBB then main in the EBB's slot; EBB then EBB at the next
+number, and at the same number accepted). `b137d455` classifies both
+representations.
+
 ## Go tests and mutations
 
 Branch `test/consensus-state-model` (gOuroboros, from `61046085`):

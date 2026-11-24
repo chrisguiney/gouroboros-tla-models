@@ -48,7 +48,8 @@ gOuroboros (`origin/main` at `61046085`):
    node-to-client hang, as the specification intends?
 9. Simultaneous open (`HandshakeSimOpen.tla`): when both sides dial at once,
    do both pick the same version (`SymmetricOutcome`, `SimAcceptsHighest`,
-   `SameStateWhenQuiet`)?
+   `SameStateWhenQuiet`), and end with the same agreed version data
+   (`SimAgreedData`)?
 10. Does `MsgAcceptVersion` carry the negotiated data
     (`AcceptCarriesNegotiatedData`)?
 11. Does every receiver reject a version table whose recognised keys are
@@ -82,6 +83,7 @@ client table (288) against every server table (24), 6,912 starting pairs
 | `HandshakeSimOpenGouroboros.cfg` (gOuroboros after the fix) | 4,032 | passes |
 | `HandshakeSimOpenEarlyReadBug.cfg` (the fix without the wait in `Client.Start`) | | **fails** `NoViolations` |
 | `HandshakeSimOpenAsymmetricBug.cfg` (one side's data undecodable by the other) | | **fails** `SymmetricOutcome` |
+| `HandshakeSimOpenRawPeerDataBug.cfg` (PR #3127 at `78792c96`: each side ends with the peer's raw data) | | **fails** `SimAgreedData` |
 | `HandshakeTable.cfg`, `HandshakeTableGouroboros.cfg` | | print the receive table |
 
 The gOuroboros failure is short: the client proposes only version 1 with the
@@ -100,7 +102,11 @@ for a reference client: it recomputes `acceptableVersion` with its own data
 sharing `<>`, query `||`, Peras `min`) is idempotent and commutative, so
 `agree(c, agree(s, c)) = agree(c, s)`. The fix
 (`fix/handshake-accept-negotiated-data`) sends the agreed data; the
-`FinishedFunc` callback still receives the peer's data.
+`FinishedFunc` callback still receives the peer's data. PR #3194 at
+`77deeda7` only moves `agreedVersionData` into
+`protocol/handshake/version_data.go`, the same file the simultaneous-open
+fix uses, so the two PRs share one agreement: no model change, as the
+rule `Agree` already models is unchanged.
 
 **Key order.** The specification requires every key unique and ascending
 [S7]. The reference codec is narrower [R10]: it skips a key its version
@@ -216,6 +222,27 @@ Branch `fix/handshake-simultaneous-open` follows the reference:
   peer's proposal is rejected on arrival: `HandshakeSimOpenEarlyReadBug.cfg`,
   and in Go about one run in 150 of `TestSimultaneousOpen` with the wait
   removed.
+
+- Review of PR #3127 (head `78792c96`, reviewer finding on
+  `protocol/handshake/client.go:257`): the branch handed each side the
+  peer's raw version data. With different diffusion modes the two
+  connections derived opposite full-duplex settings. The reference client
+  ends with `acceptVersion vData vData'`, the agreed data (Client.hs
+  201-215 [R2]). The model shared the defect: `result` carried no data, so
+  nothing could see it. It now records the data each side ends with
+  (`data`, `EndData`), and `SimAgreedData` requires both to hold the
+  agreement of the two tables; `RawPeerData = TRUE` reproduces the branch
+  (`HandshakeSimOpenRawPeerDataBug.cfg`). Fixed in `5826fae1`: the client
+  passes `agreedVersionData(own, peer)` to `FinishedFunc`; the new mixed
+  diffusion-mode cases in `TestSimultaneousOpen` and
+  `TestSimultaneousOpenConnectionsMixedModes` fail without it.
+- Same class, not fixed here: on a normal open the gOuroboros server's
+  `FinishedFunc` still gets the client's raw data, while the reference
+  server ends with the agreed data (Server.hs 42-44). An initiator-only
+  server facing a full-duplex client sets its muxer to
+  initiator-and-responder instead of responder; its mini-protocols still
+  follow its own `fullDuplex`. Not modelled: `Handshake.tla` records no
+  per-side data on a normal open.
 
 Tests: `protocol/handshake/simultaneous_open_test.go` (highest common
 version, a version only one side speaks, no common version, magic

@@ -123,6 +123,22 @@ reference pair. gOuroboros has two defects and three deviations:
   (`LocalTxMonitorTimeoutBug.cfg`). So the default should change only
   after that client fix lands, and only where the application can say when
   its mempool changed.
+- **Review of PR #3196 (head `26f0e50a`): the awaited acquire times out
+  against gOuroboros's own client.** The reviewer reproduced
+  `LocalTxMonitorTimeoutBug.cfg` in Go: with `AwaitMempoolFunc` set, a
+  default client's `AcquireTimeout` (5 s) fires while the server waits, and
+  the PR's tests pass only because they zero it. The model already had this
+  trace, so it needs no change: the fix is the client one, PR #3154
+  (`e9996ade`, `matchAwaitAcquire` and a `TimeoutFunc` that returns 0 for an
+  await), which the reference matches (no time limit on `StAcquiring` [S4]).
+  Checked on a scratch merge of PR #3154 into `26f0e50a` with the tests'
+  `AcquireTimeout` set to 50 ms: the await tests pass (the await lasts at
+  least 100 ms); on `26f0e50a` alone the same change fails
+  `TestServerAwaitAcquireWaitsForChange` with "protocol is shutting down".
+  So PR #3154 merges first, and PR #3196 then drops the zeroed timeout from
+  its test helper. The scratch merge also showed that PR #3154's state-map
+  model test and `TestStopDoesNotWaitForPeer` need `MsgGetMeasures` rows
+  once both land, a merge-order conflict for whichever lands second.
 
 ### Checking the checks
 

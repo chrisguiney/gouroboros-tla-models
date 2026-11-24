@@ -81,12 +81,12 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N24](#n24) | network | Peer-sharing request when peer sharing was negotiated off | Mini-protocol not registered; a segment for it is `UnknownMiniProtocol` and tears the connection down | Answers an empty list | Such a node does not run the server | conforms (implementation choice) | Deliberate (documented in the package) |
 | [N25](#n25) | network | Peer-sharing address forms | An IPv4-mapped IPv6 address is sent as IPv6; the old eight-field IPv6 form is not decoded; declared list length ignored | IPv4-mapped sent as IPv4 (`net.IP.To4`); old form accepted on decode; list length checked | CDDL `peer-sharing-v14.cddl` | conforms | Recorded (model `peersharing`); same endpoint on a dual-stack host |
 | [N26](#n26) | network | Local-tx-monitor: re-acquire (`MsgAwaitAcquire`) is timed | The node holds the answer until the mempool changes | main: the client times it at 5 s, so it dies against a real node; PR: not timed (acquire from `Idle` still is) | Await a new snapshot; no timeouts | does not conform → conforms | Open PR #3154 |
-| [N27](#n27) | network | Local-tx-monitor server answers `MsgAwaitAcquire` at once | Waits until the snapshot differs | Answers immediately with the current snapshot | Await a new snapshot | does not conform | Not fixed; needs a mempool-change signal from the application |
+| [N27](#n27) | network | Local-tx-monitor server answers `MsgAwaitAcquire` at once | Waits until the snapshot differs | Answers immediately with the current snapshot | Await a new snapshot | does not conform | Opt-in fix in PR #3196 (`AwaitMempoolFunc`); merge after PR #3154, which stops the client timing the await |
 | [N28](#n28) | network | Local-tx-monitor `MsgGetMeasures` | Always decoded and answered | Not implemented; decoding fails and the connection is torn down | Part of the protocol | does not conform | Not fixed; a missing feature |
 | [N29](#n29) | network | Local-tx-monitor `Stop` while a snapshot is acquired | `MsgDone` only from `StIdle` (typed) | main: sends `MsgDone` from `Acquired`, an illegal message; PR: sends `MsgRelease` first | `MsgDone` only from `StIdle` | does not conform → conforms | Open PR #3088 (by another contributor) |
 | [N30](#n30) | network | Node-to-client default timeouts | No time limits in the node-to-client codecs | main: local-state-query 5 s / 180 s, local-tx-monitor 5 s / 30 s, local-tx-submission 30 s; PRs: none by default | No timeouts | does not conform → conforms | Open PRs #3159 and #3140 |
 | [N31](#n31) | network | Local-state-query server after `MsgDone` | Restarted by the inbound governor | main: stays `Done`; a new run's `MsgAcquire` is never answered; PR: restarts | A cleanly terminated server-side mini-protocol is restarted | does not conform → conforms | Open PR #3113 |
-| [N32](#n32) | network | Other servers that do not restart after `MsgDone` | Every responder is restarted | Local-tx-monitor, local-tx-submission, message submission, local message submission, local message notification and Peras votes stay done | Restart | does not conform | Not fixed. Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main |
+| [N32](#n32) | network | Other servers that do not restart after `MsgDone` | Every responder is restarted | Local-tx-monitor, local-tx-submission, message submission, local message submission, local message notification and Peras votes stay done | Restart | does not conform | Fixed in PR #3197 (head `c107bb53`). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main |
 | [N33](#n33) | network | Local-state-query `Release` with nothing acquired | Impossible by types | main: sends `MsgRelease` from `Idle`, which tears the connection down; PR: returns `ErrNotAcquired` | `MsgRelease` only from `StAcquired` | does not conform → conforms | Open PR #3113 |
 | [N34](#n34) | network | Local-state-query immutable-tip acquire below version 16 | Refuses to encode it | main: sends it; PR: `ErrAcquireImmutableTipUnsupportedVersion` | Silent | conforms | Open PR #3113 (interoperability defect against old nodes) |
 | [N35](#n35) | network | Local-state-query implicit acquire | No implicit acquire | main: a query on an idle client acquires the volatile tip and never releases it, so later queries answer from a stale state; PR: released when the call returns | Silent (the wire sequence is legal either way) | conforms | Open PR #3113. Library defect (stale answers) |
@@ -271,9 +271,9 @@ The spec does not say whether a query must first pass negotiation; main tells a 
 - **What differs.** Reference: supported: a `MsgProposeVersions` received in `Confirm` is read as `MsgReplyVersions`. gOuroboros: main: not supported (a proposal in `Confirm` is an error); PR: supported.
 - **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, "Handshake mini-protocol", lines 447 and 704-709: "The handshake mini protocol is designed to handle simultaneous TCP open."
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Client.hs` 120 (`MsgReplyVersions vMap -> ...`)
-- **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/client.go` 113 (`default:` error); PR #3127 head `19c0debbf` `client.go` 125-126, 193
+- **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/client.go` 113 (`default:` error); PR #3127 head `19c0debbf` `client.go` 125-126, 193. Review: at `78792c96` each side ended with the peer's raw data (reference: the agreed data, `Client.hs` 213-215); fixed at `5826fae1` (model `handshake` `SimAgreedData`, `HandshakeSimOpenRawPeerDataBug.cfg`)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3127
+- **Status.** Open PR #3127, head `5826fae1`
 
 Simultaneous open happens when two nodes dial each other at the same moment and TCP joins the two attempts into one connection.
 
@@ -451,7 +451,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../MiniProtocol/LocalTxMonitor/Server.hs` 85
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/server.go` 83, 105-125
 - **Verdict.** does not conform
-- **Status.** Fixed opt-in on local branch `fix/localtxmonitor-await-acquire` (`c0ec388e`): `Config.AwaitMempoolFunc` gets the held snapshot and blocks until the mempool differs; unset, the server answers at once as before. The default should not change until the client stops timing an await (PR #3154), and only an application with a mempool-change signal can supply the function. Model: `specs/localtx/LocalTxMonitorFixed.cfg`
+- **Status.** Fixed opt-in on local branch `fix/localtxmonitor-await-acquire` (`c0ec388e`): `Config.AwaitMempoolFunc` gets the held snapshot and blocks until the mempool differs; unset, the server answers at once as before. The default should not change until the client stops timing an await (PR #3154), and only an application with a mempool-change signal can supply the function. Model: `specs/localtx/LocalTxMonitorFixed.cfg`. Published as PR #3196 (head `26f0e50a`); review found the awaited acquire times out against a default gOuroboros client, which `LocalTxMonitorTimeoutBug.cfg` already shows and PR #3154 fixes: merge PR #3154 first, then remove the zeroed `AcquireTimeout` from PR #3196's test helper
 
 ### N28
 
@@ -508,7 +508,7 @@ A node holds `MsgSubmitTx` while its mempool is full, and a state query can be s
 - **Reference.** ouroboros-network `5f356486ab3e` `.../InboundGovernor.hs` 455-470
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/server.go` 164-172, `protocol/localtxsubmission/server.go` 112-120, `protocol/messagesubmission/server.go` 511-520, `protocol/localmessagesubmission/server.go` 315-324 (log only); Peras `protocol/perasvotes/server.go` 59
 - **Verdict.** does not conform
-- **Status.** Fixed on local branches `fix/<protocol>-server-restart`, one per server (local-tx-monitor `885a5991`, local-tx-submission `1086fdb1`; the DMQ and Peras servers on their own branches). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main. Model invariant `NewRunServed` in `specs/localtx`
+- **Status.** Fixed on local branches `fix/<protocol>-server-restart`, one per server (local-tx-monitor `885a5991`, local-tx-submission `1086fdb1`; the DMQ and Peras servers on their own branches). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main. Model invariant `NewRunServed` in `specs/localtx` Published together as PR #3197 (head `c107bb53`). Review: the first draft (`656bbcea`) let `WaitForMessage` in local message notification select on the run's stop channel, so every `MsgClientDone` ended an application wait with a shutdown error; `c107bb53` watches only `Stop` and the connection there (the in-run blocking request still watches its run). Model `specs/dmq` `LocalMessageNotificationRestartWaitBug.cfg` / `AppWaitOutlivesRun`
 
 ### N33
 
@@ -732,9 +732,9 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **What differs.** Reference: slot strictly later except a main block after an EBB; an EBB after a main block shares its number; first block number 0. gOuroboros: main: any main block or EBB may share its predecessor's slot; an EBB may take either number; the first block must be 1; PR: as the reference.
 - **Spec.** cardano-ledger `1210d37fe6bd` `eras/byron/chain/formal-spec/byron-blockchain.tex`, "Permissive BFT Header Processing", line 582: "s > s_last"
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/byron/Ouroboros/Consensus/Byron/Ledger/HeaderValidation.hs` 39-52
-- **gOuroboros.** gOuroboros `d0b95845` `consensus/byron/validate.go` 112-113, 249, 284; PR #3111 head `1bc529c64` same file 93-96, 260-300
+- **gOuroboros.** gOuroboros `d0b95845` `consensus/byron/validate.go` 112-113, 249, 284; PR #3111 head `1bc529c64` same file 93-96, 260-300. Review: at `094aeac6` an EBB predecessor passed as a `*ByronEpochBoundaryBlock` counted as a main block (reference: kind from `byronHeaderIsEBB`, `HeaderValidation.hs` 30-32); fixed at `b137d455` (model `consensus` `ByronEnvelope.tla`)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3111 (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch
+- **Status.** Open PR #3111 at `b137d455` (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch
 
 ### C6
 
@@ -1114,9 +1114,9 @@ No pull request yet (decide whether and how to fix):
 - **N14** Handshake version keys out of order. Fixed on local branch `fix/handshake-version-key-order`.
 - **N18** Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client). Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives.
 - **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed in PR #3195 (head `8f6c6d5b`).
-- **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Not fixed; needs a mempool-change signal from the application.
+- **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Opt-in fix in PR #3196 (head `26f0e50a`), which depends on PR #3154 for the client side.
 - **N28** Local-tx-monitor `MsgGetMeasures`. Not fixed; a missing feature.
-- **N32** Other servers that do not restart after `MsgDone`. Not fixed. Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.
+- **N32** Other servers that do not restart after `MsgDone`. Fixed in PR #3197 (head `c107bb53`). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.
 - **C6** Genesis window anchor. Not fixed; correct only if the caller anchors every fragment at one point (model `consensus-genesis`, `OwnAnchorBug`).
 - **C8** Genesis window count from `SimpleChainFragment`. The float rounding is fixed on local branch `fix/genesis-window-estimate-rounding` (`74699bf6`, no PR); the estimate itself remains. Callers with real headers should implement `ChainFragment` with a count.
 - **C13** The neutral nonce as an identity in the epoch nonce (the rolling part is fixed by #3053). Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet: `EpochNonceFromNonces`, `CalculateEpochNonce` deprecated.
