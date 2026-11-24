@@ -53,7 +53,8 @@ protocol.
   window, stopping and restarting, its queries, and the protocol with its
   limits and timeouts.
 - [Block-fetch](specs/blockfetch/README.md): matching each
-  batch to its request, and stopping with ranges outstanding.
+  batch to its request, stopping with ranges outstanding, and its locks
+  and user callbacks.
 - [Tx-submission](specs/txsubmission/README.md): the
   acknowledgement window and the blocking-style rules.
 - [Peer-sharing](specs/peersharing/README.md): the amount
