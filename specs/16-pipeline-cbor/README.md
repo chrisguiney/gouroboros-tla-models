@@ -177,6 +177,7 @@ ChainDB add-block queue in ouroboros-consensus.
 | Close with blocks queued | every queued block gets `FailedToAddBlock` [R4] | blocks dropped; waiting `Fence` gets `ErrPipelineStopped` | aggregate report only |
 | Rollback | part of chain selection, serialised with adds | caller's job after `WaitForDrain` | defect during `Stop` (fixed on a branch) |
 | Result consumption | promises are optional to read; followers pull | unread `Results` stalls the runner | defect (fixed on a branch: bounded, drop-oldest, never blocks commits) |
+| Decode-only `Results` (header-only, trusted decode-only) | n/a: ChainDB always applies | PR #3161 at `805d32abd`: drop-oldest like full mode, so a slow reader lost committed blocks; PR head `0dbc3775`: always lossless | defect on the PR, fixed at `0dbc3775` |
 
 ## CBOR: preserved bytes and decoder limits
 
@@ -235,7 +236,8 @@ transaction reconstruction found no case.
 ## Not modelled
 
 Metrics, the retained-CBOR byte budget (other than as a reason the stall comes
-sooner), trusted decode-only and header-only modes, panics in stages, parent
+sooner), validation in trusted decode-only and header-only modes (their
+`Results` delivery is modelled by `HasApplyFunc`), panics in stages, parent
 context cancellation without `Stop`, more than one client, and Leios or Peras
 messages in the reference queue.
 
@@ -265,6 +267,32 @@ chain-sync client's next request, which the protocol allows; the reference
 also applies backpressure to block fetching through its bounded add-block
 queue, and never makes chain selection wait on a follower, which the default
 mode still follows.
+
+### Decode-only modes are lossless by default
+
+Review of PR #3161 at `805d32abd` found that `WithHeaderOnly()` and
+`WithTrustedDecodeOnly()` pipelines, which have no `ApplyFunc` and whose only
+output is `Results`, used the drop-oldest default: with a one-result bound and
+a reader 300 ms late, 1 of 8 blocks arrived. The model shared the defect: it
+had no notion of a pipeline without an `ApplyFunc`, so no invariant could see
+it. Switch `HasApplyFunc` (FALSE: header-only or trusted decode-only) and
+switch `DecodeOnlyLossless` (TRUE: the fix at `0dbc3775`, where `Start`
+makes `Results` lossless when there is no `ApplyFunc`) now feed `Lossless`,
+which `Forward` uses. Invariant `DecodeOnlyNeverDropsBeforeStop` says a
+pipeline without an `ApplyFunc` drops nothing before Stop, whether or not the
+caller asked for `WithLosslessResults`.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockPipelineDecodeOnly.cfg` (no `ApplyFunc`, no `WithLosslessResults`, reader, Stop) | 19,838 | passes, including `DecodeOnlyNeverDropsBeforeStop` |
+| `BlockPipelineDecodeOnlyDropBug.cfg` (`805d32abd`: `DecodeOnlyLossless = FALSE`) | | `DecodeOnlyNeverDropsBeforeStop` violated |
+
+Every other config sets `HasApplyFunc = TRUE`, so its results are unchanged.
+Go test `TestDecodeOnlyResultsAreLosslessByDefault` reproduces the drop at
+`805d32abd` (7 of 8 dropped in both modes) and passes at `0dbc3775`. Dingo's
+trusted decode-only pipeline already passes `WithLosslessResults()`, which is
+now redundant there but harmless. The `ARCHITECTURE.md` rewrite of the result
+accounting in the same commit is documentation and cannot affect the model.
 
 ## Running it
 

@@ -45,12 +45,22 @@ CONSTANTS
     ResultsNonBlocking, \* TRUE: the fix, where handing a result off never waits and a full
                         \* Results buffer drops its oldest entry. FALSE: gOuroboros 61046085,
                         \* where the runner waits for room in Results
-    LosslessResults     \* TRUE: WithLosslessResults on top of the fix. A full Results
+    LosslessResults,    \* TRUE: WithLosslessResults on top of the fix. A full Results
                         \* buffer then makes the runner wait for the reader, as before the
                         \* fix, and drops are allowed only once Stop has begun [G]
+    HasApplyFunc,       \* TRUE: full mode, where ApplyFunc is the commit sink. FALSE:
+                        \* WithHeaderOnly or WithTrustedDecodeOnly, where Start forbids an
+                        \* ApplyFunc and Results is the only output [G]
+    DecodeOnlyLossless  \* TRUE: the fix, where Start makes Results lossless when there
+                        \* is no ApplyFunc. FALSE: gOuroboros 805d32ab, where decode-only
+                        \* modes drop undelivered results unless WithLosslessResults is set
 
 ASSUME MaxPending \in Nat /\ MaxPending >= 1 /\ CapacityBound \in Nat
 ASSUME QueueCap \in Nat /\ QueueCap >= 1   \* the fix keeps at least one result
+
+\* In English: whether Results is lossless. WithLosslessResults asks for it;
+\* with the fix, a pipeline without an ApplyFunc gets it by default [G] Start.
+Lossless == LosslessResults \/ (~HasApplyFunc /\ DecodeOnlyLossless)
 
 \* Sequence numbers. Submit hands them out in order, with no gaps [G].
 Seqs == 0 .. N - 1
@@ -359,7 +369,7 @@ Forward ==
           /\ results' = Append(results, Head(toForward))
           /\ UNCHANGED dropped
        \/ /\ ResultsNonBlocking                              \* the fix only
-          /\ ~LosslessResults \/ stopping                    \* lossless: only once Stop began
+          /\ ~Lossless \/ stopping                           \* lossless: only once Stop began
           /\ Len(results) >= QueueCap                        \* no room
           /\ results' = Append(Tail(results), Head(toForward)) \* drop the oldest
           /\ dropped' = dropped + 1
@@ -454,7 +464,13 @@ PendingBounded == ~overflow
 
 \* In English: in lossless mode no committed result is dropped before Stop
 \* begins, so a reader receives every block it was handed.
-LosslessNeverDropsBeforeStop == LosslessResults => (dropped = 0 \/ stopping)
+LosslessNeverDropsBeforeStop == Lossless => (dropped = 0 \/ stopping)
+
+\* In English: a pipeline without an ApplyFunc (WithHeaderOnly or
+\* WithTrustedDecodeOnly) delivers blocks only through Results, so it must
+\* not drop a committed result before Stop begins, whether or not the caller
+\* asked for WithLosslessResults.
+DecodeOnlyNeverDropsBeforeStop == ~HasApplyFunc => (dropped = 0 \/ stopping)
 
 \* In English: after a successful WaitForDrain and the client's rollback,
 \* no block from before the drain boundary is committed.
@@ -482,6 +498,6 @@ ProbeNeverDrop == dropped = 0
 \* Probe, EXPECTED to be violated: "In lossless mode the runner never waits
 \* for the reader." Violated = a full Results buffer does hold it back.
 ProbeLosslessNeverHoldsBack ==
-    ~(LosslessResults /\ ~stopping /\ rpc = "forward" /\ toForward # <<>>
+    ~(Lossless /\ ~stopping /\ rpc = "forward" /\ toForward # <<>>
       /\ Len(results) >= QueueCap)
 =============================================================================
