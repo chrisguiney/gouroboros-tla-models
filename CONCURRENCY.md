@@ -1951,16 +1951,26 @@ hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
   package and tests compile) uses nothing removed from these four servers.
   No file overlap with `fix/protocol-callback-context`; its `Stop(ctx)` change
   will touch the same four `Server.Stop` methods.
-  - **Same shape elsewhere** (server replaces `s.Protocol` on restart):
-    C9 `leiosfetch/server.go:71`, C12 `leiosvotes/server.go:85`,
-    C20 `leiosnotify/server.go:116`, also `localstatequery/server.go:100`
-    and `keepalive/server.go:156` (not in the hazard list). The #3197
-    servers: `localtxmonitor/server.go:76`, `localtxsubmission/server.go:57`,
+  - **Extended to localstatequery and keepalive** (`localstatequery/server.go:100`,
+    `keepalive/server.go:156`; not in the hazard list), same shape, branch
+    commit `ff6c8e84`. `TestServerMethodsDuringRestart` in both packages
+    fails under `-race` on `origin/main` and passes `-race -count=3`. Their
+    clients start once (`onceStart`) and never replace the instance, so they
+    are unchanged. Call site updated: `keepalive/limits_test.go:80`. Dingo
+    `2fc7975d3` uses only kept methods on these servers
+    (`ouroboros/localstatequery.go:258` `IsDone`, `:910` `StopChan`); its
+    `ouroboros` package compiles against the branch.
+  - **Same shape elsewhere, not yet changed:** C9 `leiosfetch/server.go:71`,
+    C12 `leiosvotes/server.go:85`, C20 `leiosnotify/server.go:116` (other
+    triage agent).
+  - **After #3197:** the servers #3197 makes restart
+    (`localtxmonitor/server.go:76`, `localtxsubmission/server.go:57`,
     `perasvotes/server.go:40`, `messagesubmission/server.go:100`,
     `localmessagesubmission/server.go:137`,
-    `localmessagenotification/server.go:92`; `connection.go:574`, `:582`,
-    `:634`, `:647`, `:661` read their `.Server.Protocol` unlocked.
-  - **Dingo uses that the same change there would hit:**
+    `localmessagenotification/server.go:92`) and the unlocked
+    `.Server.Protocol` reads in `connection.go:574`, `:582`, `:634`, `:647`,
+    `:661`. Change them once #3197 lands.
+  - **Dingo uses the after-#3197 change would hit:**
     `ouroboros/localtxsubmission.go:129` (`ctx.Server.Protocol != nil`,
     field). Kept-method uses: `ouroboros/localtxsubmission.go:130`
     `StopChan`, `ouroboros/localstatequery.go:258` `IsDone`, `:910`
