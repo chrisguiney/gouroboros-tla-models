@@ -46,6 +46,13 @@
 (* EngineTimer.tla covers when the state timer is armed; here it only      *)
 (* fires once, at any time, as one more way to reach SendError.            *)
 (*                                                                         *)
+(* StopJoins = "ctx" is the API gOuroboros adopted after 5c4f31c1        *)
+(* (branch fix/protocol-callback-context): Stop(ctx) and Close(ctx) join  *)
+(* the four loops and every RunLoop goroutine (rl), bounded by the        *)
+(* caller's ctx, and skip the join when ctx is the callback marker of     *)
+(* the instance whose goroutine calls them (matched by identity). The     *)
+(* done watcher (w) runs no callback and is not in the joined set.        *)
+(*                                                                         *)
 (* Symbols are explained in specs/keepalive/KeepAlive.tla's header.        *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
@@ -59,7 +66,15 @@ CONSTANTS
                        \* "waitsForStopChan"
     HandlerCallbacks,  \* what MessageHandlerFunc may do for a "msg":
                        \* "returns", "callsStop", "waitsForStopChan",
-                       \* "waitsForCaller" (until the user's Stop returns)
+                       \* "waitsForCaller" (until the user's Stop returns),
+                       \* "startsRunLoop" (starts the RunLoop goroutine rl,
+                       \* as the leios-notify server does per request)
+    RunLoopCallbacks,  \* what the callback on rl may do: "returns",
+                       \* "callsStop" (with its own marker),
+                       \* "waitsForStopChan", "ignoresStop" (a
+                       \* RequestNextFunc that ignores QuitChan; it returns
+                       \* only after the user's Stop has returned)
+    CtxMayEnd,         \* TRUE: the context the user passes to Stop may end
     TimerFires,        \* TRUE: the state timer may fire once
     MuxerMayStop,      \* TRUE: the muxer may shut down under the engine
     RestartOn,         \* "terminal": a server restarts from the MsgDone
@@ -68,21 +83,27 @@ CONSTANTS
     StopJoins,         \* "none": nothing waits for the loops (gOuroboros
                        \* 5c4f31c1); "loops": a rejected candidate where a
                        \* Stop called from outside the engine waits for
-                       \* every loop; "close": the fix, as the reference
-                       \* does it: Stop still waits for nothing, and the
-                       \* connection's teardown, after Stop returned,
-                       \* waits for every loop before Close returns
+                       \* every loop; "close": the connection's teardown,
+                       \* after Stop returned, waits for every loop before
+                       \* Close returns; "ctx": Stop(ctx) waits for the
+                       \* loops and rl until they exit or ctx ends, and a
+                       \* Stop carrying the caller's own marker waits for
+                       \* nothing
     Mutation           \* "none", or one deliberate break of the code:
                        \* "watcherRecvOnly", "startIgnoresStopped",
                        \* "noOnces", "noWaitRead", "waitReadUnderLock",
-                       \* "closeSkipsJoin"
+                       \* "closeSkipsJoin", "noMarker" (a loop's Stop joins
+                       \* too), "runLoopUnjoined" (Stop(ctx) leaves rl out)
 
 ASSUME Role \in {"client", "server"}
 ASSUME RestartOn \in {"terminal", "anyMessage"}
-ASSUME StopJoins \in {"none", "loops", "close"}
+ASSUME StopJoins \in {"none", "loops", "close", "ctx"}
+ASSUME RunLoopCallbacks \subseteq {"returns", "callsStop", "waitsForStopChan",
+                                   "ignoresStop"}
+ASSUME CtxMayEnd \in BOOLEAN
 ASSUME Mutation \in {"none", "watcherRecvOnly", "startIgnoresStopped",
                      "noOnces", "noWaitRead", "waitReadUnderLock",
-                     "closeSkipsJoin"}
+                     "closeSkipsJoin", "noMarker", "runLoopUnjoined"}
 
 (* The peer's message sequences the configs choose from (a .cfg file cannot
    write a sequence, so it names one of these with Msgs <- Name). *)
@@ -119,9 +140,10 @@ VARIABLES
     reply,       \* stateLoop's answer waits in the request's errorChan
     restarted,   \* a server started its next instance
     badCarry,    \* a restart suspended the role while readLoop still read
-    timerFired   \* the state timer has fired
+    timerFired,  \* the state timer has fired
+    ctxDone      \* the context the user passed to Stop has ended
 
-pcs   == <<pc, ret, smode, saw>>
+pcs   == <<pc, ret, smode, saw, ctxDone>>
 life  == <<lifeMu, started, stopped, once, startedAfterStop>>
 chans == <<stopChan, readDone, recvDone, sendDone, doneChan, muxDone, doneCloses>>
 data  == <<sent, wire, rq, cur, hmsg, reply, restarted, badCarry, timerFired>>
@@ -129,18 +151,32 @@ data  == <<sent, wire, rq, cur, hmsg, reply, restarted, badCarry, timerFired>>
 vars  == <<pcs, life, chans, data>>
 
 \* Literally: "Procs is defined as the set containing "owner", "user", "rd",
-\*   "rv", "sd", "st" and "w"."
-Procs == {"owner", "user", "rd", "rv", "sd", "st", "w"}
+\*   "rv", "sd", "st", "w" and "rl"."
+Procs == {"owner", "user", "rd", "rv", "sd", "st", "w", "rl"}
 \* Literally: "Loops is defined as the set containing "rd", "rv", "sd", "st"
 \*   and "w"."
 Loops == {"rd", "rv", "sd", "st", "w"}
+
+\* In English: "The goroutines Stop(ctx) and Close(ctx) wait for: the four
+\* loops and the RunLoop goroutine (the runLoopUnjoined mutation leaves it
+\* out). The done watcher runs no callback and is not counted."
+\* Literally: "Joined is defined as the set containing "rd", "rv", "sd" and
+\*   "st", together with (if Mutation equals "runLoopUnjoined" then the
+\*   empty set else the set containing "rl")."
+Joined == {"rd", "rv", "sd", "st"} \cup
+          (IF Mutation = "runLoopUnjoined" THEN {} ELSE {"rl"})
+
+\* In English: "Goroutine g is not running: it has exited or never started."
+\* Literally: "Over of g is defined as: pc of g is a member of the set
+\*   containing "notStarted" and "exited"."
+Over(g) == pc[g] \in {"notStarted", "exited"}
 
 \* In English: "Steps at which a goroutine is blocked until something else
 \* happens: a lock must never be held at one of them."
 \* Literally: "Blocking is defined as the set of these step names."
 Blocking == {"s_onceWait", "s_waitRead", "s_join", "cbWait", "hWait",
              "hWaitCaller", "wait", "queue", "req", "reply", "select",
-             "w1", "w2"}
+             "w1", "w2", "rlWait", "rlHeld"}
 
 \* In English: "Every goroutine starts at its first step; the loops have not
 \* been started; every channel is open; nothing has happened."
@@ -168,33 +204,34 @@ Init ==
     /\ cur = "none" /\ hmsg = "none"
     /\ reply = FALSE /\ restarted = FALSE /\ badCarry = FALSE
     /\ timerFired = FALSE
+    /\ ctxDone = FALSE
 
 \* In English: "Goroutine p moves to step s; nothing else about the
 \* goroutines changes."
 \* Literally: "Goto of p and s is defined as: pc in the next state equals pc
-\*   with p mapped to s, and ret, smode and saw are unchanged."
-Goto(p, s) == pc' = [pc EXCEPT ![p] = s] /\ UNCHANGED <<ret, smode, saw>>
+\*   with p mapped to s, and ret, smode, saw and ctxDone are unchanged."
+Goto(p, s) == pc' = [pc EXCEPT ![p] = s] /\ UNCHANGED <<ret, smode, saw, ctxDone>>
 
 \* In English: "Goroutine p starts an inline stop(restart) and returns to
 \* step r when it is done."
 \* Literally: "CallStop of p, restart and r is defined as: pc in the next
 \*   state equals pc with p mapped to "s_once", and ret in the next state
 \*   equals ret with p mapped to r, and smode in the next state equals smode
-\*   with p mapped to restart, and saw is unchanged."
+\*   with p mapped to restart, and saw and ctxDone are unchanged."
 CallStop(p, restart, r) ==
     /\ pc' = [pc EXCEPT ![p] = "s_once"]
     /\ ret' = [ret EXCEPT ![p] = r]
     /\ smode' = [smode EXCEPT ![p] = restart]
-    /\ UNCHANGED saw
+    /\ UNCHANGED <<saw, ctxDone>>
 
 \* In English: "Goroutine p calls SendError and goes to step r after it."
 \* Literally: "CallSendError of p and r is defined as: pc in the next state
 \*   equals pc with p mapped to "se_check", and ret in the next state equals
-\*   ret with p mapped to r, and smode and saw are unchanged."
+\*   ret with p mapped to r, and smode, saw and ctxDone are unchanged."
 CallSendError(p, r) ==
     /\ pc' = [pc EXCEPT ![p] = "se_check"]
     /\ ret' = [ret EXCEPT ![p] = r]
-    /\ UNCHANGED <<smode, saw>>
+    /\ UNCHANGED <<smode, saw, ctxDone>>
 
 \* In English: "closeDone: close doneChan under doneOnce. The noOnces
 \* mutation drops the Once and closes it again."
@@ -207,13 +244,19 @@ CloseDone ==
         THEN UNCHANGED <<doneChan, doneCloses>>
         ELSE doneChan' = TRUE /\ doneCloses' = doneCloses + 1
 
-\* In English: "Where a stop call goes when its Once part is over. Under the
-\* "loops" candidate fix, every Stop from outside the engine, first or not,
-\* then waits for the loops; a Stop from inside a loop never does, since it
-\* would wait for itself."
-\* Literally: "AfterStop of p is defined as: if StopJoins equals "loops" and
-\*   p equals "user", then "s_join", else ret of p."
-AfterStop(p) == IF StopJoins = "loops" /\ p = "user" THEN "s_join" ELSE ret[p]
+\* In English: "Where a stop call goes when its Once part is over. Under
+\* "loops" and "ctx", every Stop from outside the engine, first or not,
+\* then waits for the loops. A Stop from inside a loop passes that loop's
+\* own callback marker, so it never does, since it would wait for itself;
+\* the noMarker mutation drops the marker and makes it wait too."
+\* Literally: "AfterStop of p is defined as: if (StopJoins is a member of
+\*   the set containing "loops" and "ctx", and p equals "user"), or
+\*   (StopJoins equals "ctx", and Mutation equals "noMarker", and p is a
+\*   member of Joined), then "s_join", else ret of p."
+AfterStop(p) ==
+    IF \/ StopJoins \in {"loops", "ctx"} /\ p = "user"
+       \/ StopJoins = "ctx" /\ Mutation = "noMarker" /\ p \in Joined
+    THEN "s_join" ELSE ret[p]
 
 -----------------------------------------------------------------------------
 (* The environment: the peer and the muxer act only until the user calls  *)
@@ -271,7 +314,7 @@ OwnerCheck ==
           ELSE /\ pc' = [pc EXCEPT !["owner"] = "startUnlock", !["rd"] = "wait",
                                    !["rv"] = "wait", !["sd"] = "wait",
                                    !["st"] = "select", !["w"] = "w1"]
-               /\ UNCHANGED <<ret, smode, saw>>
+               /\ UNCHANGED <<ret, smode, saw, ctxDone>>
                /\ started' = TRUE
                /\ startedAfterStop' = stopped
     /\ UNCHANGED <<lifeMu, stopped, once, chans, data>>
@@ -356,7 +399,8 @@ StopLock(p) ==
     /\ saw' = [saw EXCEPT ![p] = started]
     /\ pc' = [pc EXCEPT ![p] = IF Mutation = "waitReadUnderLock"
                                THEN "s_close" ELSE "s_unlock"]
-    /\ UNCHANGED <<ret, smode, started, once, startedAfterStop, chans, data>>
+    /\ UNCHANGED <<ret, smode, ctxDone, started, once, startedAfterStop, chans,
+                   data>>
 
 \* In English: "Release lifecycleMu."
 \* Literally: "StopUnlock of p is defined as: pc of p equals "s_unlock", and
@@ -382,8 +426,8 @@ StopClose(p) ==
     /\ IF ~saw[p] THEN CloseDone ELSE UNCHANGED <<doneChan, doneCloses>>
     /\ pc' = [pc EXCEPT ![p] = IF smode[p] /\ saw[p] /\ Mutation /= "noWaitRead"
                                THEN "s_waitRead" ELSE "s_unreg"]
-    /\ UNCHANGED <<ret, smode, saw, life, readDone, recvDone, sendDone, muxDone,
-                   data>>
+    /\ UNCHANGED <<ret, smode, saw, ctxDone, life, readDone, recvDone, sendDone,
+                   muxDone, data>>
 
 \* In English: "StopForRestart waits on readDoneChan, with no other case."
 \* Literally: "StopWaitRead of p is defined as: pc of p equals
@@ -413,15 +457,21 @@ StopUnreg(p) ==
     /\ UNCHANGED <<started, stopped, startedAfterStop, chans, sent, wire, rq, cur,
                    hmsg, reply, restarted, timerFired>>
 
-\* In English: "The candidate fix: wait until every loop has exited."
-\* Literally: "StopJoin of p is defined as: pc of p equals "s_join", and for
-\*   all l in Loops, pc of l is a member of the set containing "notStarted"
-\*   and "exited", and Goto of p and ret of p, and everything else is
-\*   unchanged."
+\* In English: "Wait until every loop has exited. Under "ctx" the wait
+\* covers the Joined set, and the user's Stop also returns ctx.Err() once
+\* its context has ended; shutdown goes on without it."
+\* Literally: "StopJoin of p is defined as: pc of p equals "s_join", and
+\*   either (if StopJoins equals "ctx" then for all g in Joined, Over of g,
+\*   else for all l in Loops, Over of l; and Goto of p and ret of p), or
+\*   (StopJoins equals "ctx", and p equals "user", and ctxDone is true, and
+\*   Goto of p and "returnedErr"); and everything else is unchanged."
 StopJoin(p) ==
     /\ pc[p] = "s_join"
-    /\ \A l \in Loops : pc[l] \in {"notStarted", "exited"}
-    /\ Goto(p, ret[p])
+    /\ \/ /\ IF StopJoins = "ctx" THEN \A g \in Joined : Over(g)
+                                  ELSE \A l \in Loops : Over(l)
+          /\ Goto(p, ret[p])
+       \/ StopJoins = "ctx" /\ p = "user" /\ ctxDone
+          /\ Goto(p, "returnedErr")
     /\ UNCHANGED <<life, chans, data>>
 
 \* In English: "SendError returns at once if stopChan or doneChan is
@@ -450,6 +500,64 @@ StopStep(p) ==
     \/ StopOnce(p) \/ StopOnceWait(p) \/ StopLock(p) \/ StopUnlock(p)
     \/ StopClose(p) \/ StopWaitRead(p) \/ StopUnreg(p) \/ StopJoin(p)
     \/ SeCheck(p) \/ SeSend(p)
+
+\* In English: "The user's Stop call has returned, with or without an
+\* error."
+\* Literally: "UserReturned is defined as: pc of "user" is a member of the
+\*   set containing "returned", "returnedErr", "closeJoin" and "closed"."
+UserReturned == pc["user"] \in {"returned", "returnedErr", "closeJoin", "closed"}
+
+\* In English: "The context the user passed to Stop ends (a deadline or a
+\* cancel) while Stop waits for the join."
+\* Literally: "CtxEnd is defined as: CtxMayEnd is true, and pc of "user"
+\*   equals "s_join", and ctxDone is not true, and ctxDone in the next state
+\*   equals TRUE, and pc, ret, smode, saw, life, chans and data are
+\*   unchanged."
+CtxEnd ==
+    /\ CtxMayEnd /\ pc["user"] = "s_join" /\ ~ctxDone
+    /\ ctxDone' = TRUE
+    /\ UNCHANGED <<pc, ret, smode, saw, life, chans, data>>
+
+-----------------------------------------------------------------------------
+(* The RunLoop goroutine, started by a handler (RunLoop, protocol.go). *)
+
+\* In English: "The callback on the RunLoop goroutine does one of the
+\* things it may do. One that calls Stop passes its own marker, so that
+\* Stop does not wait for it."
+\* Literally: "RlRun is defined as: pc of "rl" equals "run", and there
+\*   exists a c in RunLoopCallbacks such that (c equals "returns" and Goto
+\*   of "rl" and "exited") or (c equals "callsStop" and CallStop of "rl",
+\*   FALSE and "exited") or (c equals "waitsForStopChan" and Goto of "rl"
+\*   and "rlWait") or (c equals "ignoresStop" and Goto of "rl" and
+\*   "rlHeld"); and life, chans and data are unchanged."
+RlRun ==
+    /\ pc["rl"] = "run"
+    /\ \E c \in RunLoopCallbacks :
+          \/ c = "returns" /\ Goto("rl", "exited")
+          \/ c = "callsStop" /\ CallStop("rl", FALSE, "exited")
+          \/ c = "waitsForStopChan" /\ Goto("rl", "rlWait")
+          \/ c = "ignoresStop" /\ Goto("rl", "rlHeld")
+    /\ UNCHANGED <<life, chans, data>>
+
+\* In English: "A RunLoop callback waiting for StopChan returns once it
+\* closes."
+\* Literally: "RlWait is defined as: pc of "rl" equals "rlWait", and
+\*   stopChan is true, and Goto of "rl" and "exited", and life, chans and
+\*   data are unchanged."
+RlWait ==
+    /\ pc["rl"] = "rlWait" /\ stopChan
+    /\ Goto("rl", "exited")
+    /\ UNCHANGED <<life, chans, data>>
+
+\* In English: "A RunLoop callback that ignores StopChan returns only once
+\* the user's Stop has returned (the test releases it then)."
+\* Literally: "RlHeld is defined as: pc of "rl" equals "rlHeld", and
+\*   UserReturned, and Goto of "rl" and "exited", and life, chans and data
+\*   are unchanged."
+RlHeld ==
+    /\ pc["rl"] = "rlHeld" /\ UserReturned
+    /\ Goto("rl", "exited")
+    /\ UNCHANGED <<life, chans, data>>
 
 -----------------------------------------------------------------------------
 (* readLoop *)
@@ -566,7 +674,7 @@ RvReq ==
     /\ \/ (stopChan \/ doneChan) /\ Goto("rv", "exit")
        \/ /\ pc["st"] = "select"
           /\ pc' = [pc EXCEPT !["rv"] = "reply", !["st"] = "reply"]
-          /\ UNCHANGED <<ret, smode, saw>>
+          /\ UNCHANGED <<ret, smode, saw, ctxDone>>
     /\ UNCHANGED <<life, chans, data>>
 
 \* In English: "Wait for stateLoop's answer, or leave on stopChan or
@@ -592,7 +700,10 @@ RvReply ==
 \*   "returns" and Goto of "rv" and "wait") or (c equals "callsStop" and
 \*   CallStop of "rv", FALSE and "wait") or (c equals "waitsForStopChan" and
 \*   Goto of "rv" and "hWait") or (c equals "waitsForCaller" and Goto of
-\*   "rv" and "hWaitCaller"), or (RestartOn equals "anyMessage" and Role
+\*   "rv" and "hWaitCaller") or (c equals "startsRunLoop", and pc of "rl"
+\*   equals "notStarted", and pc in the next state equals pc with "rv"
+\*   mapped to "wait" and "rl" mapped to "run", and ret, smode, saw and
+\*   ctxDone are unchanged), or (RestartOn equals "anyMessage" and Role
 \*   equals "server" and CallStop of "rv", TRUE and "restart"); and the
 \*   rest is unchanged."
 RvHandler ==
@@ -604,6 +715,9 @@ RvHandler ==
                     \/ c = "callsStop" /\ CallStop("rv", FALSE, "wait")
                     \/ c = "waitsForStopChan" /\ Goto("rv", "hWait")
                     \/ c = "waitsForCaller" /\ Goto("rv", "hWaitCaller")
+                    \/ c = "startsRunLoop" /\ pc["rl"] = "notStarted"
+                       /\ pc' = [pc EXCEPT !["rv"] = "wait", !["rl"] = "run"]
+                       /\ UNCHANGED <<ret, smode, saw, ctxDone>>
                \/ RestartOn = "anyMessage" /\ Role = "server"
                   /\ CallStop("rv", TRUE, "restart")
     /\ UNCHANGED <<life, chans, data>>
@@ -621,11 +735,10 @@ RvHWait ==
 \* busyMutex its caller holds across Protocol.Stop) returns once that call
 \* has returned."
 \* Literally: "RvHWaitCaller is defined as: pc of "rv" equals "hWaitCaller",
-\*   and pc of "user" is a member of the set containing "returned",
-\*   "closeJoin" and "closed", and Goto of "rv" and "wait", and everything
-\*   else is unchanged."
+\*   and UserReturned, and Goto of "rv" and "wait", and everything else is
+\*   unchanged."
 RvHWaitCaller ==
-    /\ pc["rv"] = "hWaitCaller" /\ pc["user"] \in {"returned", "closeJoin", "closed"}
+    /\ pc["rv"] = "hWaitCaller" /\ UserReturned
     /\ Goto("rv", "wait")
     /\ UNCHANGED <<life, chans, data>>
 
@@ -722,21 +835,23 @@ Watcher ==
 
 -----------------------------------------------------------------------------
 
-\* In English: "Everything is over: Start and Stop have returned and every
-\* loop has exited or never started."
+\* In English: "Everything is over: Start and Stop have returned, Stop
+\* perhaps with ctx.Err(), and every loop, the RunLoop goroutine included,
+\* has exited or never started."
 \* Literally: "Finished is defined as: pc of "owner" equals "done", and pc
-\*   of "user" is a member of the set containing "returned" and "closed",
-\*   and for all l in Loops, pc of l is a member of the set containing
-\*   "notStarted" and "exited"."
+\*   of "user" is a member of the set containing "returned", "returnedErr"
+\*   and "closed", and for all l in the union of Loops and the set
+\*   containing "rl", Over of l."
 Finished ==
-    /\ pc["owner"] = "done" /\ pc["user"] \in {"returned", "closed"}
-    /\ \A l \in Loops : pc[l] \in {"notStarted", "exited"}
+    /\ pc["owner"] = "done" /\ pc["user"] \in {"returned", "returnedErr", "closed"}
+    /\ \A l \in Loops \cup {"rl"} : Over(l)
 
 \* In English: "A step is one step of one goroutine, the peer or the muxer;
 \* once everything is over, nothing changes. A state with no step that is
 \* not Finished is a deadlock, which TLC reports."
 \* Literally: "Next is defined as: PeerSend, or MuxerStop, or OwnerLock, or
-\*   OwnerCheck, or OwnerUnlock, or UserStop, or UserCloseJoin, or there exists a p in Procs
+\*   OwnerCheck, or OwnerUnlock, or UserStop, or UserCloseJoin, or CtxEnd,
+\*   or RlRun, or RlWait, or RlHeld, or there exists a p in Procs
 \*   such that StopStep of p, or RdWait, or RdDecode, or RdCbWait, or
 \*   RdQueueCheck, or RdQueue, or RdExit, or RvWait, or RvReq, or RvReply,
 \*   or RvHandler, or RvHWait, or RvHWaitCaller, or RvRestart, or RvExit,
@@ -745,6 +860,7 @@ Finished ==
 Next ==
     \/ PeerSend \/ MuxerStop
     \/ OwnerLock \/ OwnerCheck \/ OwnerUnlock \/ UserStop \/ UserCloseJoin
+    \/ CtxEnd \/ RlRun \/ RlWait \/ RlHeld
     \/ \E p \in Procs : StopStep(p)
     \/ RdWait \/ RdDecode \/ RdCbWait \/ RdQueueCheck \/ RdQueue \/ RdExit
     \/ RvWait \/ RvReq \/ RvReply \/ RvHandler \/ RvHWait \/ RvHWaitCaller
@@ -819,6 +935,21 @@ JoinedAfterStop ==
 \*   containing "notStarted" and "exited"."
 JoinedAfterClose ==
     pc["user"] = "closed" => \A l \in Loops : pc[l] \in {"notStarted", "exited"}
+
+\* In English: "Once the user's Stop(ctx) has returned without an error,
+\* every goroutine of the instance that runs callbacks has exited: the four
+\* loops and the RunLoop goroutine."
+\* Literally: "JoinedAfterCtxStop is defined as: if pc of "user" equals
+\*   "returned", then for all g in the set containing "rd", "rv", "sd",
+\*   "st" and "rl", Over of g."
+JoinedAfterCtxStop ==
+    pc["user"] = "returned" => \A g \in {"rd", "rv", "sd", "st", "rl"} : Over(g)
+
+\* In English: "Probe: the user's Stop never gives up on the join because
+\* its context ended."
+\* Literally: "ProbeNeverTimesOut is defined as: pc of "user" does not
+\*   equal "returnedErr"."
+ProbeNeverTimesOut == pc["user"] /= "returnedErr"
 
 (* Reachability probes: each is expected to be violated. *)
 

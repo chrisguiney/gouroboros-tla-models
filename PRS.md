@@ -74,6 +74,9 @@ closes. A PR can draw on more than one model.
 | none (race detector, CONCURRENCY C9, C12, C20) | `fix/leios-server-protocol-race` | three leios servers stop embedding the protocol instance (breaking) |
 | none (CONCURRENCY C14, C15) | `fix/perasvotes-op-lock-and-await-panic` | `Done` and requests honour their context during `Sync`; `AwaitObjectIDsFunc` panics are contained |
 | none (CONCURRENCY C19, overturned) | `test/leiosnotify-request-order` | pipelined requests answered one at a time, in order |
+| `connection` (`ConnectionTeardown`), `engine` (`EngineLifecycle`), CONCURRENCY A6, A11, C11, C18, C21 | `fix/protocol-callback-context` (`d84adf86`, `a1324a8b`, `861f349b`; publish after `fix/connection-teardown-joins`) | every `Stop` and `Close` take a context (breaking), the callback marker in all sixteen mini-protocols, `RunLoop` goroutines joined, the muxer joined at `Close`, the keep-alive timer |
+| `engine` (`EngineLifecycle`) | `fix/blockfetch-stop-callbacks-context` (`7523db86`; publish after `fix/protocol-callback-context`; replaces `fix/blockfetch-stop-callbacks-unlocked`) | block-fetch `Stop` callbacks unlocked and client goroutines joined, with the shared marker |
+| none (race detector, CONCURRENCY A9) | `fix/protocol-send-before-start` (`4cca4329`) | a message sent before `Start` is queued, not blocked |
 
 ## Not yet attributed
 

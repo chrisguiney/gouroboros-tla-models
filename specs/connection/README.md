@@ -318,6 +318,43 @@ the join (`c164be91`): a protocol-loop pool on the muxer
 `CallbackContext`. The other mini-protocols' callback contexts do not carry
 it yet.
 
+### Part 5, third pass: `Close(ctx)`
+
+The API was then broken on purpose (branch `fix/protocol-callback-context`,
+to be published after `fix/connection-teardown-joins`): `CloseContext` is
+gone and `Close` takes a `context.Context`. Every one of the sixteen
+mini-protocols now builds its `CallbackContext` with the marker of the
+protocol instance running the callback, read through `Context()`; a
+callback passes that to `Close`. The model adds three things:
+
+- **A bounded wait.** The user's `Close` returns `ctx.Err()` when its context
+  ends (`CloseCtxMayEnd`); shutdown goes on without it.
+- **The muxer join** (fix `muxerJoin`, hazard A6). Shutdown waits for the
+  muxer's goroutines, whose forwarders, read loop and senders run the
+  `Metrics` callbacks; in Go it drains `ErrorChan`, which the muxer closes
+  only after joining them.
+- **Excusing an instance, not its running loops.** A callback's instance can
+  start one more loop while the callback is in `Close` (a `RunLoop`
+  goroutine, `OwnerLateLoop`). The excuse must cover it: the leios-notify
+  late-notification loop waits for the request source's result, so a
+  shutdown that waits for it waits for the callback, which waits for
+  shutdown. That deadlock was found by the Go test first and then modelled.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ConnectionTeardownCloseCtx.cfg` (every fix and `muxerJoin`, callback closes with its own context while its instance starts a loop, user `ctx` may end) | 8,044 | passes all seven, with `MuxerJoinedAfterClose` |
+| `ConnectionTeardownNoMuxerJoinBug.cfg` | | `MuxerJoinedAfterClose` violated |
+| `ConnectionTeardownExcuseEntriesBug.cfg` (mutation: the excuse covers only the loops already running) | | deadlock |
+| `ConnectionTeardownProbeLateLoopBug.cfg` | | probe reached: the instance starts a loop while its callback is in `Close` |
+
+Go: `TestCloseWaitsForMuxerMetricsCallback` (fails without the drain:
+`Close` returned while a `Metrics` callback ran), one test per mini-protocol
+in `connection_callback_close_test.go` (a callback closes its connection with
+its own context, `Close` returns, a second `Close` joins everything, the error
+channel is closed, goleak is clean), and, since a connection does not carry
+them, `protocol/handshake` and `protocol/messagesubmission` tests that stop
+their own instance from a callback.
+
 ## What model `connection` found
 
 - **Messages survive restarts.** Carrying the read buffer, admitting one

@@ -36,6 +36,14 @@
 (* mutex held across the doneChan check and the Add guarantees, as the     *)
 (* muxer's fenceRegistrations does (muxer/muxer.go:1340).                  *)
 (*                                                                         *)
+(* Close(ctx) (branch fix/protocol-callback-context) adds three things:   *)
+(* the user's wait ends with ctx.Err() when its context ends              *)
+(* (CloseCtxMayEnd); shutdown waits for the muxer's goroutines, which run  *)
+(* the Metrics callbacks, by draining its error channel until it closes   *)
+(* ("muxerJoin"); and a callback's own marker excuses its instance's      *)
+(* loops, including one the instance starts after the excuse (a RunLoop  *)
+(* goroutine, OwnerLateLoop).                                             *)
+(*                                                                         *)
 (* No specification source: this is gOuroboros's own Go API.               *)
 (* Symbols are explained in specs/keepalive/KeepAlive.tla's header.        *)
 (***************************************************************************)
@@ -51,11 +59,23 @@ CONSTANTS
                         \* "own": CloseContext with the context its
                         \*   protocol instance gave it (carrying that
                         \*   instance as marker); "plain": Close.
+    CloseCtxMayEnd,     \* TRUE: the context the user passes to Close may end
+    OwnerLateLoop,      \* TRUE: while its callback is in Close, the
+                        \* callback's instance may start one more loop
+                        \* (RunLoop), which returns only after the callback
+                        \* has (the leios-notify late-notification loop
+                        \* waits for the source's result)
     UserMarker,         \* the user's Close: "none" (Close), or "foreign"
                         \* (CloseContext called from another connection's
                         \* callback, with that callback's context)
     Fix                 \* a subset of {"fence", "muxerGuard", "join",
-                        \* "closeEarly", "anyMarker"}:
+                        \* "closeEarly", "anyMarker", "muxerJoin",
+                        \* "excuseEntries"}:
+                        \* "muxerJoin": shutdown waits for the muxer's
+                        \*   goroutines after muxer.Stop.
+                        \* "excuseEntries" (mutation, with "join"): the
+                        \*   excuse covers only the loops running when the
+                        \*   callback's Close began, not its instance.
                         \* "fence": start a tracked goroutine only under a
                         \*   mutex, after checking doneChan; shutdown takes
                         \*   the mutex before Wait.
@@ -78,7 +98,10 @@ CONSTANTS
                         \* "closeEarly": a Close before doneChan exists
                         \*   closes the conn and makes setup give up.
 
-ASSUME Fix \subseteq {"fence", "muxerGuard", "join", "closeEarly", "anyMarker"}
+ASSUME Fix \subseteq {"fence", "muxerGuard", "join", "closeEarly", "anyMarker",
+                      "muxerJoin", "excuseEntries"}
+ASSUME CloseCtxMayEnd \in BOOLEAN
+ASSUME OwnerLateLoop \in BOOLEAN
 ASSUME CallbackCloseKinds \subseteq {"own", "plain"}
 ASSUME UserMarker \in {"none", "foreign"}
 
@@ -110,13 +133,15 @@ VARIABLES
     cbClose,    \* the callback's own Close: "none", "waiting", "returned"
     exempt,     \* the callback's goroutine is excused from the shutdown join
     closeReq,   \* a Close came before doneChan existed
-    userExcept  \* the user's Close skips waiting for the callback's loop
+    userExcept, \* the user's Close skips waiting for the callback's loop
+    loopLate    \* the loop the callback's instance starts while the
+                \* callback is in Close: "none", "running" or "exited"
 
 chans == <<doneChan, errorChan, connClosed, conn, muxer>>
 wgv   == <<wg, waitBegan, lateAdd, wgMu>>
 prot  == <<hs, hsErr, protoErr, muxErr, muxErrUsed, proto, cb>>
 flags == <<panicked, gaveUp, hsLate>>
-joinv == <<loopCb, loopOther, cbClose, exempt, closeReq, userExcept>>
+joinv == <<loopCb, loopOther, cbClose, exempt, closeReq, userExcept, loopLate>>
 \* Literally: "vars is defined as the tuple of pc, chans, wgv, prot,
 \*   flags and joinv."
 vars  == <<pc, chans, wgv, prot, flags, joinv>>
@@ -135,7 +160,7 @@ Procs == {"setup", "user", "sd", "mf", "pf", "mc"}
 \*   and proto equals "none", and cb equals "idle", and panicked, gaveUp
 \*   and hsLate equal FALSE, and loopCb and loopOther equal "none", and
 \*   cbClose equals "none", and exempt, closeReq and userExcept equal
-\*   FALSE."
+\*   FALSE, and loopLate equals "none"."
 Init ==
     /\ pc = [p \in Procs |-> CASE p = "setup" -> "mkDone"
                                [] p = "user"  -> "idle"
@@ -149,6 +174,7 @@ Init ==
     /\ panicked = FALSE /\ gaveUp = FALSE /\ hsLate = FALSE
     /\ loopCb = "none" /\ loopOther = "none" /\ cbClose = "none"
     /\ exempt = FALSE /\ closeReq = FALSE /\ userExcept = FALSE
+    /\ loopLate = "none"
 
 \* In English: "Goroutine p moves to step s."
 \* Literally: "Goto of p and s is defined as: pc in the next state equals pc
@@ -264,7 +290,7 @@ CallbackClose ==
         /\ cbClose' = "waiting"
         /\ exempt' = ("join" \in Fix /\ k = "own")
         /\ UNCHANGED <<pc, errorChan, connClosed, conn, muxer, wgv, prot, flags,
-                       loopCb, loopOther, closeReq, userExcept>>
+                       loopCb, loopOther, closeReq, userExcept, loopLate>>
 
 \* In English: "The callback's Close returns once connClosedChan is closed,
 \* without waiting for its own goroutine."
@@ -275,7 +301,7 @@ CallbackCloseReturn ==
     /\ cbClose = "waiting" /\ connClosed
     /\ cbClose' = "returned"
     /\ UNCHANGED <<pc, chans, wgv, prot, flags, loopCb, loopOther, exempt, closeReq,
-                   userExcept>>
+                   userExcept, loopLate>>
 
 \* In English: "A protocol loop exits once its protocol or the muxer is
 \* stopped; the callback's loop only once the callback has returned."
@@ -290,7 +316,40 @@ LoopExit ==
     /\ \/ loopOther = "running" /\ loopOther' = "exited" /\ UNCHANGED loopCb
        \/ loopCb = "running" /\ cb /= "running" /\ loopCb' = "exited"
           /\ UNCHANGED loopOther
-    /\ UNCHANGED <<pc, chans, wgv, prot, flags, cbClose, exempt, closeReq, userExcept>>
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, cbClose, exempt, closeReq, userExcept,
+                   loopLate>>
+
+\* In English: "While its callback waits in Close, the callback's instance
+\* starts one more loop, as long as shutdown has not yet refused new loops
+\* (it does so once the muxer is stopped)."
+\* Literally: "LateLoopStart is defined as: OwnerLateLoop is true, and
+\*   cbClose equals "waiting", and loopLate equals "none", and pc of "sd"
+\*   is a member of the set containing "notStarted", "wait" and
+\*   "readMuxer", and loopLate in the next state equals "running", and the
+\*   rest is unchanged."
+LateLoopStart ==
+    /\ OwnerLateLoop /\ cbClose = "waiting" /\ loopLate = "none"
+    /\ pc["sd"] \in {"notStarted", "wait", "readMuxer"}
+    /\ loopLate' = "running"
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, loopCb, loopOther, cbClose, exempt,
+                   closeReq, userExcept>>
+
+\* In English: "The late loop returns once the callback has returned."
+\* Literally: "LateLoopExit is defined as: loopLate equals "running", and
+\*   cb does not equal "running", and loopLate in the next state equals
+\*   "exited", and the rest is unchanged."
+LateLoopExit ==
+    /\ loopLate = "running" /\ cb /= "running"
+    /\ loopLate' = "exited"
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, loopCb, loopOther, cbClose, exempt,
+                   closeReq, userExcept>>
+
+\* In English: "The late loop is excused from shutdown's join when its
+\* instance is: the callback's marker excuses the instance, not only the
+\* loops already running (the excuseEntries mutation)."
+\* Literally: "LateExcused is defined as: exempt is true, and
+\*   "excuseEntries" is not a member of Fix."
+LateExcused == exempt /\ "excuseEntries" \notin Fix
 
 -----------------------------------------------------------------------------
 (* setupConnection *)
@@ -451,7 +510,7 @@ SetupStart ==
     /\ loopOther' = IF proto = "constructed" THEN "running" ELSE loopOther
     /\ Goto("setup", "returned")
     /\ UNCHANGED <<chans, wgv, hs, hsErr, protoErr, muxErr, muxErrUsed, cb, flags,
-                   cbClose, exempt, closeReq, userExcept>>
+                   cbClose, exempt, closeReq, userExcept, loopLate>>
 
 \* Literally: "SetupStep is defined as: SetupMkDone, or SetupMkMuxer, or
 \*   SetupGo of "goMuxFwd", "mf" and "mkHandshake", or SetupGoAdd of
@@ -504,19 +563,25 @@ UserClose ==
                      ELSE UNCHANGED <<conn, closeReq>>
                /\ UNCHANGED <<doneChan, exempt, userExcept>>
     /\ UNCHANGED <<errorChan, connClosed, muxer, wgv, prot, flags, loopCb, loopOther,
-                   cbClose>>
+                   cbClose, loopLate>>
 
 \* In English: "Close returns once connClosedChan is closed and, under the
-\* join, every loop has exited (the user's goroutine runs none of them)."
+\* join, every loop has exited (the user's goroutine runs none of them).
+\* If its context ends first, it returns ctx.Err() and shutdown goes on."
 \* Literally: "UserReturn is defined as: pc of "user" equals "waiting", and
-\*   connClosed is true, and ("join" is not a member of Fix, or loopOther
-\*   does not equal "running" and (loopCb does not equal "running" or
-\*   userExcept is true)), and Goto of "user" and "returned", and the rest is
-\*   unchanged."
+\*   either (connClosed is true, and ("join" is not a member of Fix, or
+\*   loopOther does not equal "running" and ((loopCb and loopLate do not
+\*   equal "running") or userExcept is true)), and Goto of "user" and
+\*   "returned"), or (CloseCtxMayEnd is true, and Goto of "user" and
+\*   "returnedErr"); and the rest is unchanged."
 UserReturn ==
-    /\ pc["user"] = "waiting" /\ connClosed
-    /\ "join" \notin Fix \/ (loopOther /= "running" /\ (loopCb /= "running" \/ userExcept))
-    /\ Goto("user", "returned")
+    /\ pc["user"] = "waiting"
+    /\ \/ /\ connClosed
+          /\ "join" \notin Fix \/ (loopOther /= "running"
+                                    /\ ((loopCb /= "running" /\ loopLate /= "running")
+                                        \/ userExcept))
+          /\ Goto("user", "returned")
+       \/ CloseCtxMayEnd /\ Goto("user", "returnedErr")
     /\ UNCHANGED <<chans, wgv, prot, flags>>
     /\ UNCHANGED joinv
 
@@ -549,31 +614,56 @@ AfterJoin ==
         THEN Goto("sd", "fenceLock") /\ UNCHANGED waitBegan
         ELSE Goto("sd", "wgWait") /\ waitBegan' = TRUE
 
+\* In English: "Where shutdown goes once the muxer is stopped (and, under
+\* muxerJoin, joined): the protocol-loop join, or what follows it."
+\* Literally: "AfterMuxer is defined as: if "join" is a member of Fix then
+\*   Goto of "sd" and "join" and waitBegan is unchanged, else AfterJoin."
+AfterMuxer ==
+    IF "join" \in Fix
+        THEN Goto("sd", "join") /\ UNCHANGED waitBegan
+        ELSE AfterJoin
+
 \* In English: "If c.muxer is set, muxer.Stop (which only closes the
-\* muxer's doneChan). Then the join, or what follows it."
+\* muxer's doneChan). Then, under muxerJoin, wait for the muxer's
+\* goroutines; otherwise go straight on."
 \* Literally: "SdMuxer is defined as: pc of "sd" equals "readMuxer", and
 \*   muxer in the next state equals (if muxer equals "running" then
-\*   "stopped" else muxer), and if "join" is a member of Fix then Goto of
-\*   "sd" and "join" and waitBegan is unchanged, else AfterJoin; and the
-\*   rest is unchanged."
+\*   "stopped" else muxer), and if "muxerJoin" is a member of Fix then
+\*   Goto of "sd" and "muxJoin" and waitBegan is unchanged, else
+\*   AfterMuxer; and the rest is unchanged."
 SdMuxer ==
     /\ pc["sd"] = "readMuxer"
     /\ muxer' = IF muxer = "running" THEN "stopped" ELSE muxer
-    /\ IF "join" \in Fix
-          THEN Goto("sd", "join") /\ UNCHANGED waitBegan
-          ELSE AfterJoin
+    /\ IF "muxerJoin" \in Fix
+          THEN Goto("sd", "muxJoin") /\ UNCHANGED waitBegan
+          ELSE AfterMuxer
     /\ UNCHANGED <<doneChan, errorChan, connClosed, conn, wg, lateAdd, wgMu, prot,
                    flags, joinv>>
+
+\* In English: "The muxer join: its error channel closes once its cleanup
+\* goroutine, which waits for the read loop, forwarders and senders, is
+\* done."
+\* Literally: "SdMuxJoin is defined as: pc of "sd" equals "muxJoin", and pc
+\*   of "mc" is a member of the set containing "notStarted" and "exited",
+\*   and AfterMuxer, and the rest is unchanged."
+SdMuxJoin ==
+    /\ pc["sd"] = "muxJoin"
+    /\ pc["mc"] \in {"notStarted", "exited"}
+    /\ AfterMuxer
+    /\ UNCHANGED <<doneChan, errorChan, connClosed, conn, muxer, wg, lateAdd, wgMu,
+                   prot, flags, joinv>>
 
 \* In English: "The join: wait until every protocol loop has exited, except
 \* the goroutine of a callback that is itself in Close."
 \* Literally: "SdJoin is defined as: pc of "sd" equals "join", and loopOther
 \*   does not equal "running", and (loopCb does not equal "running" or
-\*   exempt is true), and AfterJoin, and the rest is unchanged."
+\*   exempt is true), and (loopLate does not equal "running" or
+\*   LateExcused), and AfterJoin, and the rest is unchanged."
 SdJoin ==
     /\ pc["sd"] = "join"
     /\ loopOther /= "running"
     /\ loopCb /= "running" \/ exempt
+    /\ loopLate /= "running" \/ LateExcused
     /\ AfterJoin
     /\ UNCHANGED <<doneChan, errorChan, connClosed, conn, muxer, wg, lateAdd, wgMu,
                    prot, flags, joinv>>
@@ -661,7 +751,7 @@ ProtoFwd ==
     /\ UNCHANGED joinv
 
 \* In English: "The muxer cleanup goroutine closes the conn once the muxer
-\* is stopped. Nothing waits for it."
+\* is stopped. Under muxerJoin, shutdown waits for it."
 \* Literally: "MuxCleanup is defined as: pc of "mc" equals "wait", and muxer
 \*   equals "stopped", and conn in the next state equals "closed", and Goto
 \*   of "mc" and "exited", and the rest is unchanged."
@@ -678,30 +768,36 @@ MuxCleanup ==
 \* every goroutine finished, no callback runs, no SendError is half done."
 \* Literally: "Finished is defined as: pc of "setup" is a member of the set
 \*   containing "returned" and "failed", and pc of "user" is a member of
-\*   the set containing "returned" and "returnedEarly", and pc of "sd"
+\*   the set containing "returned", "returnedEarly" and "returnedErr",
+\*   and pc of "sd"
 \*   equals "done", and pc of "mf", "pf" and "mc" are members of the set
 \*   containing "notStarted" and "exited", and cb does not equal "running",
 \*   and hsErr does not equal "checked", and loopCb and loopOther do not
-\*   equal "running", and cbClose does not equal "waiting"."
+\*   equal "running", and cbClose does not equal "waiting", and loopLate
+\*   does not equal "running"."
 Finished ==
-    /\ pc["setup"] \in {"returned", "failed"} /\ pc["user"] \in {"returned", "returnedEarly"}
+    /\ pc["setup"] \in {"returned", "failed"}
+    /\ pc["user"] \in {"returned", "returnedEarly", "returnedErr"}
     /\ pc["sd"] = "done"
     /\ \A p \in {"mf", "pf", "mc"} : pc[p] \in {"notStarted", "exited"}
     /\ cb /= "running" /\ hsErr /= "checked"
     /\ loopCb /= "running" /\ loopOther /= "running" /\ cbClose /= "waiting"
+    /\ loopLate /= "running"
 
 \* In English: "A step is one step of one goroutine or one event; once
 \* everything is over, nothing changes. Any other state with no step is a
 \* deadlock (a goroutine stuck for good), which TLC reports."
 \* Literally: "Next is defined as: HsFinish, or HsErrCheck, or HsErrSend,
 \*   or MuxError, or Callback, or CallbackClose, or CallbackCloseReturn, or
-\*   LoopExit, or SdJoin, or SetupStep, or UserClose, or UserReturn,
+\*   LoopExit, or LateLoopStart, or LateLoopExit, or SdJoin, or SdMuxJoin,
+\*   or SetupStep, or UserClose, or UserReturn,
 \*   or SdBegin, or SdMuxer, or SdFenceLock, or SdFenceUnlock, or SdRest,
 \*   or MuxFwd, or ProtoFwd, or MuxCleanup, or (Finished and vars is
 \*   unchanged)."
 Next ==
     \/ HsFinish \/ HsErrCheck \/ HsErrSend \/ MuxError \/ Callback
     \/ CallbackClose \/ CallbackCloseReturn \/ LoopExit \/ SdJoin
+    \/ LateLoopStart \/ LateLoopExit \/ SdMuxJoin
     \/ SetupStep
     \/ UserClose \/ UserReturn
     \/ SdBegin \/ SdMuxer \/ SdFenceLock \/ SdFenceUnlock \/ SdRest
@@ -741,11 +837,12 @@ MuxerStoppedWhenClosed ==
 \* no protocol loop is left to start one (what the comment at :263
 \* claims)."
 \* Literally: "NoCallbackAfterClose is defined as: if pc of "user" equals
-\*   "returned", then cb does not equal "running", and loopCb and loopOther
-\*   do not equal "running"."
+\*   "returned", then cb does not equal "running", and loopCb, loopOther
+\*   and loopLate do not equal "running"."
 NoCallbackAfterClose ==
     pc["user"] = "returned" =>
         cb /= "running" /\ loopCb /= "running" /\ loopOther /= "running"
+        /\ loopLate /= "running"
 
 \* In English: "A Close, even one made before setup got far, leaves no
 \* muxer or protocol running once Dial has returned."
@@ -757,7 +854,20 @@ CloseTearsDown ==
     pc["user"] \in {"returned", "returnedEarly"} /\ pc["setup"] \in {"returned", "failed"}
         => muxer /= "running" /\ proto /= "running"
 
+\* In English: "After Close returns without an error, the muxer's
+\* goroutines have exited too, so no Metrics callback runs after it."
+\* Literally: "MuxerJoinedAfterClose is defined as: if pc of "user" equals
+\*   "returned", then pc of "mc" is a member of the set containing
+\*   "notStarted" and "exited"."
+MuxerJoinedAfterClose ==
+    pc["user"] = "returned" => pc["mc"] \in {"notStarted", "exited"}
+
 (* Reachability probes: each is expected to be violated. *)
+
+\* In English: "Probe: the callback's instance never starts a loop while
+\* the callback is in Close."
+\* Literally: "ProbeNoLateLoop is defined as: loopLate equals "none"."
+ProbeNoLateLoop == loopLate = "none"
 
 \* In English: "Probe: the handshake never finishes after setup's timer
 \* fired (FinishedFunc then writes handshakeVersion with no
