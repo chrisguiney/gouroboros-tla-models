@@ -268,6 +268,12 @@ that the timer then runs. Commit `18e0418a` removes the Leios Votes server's
 Busy timeout, dead since the server holds agency in Busy, and corrects the
 Leios Votes, Peer Sharing and `PROTOCOL_LIMITS.md` timeout text: it cannot
 affect the model, which already never times the side holding agency.
+Commit `ef2704eb` adds tests only (review finding): a 100 ms
+`WithAcquireTimeout` or `WithQueryTimeout` in local-state-query and
+local-tx-monitor fails the call and tears the connection down against a
+server that never answers, and with no timeout the client keeps waiting.
+It changes no behaviour, and `PeerWaitIsTimed` already says a configured
+timer fires while the peer holds agency, so the model is unaffected.
 
 ### Run it
 
