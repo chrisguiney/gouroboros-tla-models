@@ -42,11 +42,22 @@ keepalive-lifecycle: ## Check the gOuroboros server restart against Stop and con
 
 CONNECTION := cd specs/02-connection && ../../bin/tlc
 
-connection: ## Check that messages survive a restart, and why each mechanism matters
+connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config MuxHandover.cfg MuxHandover.tla
 	$(CONNECTION) -config MuxHandoverNoCarryBug.cfg MuxHandover.tla || true
 	$(CONNECTION) -config MuxHandoverAdmitAllBug.cfg MuxHandover.tla || true
 	$(CONNECTION) -config MuxHandoverNoResumeBug.cfg MuxHandover.tla || true
+	$(CONNECTION) -config MuxHandoverServerStop.cfg MuxHandover.tla
+	$(CONNECTION) -config MuxHandoverClose.cfg MuxHandover.tla
+	$(CONNECTION) -config MuxHandoverCloseWindowBug.cfg MuxHandover.tla || true
+	$(CONNECTION) -config MuxIngress.cfg MuxIngress.tla
+	$(CONNECTION) -config MuxIngressUnsizedBug.cfg MuxIngress.tla || true
+	$(CONNECTION) -config MuxIngressBackpressure.cfg MuxIngress.tla
+	$(CONNECTION) -config MuxIngressBackpressureDependencyBug.cfg MuxIngress.tla || true
+	$(CONNECTION) -config MuxIngressSharedBudget.cfg MuxIngress.tla
+	$(CONNECTION) -config MuxIngressSharedBudgetBug.cfg MuxIngress.tla || true
+	$(CONNECTION) -config ConnectionShutdown.cfg ConnectionShutdown.tla
+	$(CONNECTION) -config ConnectionShutdownLateErrorBug.cfg ConnectionShutdown.tla || true
 
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \

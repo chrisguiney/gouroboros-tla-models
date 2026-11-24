@@ -6,7 +6,17 @@ and on the other side reassembles each mini-protocol's byte stream. Bugs here
 affect every protocol at once, and they live in concurrent Go code that tests
 rarely drive into its rare orderings. That is what TLA+ is good at.
 
-This model is built in parts. Read [Model 01](../01-keepalive/README.md) first.
+This model is built in four parts. Read [Model 01](../01-keepalive/README.md)
+first.
+
+| Part | Module | Question |
+| --- | --- | --- |
+| 1 | `MuxHandover.tla` | Do messages survive a mini-protocol restart? |
+| 2 | `MuxHandover.tla`, with a stopper | Does `Stop` or a connection shutdown during a restart leave anything behind? |
+| 3 | `MuxIngress.tla` | What happens when several mini-protocols share one demultiplexer? |
+| 4 | `ConnectionShutdown.tla` | Can errors and shutdown race into a panic or a hang? |
+
+`make connection` runs all of them.
 
 ## Part 1: bytes across a restart (`MuxHandover.tla`)
 
@@ -77,7 +87,7 @@ make connection
 
 | Config | Result |
 | --- | --- |
-| `MuxHandover.cfg` | **Passes: 476 distinct states.** Every message is handled once, in order (`DeliveredInOrder`); no instance refuses an honest message (`NoViolation`); at most one message is admitted at a time; and nothing gets stuck. |
+| `MuxHandover.cfg` | **Passes: 520 distinct states.** Every message is handled once, in order (`DeliveredInOrder`); no instance refuses an honest message (`NoViolation`); at most one message is admitted at a time; and nothing gets stuck. |
 | `MuxHandoverNoCarryBug.cfg` | Deadlock: a ping that was in the old read buffer is lost, and the client waits forever for its answer. |
 | `MuxHandoverAdmitAllBug.cfg` | Deadlock after 14 steps: the old instance admits the next run's ping before it has handled `MsgDone`; the restart discards it. |
 | `MuxHandoverNoResumeBug.cfg` | Deadlock: segments queued in the old receiver are lost with it. |
@@ -87,12 +97,136 @@ three together are enough, for every way the bytes can be cut and every order
 in which the client, the read loop, the receive loop, and the restart can
 run.
 
-### What this part does not cover yet
+## Part 2: `Stop` and shutdown during a restart (`MuxHandover.tla`)
 
-- `Stop` and connection shutdown during a restart (Model 01's
-  `KeepAliveLifecycle.tla` has them, without bytes).
-- Several mini-protocols sharing the mux, the per-protocol ingress limits, and
-  the connection-wide budget.
-- Errors travelling to the connection, and the shutdown order.
+The same module, with a stopper (constant `Stopper`): `Server.Stop()`, or a
+connection shutdown (`stopProtocols` in `connection.go`, then `muxer.Stop()`),
+at any moment, including halfway through a restart. The muxer's receiver slot
+is now explicit, since the last keep-alive bug lived there: `Stop`
+unregisters it, `StopForRestart` suspends it, `Start` registers or resumes
+it, and bytes for an empty slot are dropped.
 
-Those are the next parts.
+| Config | Result |
+| --- | --- |
+| `MuxHandoverServerStop.cfg` | **Passes: 1,846 distinct states.** With the keep-alive fix (the `Stop` guard and the release of a cancelled restart's receiver): nothing reordered, nothing handled after `Stop`, nothing left reading or registered. |
+| `MuxHandoverClose.cfg` | **Passes: 3,284 distinct states.** During a connection shutdown, nothing is reordered or refused, and nothing gets stuck. |
+| `MuxHandoverCloseWindowBug.cfg` | **Fails:** a message can be handled after shutdown has stopped the protocols. |
+
+The failing trace, step by step:
+
+1. The server handles the client's `MsgDone`; its restart begins.
+2. Shutdown reads the old instance, stops it, and unregisters its receiver.
+3. Shutdown records no stop request, so the restart's guard does not fire.
+   The restart installs a new instance and **registers it with the muxer
+   again**, which is still running.
+4. The client's next ping arrives, and the new instance handles it: its
+   message handler runs after `stopProtocols` stopped the server.
+5. Only then does the muxer stop.
+
+For keep-alive the handler answers a ping. For chain-sync, block-fetch,
+tx-submission, peer-sharing, and the Leios servers, which restart the same
+way, it is application callbacks running after shutdown began. The model
+shows it happens before `muxer.Stop()`. Whether a callback can still be
+running after `Close` returns is not modelled: `Close` waits for the
+connection's own goroutines (part 4), not for the protocols'. This has not
+been reproduced in Go yet.
+
+## Part 3: several mini-protocols, one demultiplexer (`MuxIngress.tla`)
+
+The muxer reads every segment of the connection in one loop, in the order the
+peer sent them (`readLoop` in `muxer/muxer.go`), and puts each on its
+mini-protocol's queue (`segmentChannel.enqueue`). A segment fits when its
+queue stays within the protocol's limit and the connection-wide budget has
+room. When it does not fit:
+
+- **without backpressure** the connection ends with `ErrIngressOverflow`, as
+  the specification requires: "If the demultiplexer detects an overflow of
+  the buffer, it means that the peer violated the protocol and the MUX/DEMUX
+  layer shuts down the connection" (M3, `mux.tex` lines 123-131, PDF section
+  2.1.3);
+- **with backpressure** the loop waits, which holds up **every** protocol on
+  the connection. gOuroboros switches it on only while block-fetch has
+  requests it cannot size in advance (`protocol/blockfetch/client.go`), and
+  `SetIngressBackpressure` says so: "Pausing the read loop stops every
+  protocol on the connection, keep-alive included". An empty backpressured
+  queue always admits, past both its limit and the budget.
+
+The model has two protocols: `Bulk` (like a block-fetch range) and `Ping`
+(like keep-alive or a local state query), optionally with Bulk's reader
+waiting for a Ping answer before taking its next segment (`Dependency`).
+
+| Config | Result |
+| --- | --- |
+| `MuxIngress.cfg` | **Passes.** A peer that follows flow control never overflows anything, even when Bulk's reader waits on Ping. |
+| `MuxIngressUnsizedBug.cfg` | Overflow: a request the reader cannot size, without backpressure, ends the connection. This is why block-fetch switches backpressure on. |
+| `MuxIngressBackpressure.cfg` | **Passes: 891 distinct states.** The same request with backpressure: the loop waits instead, and everything is delivered. |
+| `MuxIngressBackpressureDependencyBug.cfg` | **Deadlock**, see below. |
+| `MuxIngressSharedBudget.cfg` | **Passes.** Bulk fills the shared budget while waiting on Ping; the empty-queue rule lets the Ping answer in. |
+| `MuxIngressSharedBudgetBug.cfg` | Deadlock without the empty-queue rule. This is why it exists. |
+
+**The hazard.** While backpressure holds the read loop, a reader that waits
+on another mini-protocol of the same connection waits forever: the answer is
+behind segments the loop cannot place. In gOuroboros terms: while block-fetch
+has unsized requests outstanding, a block-fetch callback that synchronously
+waits for another protocol's reply on the same connection deadlocks the
+connection. gOuroboros's documentation says pausing stops every protocol; it
+does not spell out this consequence. It is a hazard for applications, not a
+bug in gOuroboros as such.
+
+**The budget arithmetic.** For honest traffic the budget must cover every
+protocol's limit at once. gOuroboros's node-to-node limits (each at least
+`minIngressLimit`, 655,350 bytes) sum to about 15 MB across both directions,
+against a `DefaultIngressBudget` of 64 MB. Payloads are allocated at exactly
+their length (`make([]byte, header.PayloadLength)`), so the budget charges
+bytes plus a fixed overhead of about 64 bytes per segment. The budget cannot
+be hit by honest traffic.
+
+## Part 4: errors and the shutdown order (`ConnectionShutdown.tla`)
+
+Five goroutines from `connection.go`: setup (waiting for the handshake, then
+starting the protocol-error forwarder with `waitGroup.Go`, then
+`lockProtocolSetup`), the muxer-error forwarder, the protocol-error
+forwarder, the shutdown goroutine (`stopProtocols`, `muxer.Stop`,
+`waitGroup.Wait`, close `errorChan`, close `connClosedChan`), and a user
+calling `Close`. Errors are forwarded with
+`select { errorChan <- err; <-doneChan; default }`, and in Go a send on a
+closed channel panics, even inside a `select`.
+
+| Config | Result |
+| --- | --- |
+| `ConnectionShutdown.cfg` | **Passes: 420 distinct states.** Nothing sends on the closed `errorChan`, `Close` returns only after shutdown has finished, and nothing deadlocks. |
+| `ConnectionShutdownLateErrorBug.cfg` | **Panics** if a protocol could report an error after the handshake finished. |
+
+**A latent hazard.** The protocol-error forwarder is started after the
+handshake, outside `lockProtocolSetup`, so it can start after
+`waitGroup.Wait` has returned and `errorChan` is closed. Today that is safe
+only because no protocol can have an error pending then: the handshake server
+sends its accept and waits for the write before `FinishedFunc` signals
+completion, a protocol in its `Done` state reports no read errors, a protocol
+that reports an error stops itself, and the other mini-protocols start only
+in `lockProtocolSetup`. The first version of this module let protocols fail
+at any time and found the panic; reading the code removed that path. Any
+change that lets a protocol fail between the handshake and
+`lockProtocolSetup` would make it reachable.
+
+## What model 02 found
+
+- **Messages survive restarts.** Carrying the read buffer, admitting one
+  message at a time, and resuming the receiver are each necessary, and
+  together sufficient (part 1).
+- **The keep-alive fix holds with bytes in flight** (part 2,
+  `MuxHandoverServerStop.cfg`).
+- **A shutdown window**: during a connection close, a restarting server
+  re-registers with the muxer and can handle a message after
+  `stopProtocols` (part 2). Not yet reproduced in Go.
+- **A backpressure hazard** for applications whose block-fetch callbacks wait
+  on another protocol (part 3).
+- **A latent panic** in the shutdown order, unreachable today (part 4).
+- Negative results, also worth knowing: the connection budget cannot be hit
+  by honest traffic (part 3), and `Close` always returns after shutdown
+  (part 4).
+
+## Not modelled yet
+
+Byte sizes beyond "fits or not", timeouts, the egress side of the muxer, and
+whether protocol goroutines can outlive `Close`.
