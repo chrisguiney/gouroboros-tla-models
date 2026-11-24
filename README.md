@@ -19,60 +19,91 @@ make hello-bug   # watch TLC catch a bug and print the steps that cause it
 
 ## Learning path
 
-Read these in order. Each one builds on the last.
+The models are grouped by the part of gOuroboros they describe, from the wire
+up. Within a group, read them in the order listed; each group assumes the ones
+above it. The directory numbers record the order the models were written in,
+not a reading order.
 
-1. [Installing TLA+](docs/01-install.md): what `make install` does, editor setup, and troubleshooting.
-2. [Your first model](docs/02-first-model.md): `specs/00-hello/Hello.tla` line by line, and how to read TLC's output.
-3. [How this finds gouroboros bugs](docs/approach.md): the plan for turning models into Go tests.
-4. [Model 01: keep-alive](specs/01-keepalive/README.md): the first real
-   gouroboros model, the Go tests it drove, and what it found.
-5. [Model 02: the connection](specs/02-connection/README.md): the
-   multiplexer, and messages surviving a restart.
-6. [Model 03: the protocol engine](specs/03-engine/README.md): the code every
-   mini-protocol runs on, starting with how it admits incoming messages.
-7. [Model 04: chain-sync](specs/04-chainsync/README.md): the client's sync
-   window, stopping and restarting, its queries, and the protocol with its
-   limits and timeouts.
-8. [Model 05: the handshake](specs/05-handshake/README.md): version
-   negotiation, queries, and simultaneous open.
-9. [Model 06: block-fetch](specs/06-blockfetch/README.md): matching each
-   batch to its request, and stopping with ranges outstanding.
-10. [Model 07: tx-submission](specs/07-txsubmission/README.md): the
-    acknowledgement window and the blocking-style rules.
-11. [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
-    rules, size limits and timeouts.
-12. [Model 09: local tx](specs/09-localtx/README.md): local tx submission
-    and the local tx monitor's acquire, query and release.
-12. [Model 10: local-state-query](specs/10-localstatequery/README.md):
-    acquiring, querying, releasing, and the client's concurrent calls.
-13. [Model 11: message queue](specs/11-dmq/README.md): message
-    submission (CIP-0137), local submission and notification.
-14. [Model 12: Leios and Peras](specs/12-leios-peras/README.md): the
-    experimental notify, fetch and vote protocols.
-15. [Model 13: consensus](specs/13-consensus/README.md): chain selection,
-    operational certificates and KES, and the Byron PBFT window.
-16. [Model 14: the Shelley ledger](specs/14-ledger-shelley/README.md):
-    certificate lifecycles, deposits, stake snapshots, value preservation.
-17. [Model 15: Conway governance](specs/15-ledger-governance/README.md):
-    proposals, voting, ratification, enactment and refunds.
-18. [Model 16: block pipeline and CBOR](specs/16-pipeline-cbor/README.md):
-    ordered apply, rollback fencing, drain, and preserved bytes.
-19. [Model 17: the UTXO rule](specs/17-ledger-utxo/README.md): value,
-    fees, outputs, validity intervals, collateral and IsValid from Shelley
-    to Babbage.
-20. [Model 18: Genesis density](specs/18-consensus-genesis/README.md):
-    the density rule beside the reference's GDD governor and Limit on
-    Eagerness.
-21. [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
-    UTxO rule, fees and heavyweight delegation.
-22. [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
-    certification, endorser-block application, rollback and the
-    certificate's committee.
-23. [Model 21: the epoch nonce](specs/21-consensus-nonce/README.md): the
-    evolving and candidate nonces, the freeze window and the tick.
-24. [Drift](DRIFT.md): every place gOuroboros differs from the reference, with the spec's verdict.
-25. [Glossary](docs/glossary.md): keep it open while you read anything else.
-26. [Concurrency inventory](CONCURRENCY.md): every lock, goroutine and channel in gOuroboros, the hazards among them, and which concurrency models to write next.
+### Getting started
+
+- [Installing TLA+](docs/01-install.md): what `make install` does, editor setup, and troubleshooting.
+- [Your first model](docs/02-first-model.md): `specs/00-hello/Hello.tla` line by line, and how to read TLC's output.
+- [Reading a formula literally](#reading-a-formula-literally): the words each
+  symbol is read as, used by every model's "Literally" comments.
+- [How this finds gouroboros bugs](docs/approach.md): the plan for turning models into Go tests.
+- [Glossary](docs/glossary.md): keep it open while you read anything else.
+
+### The connection
+
+Everything below runs on these. Start with keep-alive: it is the smallest real
+protocol.
+
+- [Model 01: keep-alive](specs/01-keepalive/README.md): the first real
+  gouroboros model, the Go tests it drove, and what it found.
+- [Model 02: the connection](specs/02-connection/README.md): the
+  multiplexer, and messages surviving a restart.
+- [Model 03: the protocol engine](specs/03-engine/README.md): the code every
+  mini-protocol runs on, starting with how it admits incoming messages.
+
+### Node-to-node protocols
+
+- [Model 05: the handshake](specs/05-handshake/README.md): version
+  negotiation, queries, and simultaneous open.
+- [Model 04: chain-sync](specs/04-chainsync/README.md): the client's sync
+  window, stopping and restarting, its queries, and the protocol with its
+  limits and timeouts.
+- [Model 06: block-fetch](specs/06-blockfetch/README.md): matching each
+  batch to its request, and stopping with ranges outstanding.
+- [Model 07: tx-submission](specs/07-txsubmission/README.md): the
+  acknowledgement window and the blocking-style rules.
+- [Model 08: peer-sharing](specs/08-peersharing/README.md): the amount
+  rules, size limits and timeouts.
+- [Model 12: Leios and Peras](specs/12-leios-peras/README.md): the
+  experimental notify, fetch and vote protocols.
+
+### Node-to-client protocols
+
+- [Model 09: local tx](specs/09-localtx/README.md): local tx submission
+  and the local tx monitor's acquire, query and release.
+- [Model 10: local-state-query](specs/10-localstatequery/README.md):
+  acquiring, querying, releasing, and the client's concurrent calls.
+- [Model 11: message queue](specs/11-dmq/README.md): message
+  submission (CIP-0137), local submission and notification.
+
+### Consensus
+
+- [Model 13: consensus](specs/13-consensus/README.md): chain selection,
+  operational certificates and KES, and the Byron PBFT window.
+- [Model 18: Genesis density](specs/18-consensus-genesis/README.md):
+  the density rule beside the reference's GDD governor and Limit on
+  Eagerness.
+- [Model 21: the epoch nonce](specs/21-consensus-nonce/README.md): the
+  evolving and candidate nonces, the freeze window and the tick.
+
+### Ledger
+
+- [Model 14: the Shelley ledger](specs/14-ledger-shelley/README.md):
+  certificate lifecycles, deposits, stake snapshots, value preservation.
+- [Model 17: the UTXO rule](specs/17-ledger-utxo/README.md): value,
+  fees, outputs, validity intervals, collateral and IsValid from Shelley
+  to Babbage.
+- [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
+  UTxO rule, fees and heavyweight delegation.
+- [Model 15: Conway governance](specs/15-ledger-governance/README.md):
+  proposals, voting, ratification, enactment and refunds.
+- [Model 20: the Leios ledger side](specs/20-ledger-leios/README.md):
+  certification, endorser-block application, rollback and the
+  certificate's committee.
+
+### Block pipeline
+
+- [Model 16: block pipeline and CBOR](specs/16-pipeline-cbor/README.md):
+  ordered apply, rollback fencing, drain, and preserved bytes.
+
+### Across the models
+
+- [Drift](DRIFT.md): every place gOuroboros differs from the reference, with the spec's verdict.
+- [Concurrency inventory](CONCURRENCY.md): every lock, goroutine and channel in gOuroboros, the hazards among them, and which concurrency models to write next.
 
 `make models` checks every configuration of every model; a configuration
 named `*Bug.cfg` is expected to fail, and the script says so if it does not.
