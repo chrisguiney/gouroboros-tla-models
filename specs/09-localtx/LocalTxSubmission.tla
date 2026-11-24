@@ -54,8 +54,13 @@ CONSTANTS
     MaxSubmits,      \* how many transactions the callers submit in all; they are numbered 1..MaxSubmits
     MaxFlips,        \* how many times the mempool may fill up or drain (keeps the model finite)
     RogueMessages,   \* how many arbitrary messages a misbehaving peer may inject
-    ClientTimeouts,  \* TRUE: gOuroboros's client timer in StBusy (30 s by default)
+    ClientTimeouts,  \* TRUE: gOuroboros's client timer in StBusy (30 s by default on main;
+                     \* opt-in with WithTimeout, none by default, on PR #3140)
                      \* FALSE: no timeouts, as [S3] says
+    StopCancelsWait, \* TRUE: Stop ends a SubmitTx that waits for the server, then closes
+                     \* the protocol without a message (a reference client is a thread
+                     \* that is cancelled; it cannot send in StBusy [R4])
+                     \* FALSE: Stop takes busyMutex first, so it waits for the answer
     SerialCalls,     \* TRUE: SubmitTx calls take busyMutex, so one caller waits at a time
                      \* FALSE: the mutation, with the mutex removed
     ServerRestarts,  \* TRUE: the server restarts after MsgDone [S4]. FALSE: gOuroboros today
@@ -127,10 +132,12 @@ VARIABLES
     flips,      \* how many times the mempool filled up or drained
     misrouted,  \* TRUE once an answer reached a caller other than the one it answers
     runs,       \* client runs started so far on this connection
-    rogueLeft   \* rogue messages the misbehaving peer may still inject
+    rogueLeft,  \* rogue messages the misbehaving peer may still inject
+    stop,       \* the client's Stop: "no", "requested" (called, not yet returned), or "done"
+    cancelled   \* TRUE once Stop ended a SubmitTx that was waiting for the server
 
 vars == <<view, inbox, queued, waiting, submits, srvTx, full, flips,
-          misrouted, runs, rogueLeft>>
+          misrouted, runs, rogueLeft, stop, cancelled>>
 
 Init ==
     /\ view = [r \in Roles |-> "StIdle"]
@@ -144,6 +151,8 @@ Init ==
     /\ misrouted = FALSE
     /\ runs = 1
     /\ rogueLeft = RogueMessages
+    /\ stop = "no"
+    /\ cancelled = FALSE
 
 \* In English: "The server holds a transaction it cannot add yet, because
 \* the mempool is full [R4]."
@@ -151,6 +160,7 @@ ServerBlocked == view["Server"] = "StBusy" /\ full
 
 Ended ==
     \/ \E r \in Roles : view[r] \in Failures
+    \/ view["Client"] = "Closed" /\ stop = "done"
     \/ /\ view["Client"] = "StDone" /\ runs = MaxRuns
        /\ view["Server"] = "StDone" /\ inbox["Server"] = <<>>
 
@@ -167,12 +177,14 @@ WaitsForever == ServerBlocked /\ flips = MaxFlips /\ RogueMessages = 0
 \* client's send queue and the caller waits for an answer."
 ClientSubmit ==
     /\ submits < MaxSubmits
+    /\ stop = "no"
     /\ view["Client"] \in {"StIdle", "StBusy"}
     /\ SerialCalls => (waiting = {} /\ view["Client"] = "StIdle")
     /\ submits' = submits + 1
     /\ queued' = Append(queued, submits + 1)
     /\ waiting' = waiting \cup {submits + 1}
-    /\ UNCHANGED <<view, inbox, srvTx, full, flips, misrouted, runs, rogueLeft>>
+    /\ UNCHANGED <<view, inbox, srvTx, full, flips, misrouted, runs, rogueLeft,
+                   stop, cancelled>>
 
 \* In English: "The client's send loop puts the oldest queued transaction on
 \* the wire once the client holds agency, in StIdle."
@@ -182,23 +194,65 @@ ClientSend ==
     /\ view' = [view EXCEPT !["Client"] = "StBusy"]
     /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgSubmitTx", Head(queued)))]
     /\ queued' = Tail(queued)
-    /\ UNCHANGED <<waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft>>
+    /\ UNCHANGED <<waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft,
+                   stop, cancelled>>
 
-\* In English: "Stop takes busyMutex, so it runs only when no caller waits;
-\* the client is then in StIdle and sends MsgDone."
+\* In English: "A waiting SubmitTx holds busyMutex. It returns, freeing
+\* it, when its answer is read, or when the protocol fails (the result
+\* channel is closed)."
+LockHeld == waiting /= {} /\ view["Client"] \notin Failures
+
+\* In English: "Stop is called. It may be called at any time during a run,
+\* including while a SubmitTx waits for the server."
+StopRequest ==
+    /\ stop = "no"
+    /\ view["Client"] \in States \ {"StDone"}
+    /\ stop' = "requested"
+    /\ UNCHANGED <<view, inbox, queued, waiting, submits, srvTx, full, flips,
+                   misrouted, runs, rogueLeft, cancelled>>
+
+\* In English: "With StopCancelsWait, Stop ends the waiting SubmitTx; it
+\* returns, freeing busyMutex."
+StopCancel ==
+    /\ StopCancelsWait
+    /\ stop = "requested"
+    /\ LockHeld
+    /\ waiting' = {}
+    /\ cancelled' = TRUE
+    /\ UNCHANGED <<view, inbox, queued, submits, srvTx, full, flips,
+                   misrouted, runs, rogueLeft, stop>>
+
+\* In English: "Stop runs once it holds busyMutex. If it cancelled a
+\* waiting SubmitTx, the client may not send (the server has agency), so it
+\* closes the protocol without a message. If the protocol already failed,
+\* there is nothing to send. Otherwise the client is in StIdle and sends
+\* MsgDone."
 ClientStop ==
-    /\ view["Client"] = "StIdle"
-    /\ waiting = {} /\ queued = <<>>
-    /\ view' = [view EXCEPT !["Client"] = "StDone"]
-    /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgDone", 0))]
-    /\ UNCHANGED <<queued, waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft>>
+    /\ stop = "requested"
+    /\ ~LockHeld
+    /\ stop' = "done"
+    /\ \/ /\ cancelled
+          /\ view["Client"] \in States
+          /\ view' = [view EXCEPT !["Client"] = "Closed"]
+          /\ UNCHANGED inbox
+       \/ /\ view["Client"] \in Failures
+          /\ UNCHANGED <<view, inbox>>
+       \/ /\ ~cancelled
+          /\ view["Client"] = "StIdle"
+          /\ queued = <<>>
+          /\ view' = [view EXCEPT !["Client"] = "StDone"]
+          /\ inbox' = [inbox EXCEPT !["Server"] = Append(@, Msg("MsgDone", 0))]
+    /\ UNCHANGED <<queued, waiting, submits, srvTx, full, flips, misrouted, runs,
+                   rogueLeft, cancelled>>
 
 ClientRestart ==
     /\ view["Client"] = "StDone"
     /\ runs < MaxRuns
     /\ view' = [view EXCEPT !["Client"] = "StIdle"]
     /\ runs' = runs + 1
-    /\ UNCHANGED <<inbox, queued, waiting, submits, srvTx, full, flips, misrouted, rogueLeft>>
+    /\ stop' = "no"
+    /\ UNCHANGED <<inbox, queued, waiting, submits, srvTx, full, flips, misrouted, rogueLeft,
+                   cancelled>>
 
 \* --- The server. ---------------------------------------------------------
 
@@ -209,14 +263,16 @@ ServerAnswer(t) ==
     /\ ~full
     /\ view' = [view EXCEPT !["Server"] = "StIdle"]
     /\ inbox' = [inbox EXCEPT !["Client"] = Append(@, Msg(t, srvTx))]
-    /\ UNCHANGED <<queued, waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft>>
+    /\ UNCHANGED <<queued, waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft,
+                   stop, cancelled>>
 
 \* In English: "The mempool fills up or drains, a bounded number of times."
 MempoolFlip ==
     /\ flips < MaxFlips
     /\ full' = ~full
     /\ flips' = flips + 1
-    /\ UNCHANGED <<view, inbox, queued, waiting, submits, srvTx, misrouted, runs, rogueLeft>>
+    /\ UNCHANGED <<view, inbox, queued, waiting, submits, srvTx, misrouted, runs, rogueLeft,
+                   stop, cancelled>>
 
 \* --- Reading. ------------------------------------------------------------
 
@@ -242,13 +298,14 @@ Recv(r) ==
                          /\ misrouted' = (misrouted \/ c /= m.tx)
                 ELSE UNCHANGED <<waiting, misrouted>>
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]
-    /\ UNCHANGED <<queued, submits, full, flips, runs, rogueLeft>>
+    /\ UNCHANGED <<queued, submits, full, flips, runs, rogueLeft, stop, cancelled>>
 
 Inject(r, m) ==
     /\ rogueLeft > 0
     /\ inbox' = [inbox EXCEPT ![r] = Append(@, m)]
     /\ rogueLeft' = rogueLeft - 1
-    /\ UNCHANGED <<view, queued, waiting, submits, srvTx, full, flips, misrouted, runs>>
+    /\ UNCHANGED <<view, queued, waiting, submits, srvTx, full, flips, misrouted, runs,
+                   stop, cancelled>>
 
 \* --- Timeouts. -----------------------------------------------------------
 \* [S3] sets none. gOuroboros's client sets Config.Timeout on StBusy. The
@@ -263,10 +320,12 @@ Timeout ==
     /\ inbox["Client"] = <<>>
     /\ ServerBlocked
     /\ view' = [view EXCEPT !["Client"] = "TimedOut"]
-    /\ UNCHANGED <<inbox, queued, waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft>>
+    /\ UNCHANGED <<inbox, queued, waiting, submits, srvTx, full, flips, misrouted, runs, rogueLeft,
+                   stop, cancelled>>
 
 Next ==
-    \/ ClientSubmit \/ ClientSend \/ ClientStop \/ ClientRestart
+    \/ ClientSubmit \/ ClientSend \/ ClientRestart
+    \/ StopRequest \/ StopCancel \/ ClientStop
     \/ \E t \in {"MsgAcceptTx", "MsgRejectTx"} : ServerAnswer(t)
     \/ MempoolFlip
     \/ \E r \in Roles : Recv(r)
@@ -280,7 +339,7 @@ Spec == Init /\ [][Next]_vars
 (* Invariants. *)
 
 TypeOK ==
-    /\ view \in [Roles -> States \cup Failures]
+    /\ view \in [Roles -> States \cup Failures \cup {"Closed"}]
     /\ inbox \in [Roles -> Seq(Messages)]
     /\ queued \in Seq(Txs)
     /\ waiting \subseteq Txs
@@ -290,6 +349,8 @@ TypeOK ==
     /\ flips \in 0..MaxFlips
     /\ runs \in 1..MaxRuns
     /\ rogueLeft \in 0..RogueMessages
+    /\ stop \in {"no", "requested", "done"}
+    /\ cancelled \in BOOLEAN
 
 NoFailures == \A r \in Roles : view[r] \notin Failures
 
@@ -315,11 +376,23 @@ OneSubmitInFlight ==
     Len(SelectSeq(inbox["Server"], LAMBDA m : m.type = "MsgSubmitTx"))
         + (IF view["Server"] = "StBusy" THEN 1 ELSE 0) <= 1
 
+\* In English: "A Stop that has been called can always take its next step
+\* without the server doing anything: it never waits on the peer." With no
+\* client timeout, a Stop that waits for busyMutex while the node holds a
+\* submission for a full mempool waits for as long as the mempool stays
+\* full.
+StopNeverWaitsOnPeer ==
+    stop = "requested" => ENABLED (StopCancel \/ ClientStop)
+
 FailuresAreFinal ==
     [][\A r \in Roles : view[r] \in Failures => view'[r] = view[r]]_vars
 
 -----------------------------------------------------------------------------
 (* Reachability probes: each must be violated in the passing configs. *)
+
+\* In English: "Stop never cancels a SubmitTx the server holds for a full
+\* mempool."
+ProbeNoCancelledHeldSubmit == ~(cancelled /\ ServerBlocked)
 
 \* In English: "The server never waits for room in the mempool."
 ProbeServerNeverBlocks == ~ServerBlocked
