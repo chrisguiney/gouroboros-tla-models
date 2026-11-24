@@ -54,6 +54,17 @@ V1 starts in `StInit` (the outbound sends `MsgInit`) and the outbound may end
 the run with `MsgDone` instead of answering a blocking request. V2 has no
 `StInit`, and the inbound ends the run with `MsgDone` from `StIdle`.
 
+Which side is the connection's initiator depends on the version. In dmq-node
+the initiator runs the V1 outbound and the V2 inbound [R6]. Before the wire
+fix, gOuroboros put its Client (the outbound) on the initiator in both
+versions, so in V2 against dmq-node both ends ran the outbound and each
+waited in `StIdle` for the other. In V2 the outbound may also answer a
+blocking request with `MsgReplyNoSigIds`, which applies the acknowledgement
+and announces nothing; dmq-node's outbound sends it after 17 s, and its
+inbound gives up on a blocking request after 20 s [R5]. gOuroboros had no
+such message before the fix, so a gOuroboros Client with nothing new could
+not keep a dmq-node requester's connection open.
+
 ### The questions
 
 1. **`WindowBound`**: does either window ever exceed `MaxUnacked`?
@@ -67,20 +78,26 @@ the run with `MsgDone` instead of answering a blocking request. V2 has no
    (`ProtocolErrorDuplicateRequest`).
 5. **`HonestNeverRefused`**: does the outbound ever refuse a gOuroboros
    Server that used only its public API?
-6. Deadlock: a blocking request with no ids left to give is the only
-   legitimate wait (`Quiet`).
+6. Deadlock: in V1 a blocking request with no ids left to give is the only
+   legitimate wait (`Quiet`). In V2 it is not, because the requester gives up
+   after 20 s; nor is an `StIdle` that no side may leave.
 
 The inbound is either the gOuroboros Server (`Rogue = FALSE`) or a peer that
 may send any request (`Rogue = TRUE`), including bad acknowledgements, counts
 over the window, wrong blocking flags, unannounced ids, and repeated ids.
+`RolesMatch` says whether the two ends agree which of them runs the inbound
+in V2, and `NoIdsReply` whether the V2 outbound can send `MsgReplyNoSigIds`;
+both are `TRUE` after the wire fix.
 
 ### The answer
 
 | Config | States | Result |
 | --- | --- | --- |
-| `MessageSubmissionV1.cfg`: V1, the gOuroboros Server, with the repeat fix | 159 | passes |
-| `MessageSubmissionV2.cfg`: V2, the same | 137 | passes |
-| `MessageSubmissionRogue.cfg`: V2, any request, with the repeat fix | 217 | passes |
+| `MessageSubmissionV1.cfg`: V1, the gOuroboros Server, with the repeat and wire fixes | 159 | passes |
+| `MessageSubmissionV2.cfg`: V2, the same | 157 | passes |
+| `MessageSubmissionRogue.cfg`: V2, any request, with the repeat and wire fixes | 245 | passes |
+| `MessageSubmissionV2RolesBug.cfg`: V2, gOuroboros before the wire fix against dmq-node: both ends run the outbound | | **fails**: deadlock in the initial `StIdle` |
+| `MessageSubmissionV2NoIdsReplyBug.cfg`: V2, a gOuroboros Client before the wire fix: no `MsgReplyNoSigIds` | | **fails**: deadlock, a blocking request with nothing left to give |
 | `MessageSubmissionRepeatBug.cfg`: any request, gOuroboros today | | **fails** `NoRepeatServe` |
 | `MessageSubmissionServerRepeatBug.cfg`: the gOuroboros Server today, a refusing outbound | | **fails** `HonestNeverRefused` |
 
@@ -237,6 +254,7 @@ tests do not repeat them.
 | --- | --- | --- |
 | `fix/messagesubmission-repeat-request` | The Client serves a body again for an id already asked for; the Server's `RequestMessages` sends such a request | `TestClientRefusesRepeatedMessageRequest` (V1 and V2) and `TestServerRefusesToRepeatMessageRequest` fail on `main`. Guards: `TestServerMayRequestReannouncedID` fails if acknowledgement does not release the record; `TestServerUnsentRequestReleasesItsIDs` fails if the record is updated in place |
 | `fix/localmessagenotification-empty-blocking-reply` | The client accepts an empty blocking reply | `TestClientRefusesEmptyBlockingReply` fails on `main`. `TestClientPreservesGenuineEmptyReplyCallback` asserted the old behaviour for the blocking case; it now covers only the non-blocking case |
+| `fix/messagesubmission-reference-wire` | V1 used the CIP's tags, not tx-submission's; V2 lacked `MsgReplyNoSigIds` and used the CIP's tags; V2 put the outbound on the initiator; collections were definite-length lists, which the reference decoders refuse | `TestV1OutboundMatchesReferenceInbound`, `TestV1InboundMatchesReferenceOutbound`, `TestV2InboundIsInitiatorAndMatchesReferenceOutbound`, `TestV2OutboundIsResponderAndMatchesReferenceInbound` play dmq-node's side byte for byte and fail on `main` (wrong tag, no reply, wrong side, no request reaching the Client). `TestV2OutboundAnswersBlockingRequestWithNoIds`, `TestReplyNoMessageIdsRefusals` and `TestConnectionRolesFollowReference` cover the new method and the role mapping |
 | `fix/localmessagenotification-lost-wakeup` | An application `WaitForMessage` takes the wakeup meant for a blocking request | `TestAddMessageWakesBlockingRequestAndWaiter` (deterministic, `synctest`) fails 6 runs of 6 on `main`, either way round |
 
 The repeat fix records the ids asked for, per side, until they are
@@ -248,10 +266,11 @@ well, because the tx-submission specification forbids the repeat in both
 
 | Question | CIP-0137 | Reference (dmq-node) | gOuroboros | Verdict |
 | --- | --- | --- | --- | --- |
-| V1 wire tags | `MsgInit` 0, request ids 1, reply ids 2, request 3, reply 4, done 5 [C2] | tx-submission's: request ids 0, reply ids 1, request 2, reply 3, done 4, `MsgInit` 6 [R4] | the CIP's | **incompatible with dmq-node V1**; a large change, written up |
-| V2 wire tags | request ids 1, reply ids 2, request 3, reply 4, done 5 [C1] | request ids 1, reply ids 2, **`MsgReplyNoSigIds` 3**, request 4, reply 5, done 6 [R5] | the CIP's | **incompatible with dmq-node V2**; written up |
-| V2: who starts it? | the inbound has agency in `StIdle`; `StInit` existed so the outbound could start on the initiator, and V2 "reverses the agency model" [C1] | the **initiator runs the inbound**, the responder the outbound [R6] | the Client (initiator) is the outbound in V2 too | **incompatible**: both sides wait in `StIdle`; written up |
-| V2 blocking request with nothing to give | must wait | answers `MsgReplyNoSigIds` after 17 s [R1][R2] | no such message; waits | deviation, part of the tag rework |
+| V1 wire tags | `MsgInit` 0, request ids 1, reply ids 2, request 3, reply 4, done 5 [C2] | tx-submission's: request ids 0, reply ids 1, request 2, reply 3, done 4, `MsgInit` 6 [R4] | the CIP's on `main` | **incompatible with dmq-node V1**; fixed on `fix/messagesubmission-reference-wire` |
+| V2 wire tags | request ids 1, reply ids 2, request 3, reply 4, done 5 [C1] | request ids 1, reply ids 2, **`MsgReplyNoSigIds` 3**, request 4, reply 5, done 6 [R5] | the CIP's on `main` | **incompatible with dmq-node V2**; fixed on the same branch |
+| Collection encoding | silent | indefinite-length lists only: every decoder calls `decodeListLenIndef` [R4][R5] | definite-length on `main` | **incompatible**; fixed on the same branch |
+| V2: who starts it? | the inbound has agency in `StIdle`; `StInit` existed so the outbound could start on the initiator, and V2 "reverses the agency model" [C1] | the **initiator runs the inbound**, the responder the outbound [R6] | on `main` the Client (initiator) is the outbound in V2 too | **incompatible**: both sides wait in `StIdle` (`MessageSubmissionV2RolesBug.cfg`); fixed on the same branch |
+| V2 blocking request with nothing to give | must wait | answers `MsgReplyNoSigIds` after 17 s [R1][R2]; the requester gives up after 20 s [R5] | no such message on `main`; waits | **incompatible** (`MessageSubmissionV2NoIdsReplyBug.cfg`); the branch adds `Client.ReplyNoMessageIds`, which the application must call |
 | Window rules (ack, `MaxUnacked`, blocking iff empty, request 0) | "one cannot request 0 ids" either way [C3] | non-blocking may request 0 if it acknowledges [R2][R3]; same as tx-submission [S2] | as the reference | agree with the reference |
 | A body asked for twice | silent | V2 refuses; V1 tolerates [R2][R3]; the type says "at most once" [R1] | served twice | **defect**, fixed |
 | Empty `MsgRequestMessages` | silent | accepted [R2][R3] (the spec says "non-empty" [S3]) | accepted | agree with the reference |
@@ -283,8 +302,8 @@ gOuroboros `61046085`.
 | R1 | [`dmq-node/src/DMQ/Protocol/SigSubmissionV2/Type.hs` lines 147-280](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmissionV2/Type.hs#L147-L280) | V2 messages, rules, "at most once", `MsgReplyNoSigIds`, agency |
 | R2 | [`dmq-node/src/DMQ/SigSubmissionV2/Outbound.hs` lines 85-233](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/SigSubmissionV2/Outbound.hs#L85-L233) | V2 outbound checks; 17 s blocking timeout; `ProtocolErrorDuplicateRequest` |
 | R3 | [`ouroboros-network/lib/Ouroboros/Network/TxSubmission/Outbound.hs` lines 100-220](https://github.com/IntersectMBO/ouroboros-network/blob/4646039f05eb809bd5252af17121644ec1dc0c2c/ouroboros-network/lib/Ouroboros/Network/TxSubmission/Outbound.hs#L100-L220) | V1 outbound checks; no repeat check |
-| R4 | [`TxSubmission2/Codec.hs` lines 310-362](https://github.com/IntersectMBO/ouroboros-network/blob/4646039f05eb809bd5252af17121644ec1dc0c2c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/TxSubmission2/Codec.hs#L310-L362) | V1 tags; dmq-node's V1 codec wraps it (`DMQ/Protocol/SigSubmission/Codec.hs` 145-152) |
-| R5 | [`dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs` lines 81-95, 136-180](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs#L81-L180); `dmq-node/cddl/specs/sig-submission-v2.cddl` | V2 time limits and tags 1-6 |
+| R4 | [`TxSubmission2/Codec.hs` lines 310-440](https://github.com/IntersectMBO/ouroboros-network/blob/4646039f05eb809bd5252af17121644ec1dc0c2c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/TxSubmission2/Codec.hs#L310-L440) | V1 tags and indefinite lists; dmq-node's V1 codec wraps it (`DMQ/Protocol/SigSubmission/Codec.hs` 145-152) |
+| R5 | [`dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs` lines 81-95, 136-264](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs#L81-L264); `dmq-node/cddl/specs/sig-submission-v2.cddl` 23-28; `DMQ/Protocol/SigSubmissionV2/Inbound.hs` 99-100 | V2 time limits (blocking 20 s), tags 1-6, indefinite lists; the inbound treats `MsgReplyNoSigIds` as an empty reply |
 | R6 | [`dmq-node/src/DMQ/NodeToNode.hs` lines 242-352, 536-600](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/NodeToNode.hs#L242-L352) | V2 initiator runs the inbound, responder the outbound; V1 the reverse; version selection |
 | R7 | [`dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` lines 68-78](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs#L68-L78) | V1 time limits |
 | R8 | [`dmq-node/src/DMQ/NodeToClient.hs` lines 155-185](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/NodeToClient.hs#L155-L185); `DMQ/Protocol/LocalMsgSubmission/Type.hs` 20-22 | local servers run with `runAnnotatedPeer`, no limits; local submission is `LocalTxSubmission` |
@@ -299,8 +318,9 @@ gOuroboros `61046085`.
 
 Message bodies, sizes, authentication, TTLs and the replay caches; the
 pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
-time limits; the role and tag incompatibilities above, which are not state
-questions; restarting a server after `MsgDone`.
+time limits as durations (the 20 s V2 limit appears only as "an unanswered
+blocking request is a deadlock"); wire tags and list encodings, which the Go
+tests check byte for byte; restarting a server after `MsgDone`.
 
 ## Running it
 
@@ -318,6 +338,8 @@ cd specs/11-dmq
 # expected to fail
 ../../bin/tlc -config MessageSubmissionRepeatBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionServerRepeatBug.cfg MessageSubmission.tla
+../../bin/tlc -config MessageSubmissionV2RolesBug.cfg MessageSubmission.tla
+../../bin/tlc -config MessageSubmissionV2NoIdsReplyBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionNoWindowBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionNoBlockRuleBug.cfg MessageSubmission.tla
 ../../bin/tlc -config LocalMessageSubmissionConcurrentBug.cfg LocalMessageSubmission.tla
