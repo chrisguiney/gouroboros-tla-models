@@ -26,10 +26,14 @@ immutable tip at slot 0; equal prefixes are shared blocks. In every state:
 
 - the reference side computes the LoE fragment (the prefix every candidate
   shares), each peer's window lower and upper bounds, and the peers GDD
-  would drop, transcribed from `densityDisconnect`;
+  would drop, transcribed from `densityDisconnect`. GDD compares two peers
+  only when their clipped fragments start with different blocks
+  (`AF.lastPoint` is a fragment's oldest point, or its anchor when empty);
 - the gOuroboros side builds one `ChainFragment` per peer and runs
   `Preferred`: most blocks in the window, then most blocks in total, then
-  the earlier candidate.
+  the earlier candidate. It runs `Preferred` a second time on the
+  candidates trimmed to at most k blocks past the LoE tip, as the
+  reference's chain selection sees them (`trimToLoE`).
 
 Switches pick the variant: `Anchoring` (fragments start at the LoE tip, or at
 each one's own intersection with our selection, as the `ChainFragment`
@@ -44,9 +48,12 @@ contract says), `Counter` (exact count or `SimpleChainFragment`'s estimate),
 2. **`GoChoiceLosesOnlyOnTie`**: GDD drops the chain `Preferred` picked only
    when another chain ties it exactly. A tie drops both in the reference
    ("the honest chain is expected to have a strictly higher density").
-3. **`LoEBound`**: the node never selects more than k blocks past the prefix
+3. **`GoTrimmedPicksDensest`**: on the candidates trimmed to the LoE,
+   `Preferred` picks one with the most window blocks among the trimmed
+   candidates.
+4. **`LoEBound`**: the node never selects more than k blocks past the prefix
    all candidates share.
-4. **`KGuardHolds`**: a peer still sending its window is dropped only
+5. **`KGuardHolds`**: a peer still sending its window is dropped only
    because some peer offers more than k blocks after the intersection (so
    competing honest peers near the tip survive).
 
@@ -54,16 +61,19 @@ contract says), `Counter` (exact count or `SimpleChainFragment`'s estimate),
 
 | Config | Setting | States | Result |
 | --- | --- | --- | --- |
-| `GenesisDensity.cfg` | 2 peers, k=1, sgen=3, slots 1..5 | 2,704 | all four hold |
-| `GenesisDensityThree.cfg` | 3 peers, k=1, sgen=3, slots 1..4 | 27,000 | all four hold |
-| `GenesisDensityWideK.cfg` | 2 peers, k=2, sgen=6, slots 1..7, 4 blocks | 39,204 | all four hold |
+| `GenesisDensity.cfg` | 2 peers, k=1, sgen=3, slots 1..5 | 2,704 | all five hold |
+| `GenesisDensityThree.cfg` | 3 peers, k=1, sgen=3, slots 1..4 | 27,000 | all five hold |
+| `GenesisDensityWideK.cfg` | 2 peers, k=2, sgen=6, slots 1..7, 4 blocks | 39,204 | all five hold |
 | `GenesisDensityOwnAnchorBug.cfg` | fragments at their own intersection with our selection | | `GoPicksDensest` fails |
+| `GenesisDensityTrimOwnAnchorBug.cfg` | trimmed candidates, fragments at their own intersection | | `GoTrimmedPicksDensest` fails |
 | `GenesisDensitySimpleCounterBug.cfg` | `SimpleChainFragment` estimate | | `GoChoiceLosesOnlyOnTie` fails |
 | `GenesisDensityGoNoLoEBug.cfg` | caller adopts `Preferred` whole | | `LoEBound` fails |
 | `GenesisDensityNoKGuardBug.cfg` | reference without `offersMoreThanK` (mutation) | | `KGuardHolds` fails |
 | `GenesisDensityProbeTieBug.cfg` | probe | | GDD drops two tied peers at once |
 | `GenesisDensityProbeShorterBug.cfg` | probe | | `Preferred` picks a shorter, denser chain |
 | `GenesisDensityProbeDropWhileSendingBug.cfg` | probe | | GDD drops a peer still sending |
+| `GenesisDensityProbeSameFirstBlockBug.cfg` | probe, 3 peers | | two clipped fragments start with one block and end at different ones |
+| `GenesisDensityProbeTrimBug.cfg` | probe | | trimming to the LoE changes `Preferred`'s pick |
 
 sgen is ceiling(3k/f), so never below 3k; the configs use f = 1.
 
@@ -78,6 +88,14 @@ The counterexamples, in slots after the immutable tip:
   the tie goes to the longer a, and GDD would drop a.
 - No LoE: a has sent nothing, b = `<1, 2>`; the shared prefix is empty and
   adopting b goes two blocks past it, with k = 1.
+- Trimmed, own anchor: our selection is `<1>`, a has sent nothing, b =
+  `<1>`; b's trimmed fragment after its own intersection is empty, so the
+  tie keeps a although b has one trimmed block in the window.
+- Same first block (probe): a = `<1, 2>`, b = `<1>`, c has sent nothing.
+  The LoE is the immutable tip; a and b start with the same block, so GDD
+  never compares them.
+- Trim (probe): a = `<1>`, b = `<2, 3>`, k = 1. Whole, b has two window
+  blocks and wins; trimmed to `<1>` and `<2>` they tie and a wins.
 - No k guard: a = `<1, 2>`, b = `<2>` (k = 2, sgen = 6). b is still sending
   and could reach two blocks; a offers only two (not more than k). Without
   the guard GDD drops b.
@@ -93,9 +111,11 @@ Branch `test/consensus-genesis-model`,
   and checks `Preferred` on fragments anchored at the LoE tip against a Go
   transcription of `densityDisconnect`: the pick is the reference's densest
   (then longest, then first) chain, GDD drops it only on an exact tie, and a
-  peer still sending is dropped only when some peer offers more than k. It
-  requires that the density-beats-length, tie-drops-both and
-  dropped-while-sending cells are reached.
+  peer still sending is dropped only when some peer offers more than k. A
+  second pass runs `Preferred` on the candidates trimmed to k blocks past
+  the LoE tip and checks it picks the densest trimmed candidate. It
+  requires that the density-beats-length, tie-drops-both,
+  dropped-while-sending and trim-changes-the-pick cells are reached.
 - `TestGenesisModelCompareCells`: `Compare`'s table, window count by total
   length.
 
