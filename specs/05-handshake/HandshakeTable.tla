@@ -12,6 +12,8 @@ EXTENDS Handshake, TLC
 
 \* In English: "For every role r, state s, and kind k, print the four of
 \* them: role, state, kind, and what the receiver does."
+\* Literally: "Assume that for all r in Roles, s in States and k in Kinds,
+\*   PrintT of the tuple of r, s, k and ReceiveTable of r, s and k."
 ASSUME \A r \in Roles, s \in States, k \in Kinds :
          PrintT(<<r, s, k, ReceiveTable(r, s, k)>>)
 =============================================================================

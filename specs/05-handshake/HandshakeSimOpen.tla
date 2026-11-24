@@ -45,10 +45,20 @@ CONSTANT ReadsBeforeProposing \* TRUE: a side may read the peer's message while 
 
 \* Both sides' data never asks for a query. With AsymmetricDecode the `ok`
 \* flag varies: one side may send data the other cannot decode.
+\* Literally: "SimParams is defined as the set of every p in Params such that
+\*   p's query is not true, and (AsymmetricDecode is true or p's ok is true)."
 SimParams == {p \in Params : ~p.query /\ (AsymmetricDecode \/ p.ok)}
+\* Literally: "SimTables is defined as Tables of SimParams without the members
+\*   of the set containing the empty sequence."
 SimTables == Tables(SimParams) \ {<<>>}
 
 \* In English: "Both sides start in StPropose with any non-empty tables."
+\* Literally: "SimInit is defined as: view equals the function that maps every
+\*   r in Roles to "StPropose", and inbox equals the function that maps every r
+\*   in Roles to the empty sequence, and table is a member of the set of
+\*   functions from Roles to SimTables, and result equals the function that
+\*   maps every r in Roles to NoResult, and heard equals the empty sequence,
+\*   and rogueLeft equals 0."
 SimInit ==
     /\ view = [r \in Roles |-> "StPropose"]
     /\ inbox = [r \in Roles |-> <<>>]
@@ -59,6 +69,12 @@ SimInit ==
 
 \* In English: "Side r in StPropose sends its table to its peer and moves
 \* to StConfirm."
+\* Literally: "SimPropose of r is defined as: view of r equals "StPropose", and
+\*   view in the next state equals view except that its r entry is "StConfirm",
+\*   and inbox in the next state equals inbox except that its Peer of r entry
+\*   is the old entry with Msg of "MsgProposeVersions", table of r, 0,
+\*   NoParams, "None" and FALSE appended, and table, result, heard and
+\*   rogueLeft are unchanged."
 SimPropose(r) ==
     /\ view[r] = "StPropose"                         \* r has not proposed yet
     /\ view' = [view EXCEPT ![r] = "StConfirm"]      \* r now waits for an answer
@@ -69,6 +85,15 @@ SimPropose(r) ==
 \* In English: "Side r in StConfirm reads the peer's proposal. If it is not
 \* legal there (gOuroboros), r hangs up. Otherwise r is done, with the
 \* result of negotiating its own table against the peer's [R2]."
+\* Literally: "SimRecv of r is defined as: view of r equals "StConfirm", and
+\*   inbox of r does not equal the empty sequence, and, letting m be the head
+\*   of inbox of r: if IsLegal of "StConfirm" and m's type is not true, then
+\*   (view in the next state equals view except that its r entry is
+\*   "Violation", and result is unchanged), else (view in the next state equals
+\*   view except that its r entry is "StDone", and result in the next state
+\*   equals result except that its r entry is ClientJudge of table of r and m);
+\*   and inbox in the next state equals inbox except that its r entry is the
+\*   tail of the old entry, and table, heard and rogueLeft are unchanged."
 SimRecv(r) ==
     /\ view[r] = "StConfirm"
     /\ inbox[r] /= <<>>
@@ -86,6 +111,12 @@ SimRecv(r) ==
 \* holds agency there, so the message is illegal and r hangs up." The
 \* reference never does this: its client yields MsgProposeVersions before
 \* it awaits anything [R2].
+\* Literally: "SimRecvEarly of r is defined as: ReadsBeforeProposing is true,
+\*   and view of r equals "StPropose", and inbox of r does not equal the empty
+\*   sequence, and view in the next state equals view except that its r entry
+\*   is "Violation", and inbox in the next state equals inbox except that its r
+\*   entry is the tail of the old entry, and table, result, heard and rogueLeft
+\*   are unchanged."
 SimRecvEarly(r) ==
     /\ ReadsBeforeProposing                          \* only the early-reading variant
     /\ view[r] = "StPropose"                         \* r has not proposed yet
@@ -94,14 +125,34 @@ SimRecvEarly(r) ==
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]        \* the message is consumed
     /\ UNCHANGED <<table, result, heard, rogueLeft>> \* nothing else changes
 
+\* In English: "A step is some side proposing, reading, or reading early, or,
+\* once the connection is over, nothing changing."
+\* Literally: "SimNext is defined as: there exists an r in Roles such that
+\*   SimPropose of r or SimRecv of r or SimRecvEarly of r; or Ended is true and
+\*   vars is unchanged."
 SimNext ==
     \/ \E r \in Roles : SimPropose(r) \/ SimRecv(r) \/ SimRecvEarly(r)
     \/ Ended /\ UNCHANGED vars
 
+\* In English: "Start in SimInit, and from then on every step is a SimNext
+\* step."
+\* Literally: "SimSpec is defined as: SimInit holds at the start, and always,
+\*   every step is a SimNext step or a step that leaves vars unchanged."
 SimSpec == SimInit /\ [][SimNext]_vars
 
 -----------------------------------------------------------------------------
 
+\* In English: "Every variable the simultaneous-open model uses holds the kind
+\* of value it should."
+\* Literally: "SimTypeOK is defined as: view is a member of the set of
+\*   functions from Roles to the union of States and Failures, and inbox is a
+\*   member of the set of functions from Roles to the set of sequences of
+\*   members of Messages, and table is a member of the set of functions from
+\*   Roles to SimTables, and result is a member of the set of functions from
+\*   Roles to the set of records whose field kind is a member of the set
+\*   containing "None", "Accept", "Refuse", "Query" and "Error", field v is a
+\*   member of the union of Versions and the set containing 0, and field reason
+\*   is a member of Reasons."
 SimTypeOK ==
     /\ view \in [Roles -> States \cup Failures]
     /\ inbox \in [Roles -> Seq(Messages)]
@@ -113,6 +164,10 @@ SimTypeOK ==
 \* both refused [S6]. A side that refuses closes the connection [R1], so a
 \* lone refusal is safe only if the other side refused too or never
 \* starts on the connection; this checks the stronger, symmetric claim."
+\* Literally: "SymmetricOutcome is defined as: if, for all r in Roles, view of
+\*   r equals "StDone", then either (for all r in Roles, result of r's kind
+\*   equals "Accept"; and result of "Client"'s v equals result of "Server"'s
+\*   v), or, for all r in Roles, result of r's kind equals "Refuse"."
 SymmetricOutcome ==
     (\A r \in Roles : view[r] = "StDone") =>
         \/ /\ \A r \in Roles : result[r].kind = "Accept"
@@ -121,6 +176,10 @@ SymmetricOutcome ==
 
 \* In English: "A side that accepted v chose the highest version in both
 \* tables [S6]."
+\* Literally: "SimAcceptsHighest is defined as: for all r in Roles, if result
+\*   of r's kind equals "Accept", then result of r's v equals Max of the
+\*   intersection of the domain of table of "Client" and the domain of table of
+\*   "Server"."
 SimAcceptsHighest ==
     \A r \in Roles :
         result[r].kind = "Accept" =>
@@ -128,6 +187,9 @@ SimAcceptsHighest ==
 
 \* In English: "With nothing in flight, both sides are in the same state
 \* [S6 747-755]."
+\* Literally: "SameStateWhenQuiet is defined as: if, for all r in Roles, inbox
+\*   of r equals the empty sequence, then view of "Client" equals view of
+\*   "Server"."
 SameStateWhenQuiet ==
     (\A r \in Roles : inbox[r] = <<>>) => view["Client"] = view["Server"]
 =============================================================================
