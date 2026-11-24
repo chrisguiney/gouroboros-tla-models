@@ -105,7 +105,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model 13); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
-| [C4](#c4) | consensus | Shelley header after Origin (the first block) | Block 0, any slot | main: `ValidateHeaderInput` cannot say "no previous header", so block 0 always fails; PR: `PrevIsOrigin` | No sequence check without a previous block | does not conform → conforms | Open PR #3111 |
+| [C4](#c4) | consensus | Shelley header after Origin (the first block) | Block 0, any slot, predecessor `GenesisHash` | main: `ValidateHeaderInput` cannot say "no previous header", so block 0 always fails; PR: `PrevIsOrigin`, with the predecessor absent or the zero hash | No sequence check without a previous block | does not conform → conforms | Open PR #3111 at `64573df5` (model 13 `ShelleyEnvelope.tla`) |
 | [C5](#c5) | consensus | Byron header envelope: slot and block number | Slot strictly later except a main block after an EBB; an EBB after a main block shares its number; first block number 0 | main: any main block or EBB may share its predecessor's slot; an EBB may take either number; the first block must be 1; PR: as the reference | Slot strictly increases | does not conform → conforms | Open PR #3111 (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch |
 | [C6](#c6) | consensus | Genesis window anchor | One anchor, the LoE tip, shared by every candidate | Each fragment counts from its own intersection with our selection | Window anchored at the intersection of the two chains compared | does not conform | Not fixed; correct only if the caller anchors every fragment at one point (model 18, `OwnAnchorBug`) |
 | [C7](#c7) | consensus | Genesis: exact tie, and deciding before the window is complete | Both tied peers are dropped; a peer still sending is kept until it cannot win, and only when it offers more than k blocks | A tie goes to the longer fragment, then the first; decides on the blocks received so far; no `offersMoreThanK` guard | Silent on ties and partial windows | conforms (implementation choice) | Recorded (model 18). Safe only if the caller waits for the window to fill |
@@ -718,12 +718,12 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 
 **Shelley header after Origin (the first block)** (kind 1: open PR moves to the reference)
 
-- **What differs.** Reference: block 0, any slot. gOuroboros: main: `ValidateHeaderInput` cannot say "no previous header", so block 0 always fails; PR: `PrevIsOrigin`.
+- **What differs.** Reference: block 0, any slot, predecessor `GenesisHash`. gOuroboros: main: `ValidateHeaderInput` cannot say "no previous header", so block 0 always fails; PR: `PrevIsOrigin`, with the predecessor absent or the zero hash (at `1bc529c6` any predecessor passed).
 - **Spec.** cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/chain.tex`, `prtlSeqChecks`, lines 1700-1711: "prtlSeqChecks lab bh = True if lab = Nothing; s_l < slot ∧ b_l + 1 = bn ∧ ph = bprev bhb otherwise"
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/HeaderValidation.hs` (`expectedFirstBlockNo`, `UnexpectedBlockNo`)
-- **gOuroboros.** gOuroboros `d0b95845` `consensus/validate.go` 284-292; PR #3111 head `1bc529c64` same file 121-124, 279
+- **gOuroboros.** gOuroboros `d0b95845` `consensus/validate.go` 284-292; PR #3111 head `64573df5` same file 121-125, 279, 315-325
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3111
+- **Status.** Open PR #3111 at `64573df5`; model 13 `ShelleyEnvelope.tla`
 
 ### C5
 
@@ -1143,7 +1143,7 @@ Fixed by an open pull request (decide by reviewing and merging it):
 - **N40** DMQ local notification: empty reply to a blocking request. Open PR #3142.
 - **N44** LeiosVotes: next request pipelined while `Busy`. Open PR #3160.
 - **N47** Peras votes (ObjectDiffusion): await, server idle, timeouts. Open PR #3165. The network spec itself only lists `NodeToNodeV_17` as "Experimental, support Peras mini-protocols" (line 2231).
-- **C4** Shelley header after Origin (the first block). Open PR #3111.
+- **C4** Shelley header after Origin (the first block). Open PR #3111 at `64573df5`.
 - **C5** Byron header envelope: slot and block number. Open PR #3111 (reverses an earlier deliberate relaxation; Dingo does not call this validator). An EBB is an epoch boundary block, a Byron block with no transactions that opens each epoch.
 - **L1** Pool registration when the caller's view is stale. Open PR #3129. Dingo's view already satisfies the contract.
 - **L2** Transaction id of a body without stored CBOR. Open PR #3141. Decoded bodies were always right; bodies built in code were wrong.

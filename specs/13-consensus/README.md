@@ -20,7 +20,9 @@ Two parts are state machines and are modelled in TLA+:
 
 The rest is pure functions over data (the KES window, the counter
 comparison, the Byron envelope). Those are checked by table-driven Go tests
-against transcriptions of the reference, not forced into TLA+.
+against transcriptions of the reference, not forced into TLA+. The Shelley
+envelope after Origin is the exception: `ShelleyEnvelope.tla` states it as
+a table, because a review found a defect in it (slice 3).
 
 ## Slice 1: chain selection (`ChainSelection.tla`)
 
@@ -168,6 +170,38 @@ the drop-oldest path was never taken: the NoDecrement mutation and the
 "window fills" probe both passed. Raising T to 2 made full windows reachable;
 both now fail as they should. That is what the probes are for.
 
+## Slice 3: the Shelley envelope after Origin (`ShelleyEnvelope.tla`)
+
+The reference's `validateEnvelope` [R8] checks the block number, the slot
+and the predecessor hash against the block before, or against Origin for
+the first header: block 0, any slot, and the predecessor must be
+`GenesisHash`. A Shelley header encodes `GenesisHash` as null, which
+gOuroboros decodes to the zero hash.
+
+The module compares the reference verdict with gOuroboros'
+`validateSlotOrdering`, `validateBlockNumber` and `validatePrevHash` on
+every predecessor (Origin or a block), slot, block number and named
+predecessor (absent, zero, the previous block's hash, another hash).
+
+| Config | Mutation | Result |
+|---|---|---|
+| `ShelleyEnvelope` | none (PR #3111 at `64573df5`) | `EnvelopeAgrees`, `OriginNeedsGenesis` hold |
+| `ShelleyEnvelopeOriginAnyPrevBug` | PR #3111 at `1bc529c6`: `PrevIsOrigin` skips the predecessor | `OriginNeedsGenesis` fails: block 0 naming another block is accepted |
+| `ShelleyEnvelopeNoOriginBug` | main at `d0b95845`: no Origin | `EnvelopeAgrees` fails: block 0 is refused |
+| `ShelleyEnvelopeProbeOriginBug` | probe | `NoOriginAccepted` fails: a first header is accepted |
+
+**The modelling mistake.** The first version of this slice (the README row
+for C4) stated only the block number and slot after Origin, and so did the
+fix: `PrevIsOrigin` returned early from `validatePrevHash`. Review found that
+block 0 with any 32-byte predecessor then passed the whole envelope. The
+invariant `OriginNeedsGenesis` would have caught it; `TestPrevHashAfterOrigin`
+and `TestShelleyEnvelopeMatchesReferenceTable` (`consensus/origin_envelope_test.go`)
+restate the table in Go and fail at `1bc529c6`.
+
+Byron is not covered by this slice. Its first block names the genesis
+file's hash, which gOuroboros' Byron validator does not hold, so the Byron
+validator still accepts any predecessor after Origin.
+
 ## Go tests and mutations
 
 Branch `test/consensus-state-model` (gOuroboros, from `61046085`):
@@ -225,7 +259,8 @@ makes it fail again.
 | Missing VRF | Cannot happen | — | Ranks below any VRF | gOuroboros-only, unreachable from valid headers |
 | Counter rule | — | Praos `m <= n <= m+1`; TPraos `m <= n`; `m = 0` for a registered pool with no entry [R6][R7] | Same; the caller supplies `m` (a pointer to 0 for no entry) | Agree, except at `m = 2^64-1`, where the reference's `m + 1` wraps and refuses; unreachable |
 | KES window | — | `c0 <= kp < c0 + maxKESEvo` [R6] | Same | Agree |
-| Shelley slot/number order | — | Slot > previous, number = previous + 1; after Origin number 0, any slot [R8] | Same, but `ValidateHeaderInput` cannot express Origin: block 0 is always refused | Deviation (API gap), written up, not fixed |
+| Shelley slot/number order | — | Slot > previous, number = previous + 1; after Origin number 0, any slot [R8] | main: `ValidateHeaderInput` cannot express Origin, block 0 is always refused; PR #3111: `PrevIsOrigin` | **Fixed** on PR #3111 (`ShelleyEnvelope.tla`) |
+| Shelley predecessor after Origin | — | `GenesisHash` only [R8] | PR #3111 at `1bc529c6`: any predecessor; at `64573df5`: absent or the zero hash | **Defect, fixed** on PR #3111 at `64573df5` |
 | PBFT window | — | Last k issuers, refuse when count > floor(t*k) [P1][P2] | Same | Agree |
 | Byron slot order | — | Strictly later, except a main block after an EBB [B1] | Any main block could share its predecessor's slot, an EBB too | **Defect, fixed** on `fix/consensus-byron-envelope` |
 | Byron block number | — | EBB after main shares its number; all else +1; Origin 0 [B1] | Any EBB could take either number; Origin main needed 1 | **Defect, fixed** (same branch) |
@@ -273,6 +308,7 @@ The Praos paper was not consulted; every rule here is from the reference.
 
 ```sh
 scripts/run-model.sh specs/13-consensus      # every config; *Bug ones must fail
+bin/tlc -config specs/13-consensus/ShelleyEnvelope.cfg specs/13-consensus/ShelleyEnvelope.tla
 bin/tlc -workers auto -config specs/13-consensus/ChainSelection.cfg specs/13-consensus/ChainSelection.tla
 bin/tlc -workers auto -config specs/13-consensus/ChainSelectionConway.cfg specs/13-consensus/ChainSelection.tla
 bin/tlc -workers auto -config specs/13-consensus/ChainSelectionTPraos.cfg specs/13-consensus/ChainSelection.tla
