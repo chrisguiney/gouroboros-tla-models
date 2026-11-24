@@ -61,6 +61,8 @@ CONSTANTS
     PipelineLimit,        \* requests per refill (Config.PipelineLimit)
     MaxRequests,          \* stop refilling after this many (keeps it finite)
     StopLocksBurst,       \* FALSE today; TRUE: the fix (one lock, Sync checks quitting)
+    SyncChecksQuitFirst,  \* TRUE: Sync checks quitting before "loop already running"
+                          \* FALSE: the order at PR 3160 head cfa1edeb
     CancelIsErrorBeforeQuit, \* FALSE today; TRUE: MsgCanceled before MsgQuit is refused [R2]
     RogueCancel,          \* TRUE: the server may cancel before MsgQuit (misbehaving)
     ServerCancelsOnQuit,  \* TRUE as in [R3]; FALSE is a mutation
@@ -112,12 +114,21 @@ WriteRequest ==
 
 \* --- The client. ----------------------------------------------------------
 
-\* In English: "Sync, when the loop is not running: send one request, reset
-\* the counter, and start the loop. With the fix, Sync refuses once Stop has
-\* run."
+\* In English: "What Sync does if called now [G1]: refuse because Stop has
+\* run (with the fix), refuse because the loop is still running, or send."
+\* Which refusal comes first is SyncChecksQuitFirst; after Stop the loop
+\* stays in Wait until the protocol ends, so the order is visible.
+SyncAnswer ==
+    IF StopLocksBurst /\ quitting /\ (SyncChecksQuitFirst \/ loop = "Off")
+        THEN "ShuttingDown"
+    ELSE IF loop /= "Off" THEN "Running"
+    ELSE "Sends"
+
+\* In English: "Sync, when it would send: send one request, reset the
+\* counter, and start the loop."
 Sync ==
-    /\ cli = "Run" /\ loop = "Off" /\ sent < MaxRequests
-    /\ ~(StopLocksBurst /\ quitting)                      \* the fix refuses after Stop
+    /\ cli = "Run" /\ sent < MaxRequests
+    /\ SyncAnswer = "Sends"
     /\ WriteRequest
     /\ pipelined' = 0 /\ loop' = "Wait"
     /\ UNCHANGED <<burstLeft, quitting, inbox, s2c, srv, cli, answered>>
@@ -242,6 +253,11 @@ LoopCanProgress ==
 EveryRequestAnswered ==
     cli = "Done" => (answered = sent /\ c2s = <<>> /\ srv \in {"Idle", "Done"})
 
+\* In English: "With the fix, Sync after Stop reports the shutdown, whether
+\* or not the loop is still running."
+SyncAfterStopReportsShutdown ==
+    (StopLocksBurst /\ cli = "Run" /\ quitting) => SyncAnswer = "ShuttingDown"
+
 \* Probes, EXPECTED to be violated: each claims something never happens.
 \* In English: "Stop never runs during a refill."
 ProbeNoStopDuringBurst == ~(quitting /\ loop = "Burst")
@@ -251,4 +267,6 @@ ProbeNeverDone == cli /= "Done"
 ProbeNeverCanceled == \A i \in 1..Len(s2c) : s2c[i] /= "Canceled"
 \* In English: "A request is never held after MsgQuit."
 ProbeNeverHeld == held = 0
+\* In English: "The loop is never still running after Stop."
+ProbeLoopNeverRunsAfterStop == ~(cli = "Run" /\ quitting /\ loop /= "Off")
 =============================================================================
