@@ -9,7 +9,8 @@ The gOuroboros client (`protocol/chainsync/client.go`, about 2,000 lines)
 keeps many requests in flight at
 once, and lets the application change course in the middle (`Reintersect`,
 `Stop`, `StopAfterDrain`, `Jump`). This model starts with the part every other
-operation leans on: the **sync window** and **Reintersect**.
+operation leans on: the **sync window** and **Reintersect** (slice 1), then
+**stopping and restarting** on the same connection (slice 2).
 
 Read [Model 03](../03-engine/README.md) first; the pipelining ideas carry over.
 
@@ -142,14 +143,84 @@ and gOuroboros `origin/main` at `c1bc50c6`.
 
 ### Not in this slice
 
-`Stop`, `StopAfterDrain`, `Jump`, `Sync` called again on a stopped client,
-`GetCurrentTip`, `GetAvailableBlockRange`, the block pipeline behind
-`RollForward`, `MsgIntersectNotFound`, and timeouts. These are the next
-slices.
+`Stop`, `StopAfterDrain` and restarting (slice 2), `Jump`, `GetCurrentTip`,
+`GetAvailableBlockRange`, the block pipeline behind `RollForward`,
+`MsgIntersectNotFound`, and timeouts.
+
+## Slice 2: stop and restart (`ChainSyncLifecycle.tla`)
+
+### What the code does
+
+The client can stop two ways:
+
+- **`Stop`** queues `MsgDone`, waits up to 250 ms for it to be delivered,
+  then unregisters the protocol either way. `MsgDone` is legal only in
+  `StIdle` [C1], so while a `MsgRequestNext` is unanswered it waits in the
+  send queue for the reply. At the chain tip the server answers
+  `MsgAwaitReply` and then nothing until the next block, so the 250 ms runs
+  out, `Stop` returns `context deadline exceeded`, and `MsgDone` is never
+  sent. The server is left owing a reply.
+- **`StopAfterDrain`** waits for every outstanding reply, then sends `MsgDone`
+  from `StIdle`.
+
+`Start` then registers a fresh protocol instance in `StIdle` and sets
+`outstandingRequestNext` to 0, with the comment "Requests sent on the stopped
+instance are never answered". While the protocol is unregistered, the muxer
+drops its messages silently. Once `Start` registers the new instance, they are
+delivered to it.
+
+### The question
+
+**`NoViolation`**: after a stop and a restart, does either side ever receive a
+message its state machine does not allow? The server here behaves like the
+reference: it takes messages in order and answers each one, possibly much
+later. After `MsgDone` it restarts in `StIdle`.
+
+### The answer
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ChainSyncLifecycleDrain.cfg`: only `StopAfterDrain` | 374 | passes |
+| `ChainSyncLifecycleStopBug.cfg`: `Stop` too, as in gOuroboros today | | **fails** |
+| `ChainSyncLifecycleRefuse.cfg`: `Start` refuses after a `Stop` that left requests unanswered | 677 | passes |
+
+The failing trace is short. Sync, one `MsgRequestNext` unanswered at the tip,
+`Stop` times out, `Start`. The server's late roll reaches the new instance,
+which is in `StIdle` and expects nothing, and that is a protocol violation. It
+happens even if the application never calls `Sync` again. A probe
+(`ProbeNoRollViolation`) shows the roll path is reachable, not just the rarer
+`Stop` during `MsgFindIntersect`.
+
+The `Refuse` config is not a proposed fix. It shows that the violation comes
+only from restarting after an abandoned run.
+
+### Reproduced in Go
+
+A test with a real gOuroboros chain-sync server over `net.Pipe` does the same
+thing. The server answers `MsgRequestNext` with `MsgAwaitReply`. The client
+calls `Stop` (it returns `context deadline exceeded`), then `Start`, and the
+server then sends its roll. The restarted client fails, 3 runs out of 3:
+
+```
+chain-sync: received message type 3 without peer agency, an allowed
+pipelined message, or an outstanding pipelined request in state Idle
+```
+
+This is the "Stop and restart" half of gOuroboros issue #2867. That issue was
+closed when `StopAfterDrain` was added (pull request #2871), but `Stop`
+followed by `Start` on the same connection still breaks.
+
+### Spec, reference, and gOuroboros
+
+| Question | Specification | Reference | gOuroboros |
+| --- | --- | --- | --- |
+| Can a client end chain-sync with requests outstanding? | No: `MsgDone` only from `StIdle` [C1] | No: `SendMsgDone` is typed at `Z` (`ClientPipelined.hs` lines 81-83) [R2] | `StopAfterDrain`: no. `Stop`: yes, by abandoning the protocol without `MsgDone` |
+| What happens to a message the state does not allow? | The connection is aborted (`miniprotocols.tex` lines 27-36) | Same | Same: the protocol reports an error |
+| Restart on the same connection? | After `MsgDone`, the server restarts (spec 5.7) | Same, for responders | After `StopAfterDrain`: works. After an abandoning `Stop`: the late reply breaks the new run |
 
 ## Running it
 
 ```sh
-make chainsync        # the two passing configs, then the three *Bug configs
+make chainsync        # every chain-sync config; the *Bug ones are expected to fail
 make chainsync-deep   # window of three
 ```
