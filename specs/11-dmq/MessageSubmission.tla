@@ -138,13 +138,20 @@ CONSTANTS
 
 \* In English: "Id 0 is an id the outbound never announced; real ids are
 \* 1..MaxIds, handed out in order."
+\* Literally: "Unannounced is defined as 0."
 Unannounced == 0
 
 \* In English: "The set of ids in sequence s."
+\* Literally: "Range of s is defined as the set of element i of s, for every i
+\*   that is a member of 1 through the length of s."
 Range(s) == {s[i] : i \in 1..Len(s)}
 
 \* In English: "The first n ids of s, and everything after them."
+\* Literally: "Front of s and n is defined as the subsequence of s from element
+\*   1 through element n."
 Front(s, n) == SubSeq(s, 1, n)
+\* Literally: "Rest of s and n is defined as the subsequence of s from element
+\*   n plus 1 through element the length of s."
 Rest(s, n)  == SubSeq(s, n + 1, Len(s))
 
 \* The request-for-ids rule [S2][C3][R2][G1], as validateMessageIDRequest
@@ -154,6 +161,13 @@ Rest(s, n)  == SubSeq(s, n + 1, Len(s))
 \* one, a non-blocking one acknowledges or asks for something; (rule)
 \* blocking exactly when nothing is left; (window) what is left plus what
 \* is asked for fits in MaxUnacked."
+\* Literally: "IdsRequestOK of q, blocking, ack, req, checkBlockRule and
+\*   checkWindow is defined as: ack is less than or equal to the length of q,
+\*   and it is not the case that (blocking is true and req equals 0), and it is
+\*   not the case that (blocking is not true and ack equals 0 and req equals
+\*   0), and if checkBlockRule is true, then (blocking is true if and only if
+\*   the length of q minus ack equals 0), and if checkWindow is true, then the
+\*   length of q minus ack plus req is less than or equal to MaxUnacked."
 IdsRequestOK(q, blocking, ack, req, checkBlockRule, checkWindow) ==
     /\ ack <= Len(q)
     /\ ~(blocking /\ req = 0)
@@ -173,13 +187,23 @@ VARIABLES
     refused,   \* "none", or why the outbound refused a request [S1]
     servedTwice \* TRUE once the outbound served one id's body twice
 
+\* Literally: "vars is defined as the tuple of all nine variables."
 vars == <<st, req, inQ, outQ, inAsked, outServed, nextId, refused,
           servedTwice>>
 
+\* In English: "The empty request: not blocking, acknowledging nothing, asking
+\* for nothing."
+\* Literally: "NoReq is defined as the record whose field blocking is FALSE,
+\*   whose field ack is 0, and whose field n is 0."
 NoReq == [blocking |-> FALSE, ack |-> 0, n |-> 0]
 
 \* In English: "V1 starts in StInit, V2 in StIdle [C1][C2]; both windows
 \* are empty."
+\* Literally: "Init is defined as: st equals (if Version equals 1 then "Init",
+\*   else "Idle"), and req equals NoReq, and inQ equals the empty sequence and
+\*   outQ equals the empty sequence, and inAsked equals the empty set and
+\*   outServed equals the empty set, and nextId equals 1, and refused equals
+\*   "none", and servedTwice equals FALSE."
 Init ==
     /\ st = IF Version = 1 THEN "Init" ELSE "Idle"
     /\ req = NoReq
@@ -192,6 +216,8 @@ Init ==
 \* In English: "Some end of the connection runs the inbound side, the one
 \* that asks. In V1 it always does; in V2 only when the two ends agree that
 \* the initiator asks [R6]."
+\* Literally: "InboundRuns is defined as: Version equals 1, or RolesMatch is
+\*   true."
 InboundRuns == Version = 1 \/ RolesMatch
 
 -----------------------------------------------------------------------------
@@ -199,6 +225,9 @@ InboundRuns == Version = 1 \/ RolesMatch
 
 \* In English: "In StInit the outbound sends MsgInit and the inbound may
 \* start asking."
+\* Literally: "SendInit is defined as: Version equals 1 and st equals "Init",
+\*   and st in the next state equals "Idle", and req, inQ, outQ, inAsked,
+\*   outServed, nextId, refused and servedTwice are unchanged."
 SendInit ==
     /\ Version = 1 /\ st = "Init"
     /\ st' = "Idle"
@@ -213,6 +242,18 @@ SendInit ==
 \* rogue one sends anything. The outbound checks the request against its
 \* own window: it accepts and moves to the blocking or non-blocking state,
 \* or refuses, which ends the connection [S1]."
+\* Literally: "RequestIds is defined as: InboundRuns is true, and st equals
+\*   "Idle" and refused equals "none", and there exists a blocking in BOOLEAN,
+\*   an ack in 0 through the length of inQ plus 1, and an n in 0 through
+\*   MaxUnacked plus 1, such that (Rogue is true, or IdsRequestOK of inQ,
+\*   blocking, ack, n, TRUE and TRUE), and if IdsRequestOK of outQ, blocking,
+\*   ack, n, (Mutation does not equal "noBlockRule"), and (Mutation does not
+\*   equal "noWindow"), then st in the next state equals (if blocking then
+\*   "IdsBlocking", else "IdsNonBlocking"), and req in the next state equals
+\*   the record whose field blocking is blocking, whose field ack is ack, and
+\*   whose field n is n, and refused is unchanged; else refused in the next
+\*   state equals "ids request", and st and req are unchanged; and inQ, outQ,
+\*   inAsked, outServed, nextId and servedTwice are unchanged."
 RequestIds ==
     /\ InboundRuns
     /\ st = "Idle" /\ refused = "none"
@@ -232,6 +273,19 @@ RequestIds ==
 \* more than asked for, at least one if blocking [S2]. Both sides drop the
 \* ack oldest ids and append the new ones (reconcileMessageIDs). Bodies
 \* served or asked for among the dropped ids are forgotten with them."
+\* Literally: "ReplyIds is defined as: st is a member of the set containing
+\*   "IdsBlocking" and "IdsNonBlocking", and there exists a k in 0 through
+\*   req's n such that nextId plus k minus 1 is less than or equal to MaxIds,
+\*   and if req's blocking is true, then k is greater than or equal to 1, and,
+\*   letting fresh be the function that maps every i in 1 through k to nextId
+\*   plus i minus 1, and dropped be Range of Front of outQ and req's ack: outQ
+\*   in the next state equals Rest of outQ and req's ack, followed by fresh;
+\*   and inQ in the next state equals Rest of inQ and req's ack, followed by
+\*   fresh; and outServed in the next state equals outServed without the
+\*   members of dropped; and inAsked in the next state equals inAsked without
+\*   the members of dropped; and nextId in the next state equals nextId plus k;
+\*   and st in the next state equals "Idle" and req in the next state equals
+\*   NoReq, and refused and servedTwice are unchanged."
 ReplyIds ==
     /\ st \in {"IdsBlocking", "IdsNonBlocking"}
     /\ \E k \in 0..req.n :
@@ -253,6 +307,14 @@ ReplyIds ==
 \* [R5][G5]. Bodies served or asked for among the dropped ids are forgotten
 \* with them. The reference does this when 17 s pass without a new id; the
 \* model lets it happen at any time, which covers that."
+\* Literally: "ReplyNoIds is defined as: Version equals 2 and NoIdsReply is
+\*   true, and st equals "IdsBlocking", and, letting dropped be Range of Front
+\*   of outQ and req's ack: outQ in the next state equals Rest of outQ and
+\*   req's ack, and inQ in the next state equals Rest of inQ and req's ack, and
+\*   outServed in the next state equals outServed without the members of
+\*   dropped, and inAsked in the next state equals inAsked without the members
+\*   of dropped; and st in the next state equals "Idle" and req in the next
+\*   state equals NoReq, and nextId, refused and servedTwice are unchanged."
 ReplyNoIds ==
     /\ Version = 2 /\ NoIdsReply
     /\ st = "IdsBlocking"
@@ -273,6 +335,23 @@ ReplyNoIds ==
 \* an unannounced id. The outbound refuses ids outside its window [S3]
 \* and, with OutRefusesRepeat, ids it already served [R2]. Otherwise it
 \* moves to StMessages, noting any id served a second time."
+\* Literally: "RequestBodies is defined as: InboundRuns is true, and st equals
+\*   "Idle" and refused equals "none", and there exists an ids in the set of
+\*   subsets of the union of Range of inQ and the set containing Unannounced,
+\*   such that (Rogue is true, or (ids is a subset of Range of inQ, and if
+\*   InRefusesRepeat is true, then the intersection of ids and inAsked equals
+\*   the empty set)), and inAsked in the next state equals the union of inAsked
+\*   and (ids without the members of the set containing Unannounced), and if it
+\*   is not the case that ids is a subset of Range of outQ, then refused in the
+\*   next state equals "unannounced id", and st, outServed and servedTwice are
+\*   unchanged; else if OutRefusesRepeat is true and the intersection of ids
+\*   and outServed does not equal the empty set, then refused in the next state
+\*   equals "repeated id", and st, outServed and servedTwice are unchanged;
+\*   else st in the next state equals "Messages", and servedTwice in the next
+\*   state equals (servedTwice, or the intersection of ids and outServed does
+\*   not equal the empty set), and outServed in the next state equals the union
+\*   of outServed and ids, and refused is unchanged; and req, inQ, outQ and
+\*   nextId are unchanged."
 RequestBodies ==
     /\ InboundRuns
     /\ st = "Idle" /\ refused = "none"
@@ -294,6 +373,9 @@ RequestBodies ==
 
 \* In English: "The outbound answers with the bodies it still has (it may
 \* omit some) and the inbound is back in StIdle."
+\* Literally: "ReplyBodies is defined as: st equals "Messages", and st in the
+\*   next state equals "Idle", and req, inQ, outQ, inAsked, outServed, nextId,
+\*   refused and servedTwice are unchanged."
 ReplyBodies ==
     /\ st = "Messages"
     /\ st' = "Idle"
@@ -307,6 +389,11 @@ ReplyBodies ==
 
 \* In English: "In V1 the outbound may end the run from StMessageIdsBlocking;
 \* in V2 the inbound may end it from StIdle."
+\* Literally: "SendDone is defined as: refused equals "none", and (Version
+\*   equals 1 and st equals "IdsBlocking", or Version equals 2 and st equals
+\*   "Idle" and InboundRuns is true), and st in the next state equals "Done",
+\*   and req, inQ, outQ, inAsked, outServed, nextId, refused and servedTwice
+\*   are unchanged."
 SendDone ==
     /\ refused = "none"
     /\ \/ Version = 1 /\ st = "IdsBlocking"
@@ -323,47 +410,73 @@ SendDone ==
 \* request wait forever [R7]). In V2 a blocking request that is never
 \* answered is not quiet: the requester gives up after 20 s and closes the
 \* connection [R5], so it is reported as a deadlock."
+\* Literally: "Quiet is defined as: (st equals "Done", or refused does not
+\*   equal "none", or Version equals 1 and st equals "IdsBlocking" and nextId
+\*   is greater than MaxIds), and vars is unchanged."
 Quiet ==
     /\ \/ st = "Done"
        \/ refused /= "none"
        \/ Version = 1 /\ st = "IdsBlocking" /\ nextId > MaxIds
     /\ UNCHANGED vars
 
+\* In English: "A step is MsgInit, a request or reply for ids, a request or
+\* reply for bodies, done, or, once nothing more happens, nothing."
+\* Literally: "Next is defined as: SendInit, or RequestIds, or ReplyIds, or
+\*   ReplyNoIds, or RequestBodies, or ReplyBodies, or SendDone, or Quiet."
 Next ==
     \/ SendInit \/ RequestIds \/ ReplyIds \/ ReplyNoIds
     \/ RequestBodies \/ ReplyBodies
     \/ SendDone \/ Quiet
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* Literally: "Spec is defined as: Init holds at the start, and always, every
+\*   step is a Next step or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 
 \* In English: "Neither side's window ever holds more than MaxUnacked ids."
+\* Literally: "WindowBound is defined as: the length of outQ is less than or
+\*   equal to MaxUnacked, and the length of inQ is less than or equal to
+\*   MaxUnacked."
 WindowBound == Len(outQ) <= MaxUnacked /\ Len(inQ) <= MaxUnacked
 
 \* In English: "The two sides always hold the same window."
+\* Literally: "ViewsAgree is defined as: inQ equals outQ."
 ViewsAgree == inQ = outQ
 
 \* In English: "A blocking request is open only when it acknowledges the
 \* whole window; a non-blocking one only when it leaves some ids [S2]."
+\* Literally: "BlockingRule is defined as: if st equals "IdsBlocking", then the
+\*   length of outQ equals req's ack; and if st equals "IdsNonBlocking", then
+\*   the length of outQ is greater than req's ack."
 BlockingRule ==
     /\ st = "IdsBlocking" => Len(outQ) = req.ack
     /\ st = "IdsNonBlocking" => Len(outQ) > req.ack
 
 \* In English: "No id's body is served twice while it is unacknowledged
 \* [S3][R1]."
+\* Literally: "NoRepeatServe is defined as: servedTwice is not true."
 NoRepeatServe == ~servedTwice
 
 \* In English: "The outbound refuses only a peer that broke the rules."
+\* Literally: "HonestNeverRefused is defined as: if refused does not equal
+\*   "none", then Rogue is true."
 HonestNeverRefused == refused /= "none" => Rogue
 
 \* Probes, each EXPECTED to be violated.
 \* In English: "The window never fills." Violated = it does.
+\* Literally: "ProbeWindowNeverFull is defined as: the length of outQ is less
+\*   than MaxUnacked."
 ProbeWindowNeverFull == Len(outQ) < MaxUnacked
 \* In English: "Nothing is ever refused." Violated = a refusal happens.
+\* Literally: "ProbeNeverRefused is defined as: refused equals "none"."
 ProbeNeverRefused == refused = "none"
 \* In English: "No non-blocking request is ever open." Violated = one is.
+\* Literally: "ProbeNeverNonBlocking is defined as: st does not equal
+\*   "IdsNonBlocking"."
 ProbeNeverNonBlocking == st /= "IdsNonBlocking"
 \* In English: "The run never ends with MsgDone." Violated = it does.
+\* Literally: "ProbeNeverDone is defined as: st does not equal "Done"."
 ProbeNeverDone == st /= "Done"
 =============================================================================

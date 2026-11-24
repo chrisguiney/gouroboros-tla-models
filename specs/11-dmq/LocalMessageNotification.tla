@@ -87,11 +87,22 @@ VARIABLES
     emptyBlockingAccepted, \* TRUE once the client accepted one
     refused   \* TRUE once the client refused a reply [S1]
 
+\* Literally: "vars is defined as the tuple of all ten variables."
 vars == <<cs, sent, q, adds, signal, hpc, aw, reply, emptyBlockingAccepted,
           refused>>
 
+\* In English: "No reply in flight: kind "none", size 0."
+\* Literally: "NoReply is defined as the record whose field kind is "none" and
+\*   whose field size is 0."
 NoReply == [kind |-> "none", size |-> 0]
 
+\* In English: "The client is in StIdle and has sent nothing, the queue is
+\* empty, nothing has been added or signalled, the handler and the application
+\* are idle, no reply is in flight, and nothing has been accepted or refused."
+\* Literally: "Init is defined as: cs equals "Idle" and sent equals 0, and q
+\*   equals 0 and adds equals 0 and signal equals FALSE, and hpc equals "idle"
+\*   and aw equals "no", and reply equals NoReply, and emptyBlockingAccepted
+\*   equals FALSE and refused equals FALSE."
 Init ==
     /\ cs = "Idle" /\ sent = 0
     /\ q = 0 /\ adds = 0 /\ signal = FALSE
@@ -104,6 +115,12 @@ Init ==
 
 \* In English: "In StIdle the client sends a blocking or non-blocking
 \* request; the server's handler starts on it."
+\* Literally: "Request is defined as: cs equals "Idle" and refused is not true
+\*   and sent is less than MaxRequests, and there exists a blocking in BOOLEAN
+\*   such that cs in the next state equals (if blocking then "BusyBlocking",
+\*   else "BusyNonBlocking"), and hpc in the next state equals "check", and
+\*   sent in the next state equals sent plus 1, and q, adds, signal, aw, reply,
+\*   emptyBlockingAccepted and refused are unchanged."
 Request ==
     /\ cs = "Idle" /\ ~refused /\ sent < MaxRequests
     /\ \E blocking \in BOOLEAN :
@@ -113,6 +130,9 @@ Request ==
     /\ UNCHANGED <<q, adds, signal, aw, reply, emptyBlockingAccepted, refused>>
 
 \* In English: "The client ends the run from StIdle."
+\* Literally: "ClientDone is defined as: cs equals "Idle" and refused is not
+\*   true, and cs in the next state equals "Done", and sent, q, adds, signal,
+\*   hpc, aw, reply, emptyBlockingAccepted and refused are unchanged."
 ClientDone ==
     /\ cs = "Idle" /\ ~refused
     /\ cs' = "Done"
@@ -121,6 +141,14 @@ ClientDone ==
 
 \* In English: "A reply arrives and the client is back in StIdle. An empty
 \* blocking reply is accepted (gOuroboros) or refused [R2]."
+\* Literally: "Receive is defined as: reply does not equal NoReply, and if
+\*   reply's kind equals "blocking" and reply's size equals 0, then (if
+\*   ClientRefusesEmpty is true, then refused in the next state equals TRUE and
+\*   emptyBlockingAccepted is unchanged; else emptyBlockingAccepted in the next
+\*   state equals TRUE and refused is unchanged); else emptyBlockingAccepted
+\*   and refused are unchanged; and cs in the next state equals "Idle" and
+\*   reply in the next state equals NoReply, and sent, q, adds, signal, hpc and
+\*   aw are unchanged."
 Receive ==
     /\ reply /= NoReply
     /\ IF reply.kind = "blocking" /\ reply.size = 0
@@ -140,6 +168,20 @@ Receive ==
 \* non-blocking request is answered with whatever was there. A blocking
 \* one is answered if that was something; otherwise the handler goes to
 \* wait. A rogue server may answer a blocking request with nothing."
+\* Literally: "HandlerCheck is defined as: hpc equals "check", and either (cs
+\*   equals "BusyNonBlocking", and reply in the next state equals the record
+\*   whose field kind is "nonblocking" and whose field size is q, and q in the
+\*   next state equals 0 and hpc in the next state equals "idle"), or (cs
+\*   equals "BusyBlocking" and q is greater than 0, and reply in the next state
+\*   equals the record whose field kind is "blocking" and whose field size is
+\*   q, and q in the next state equals 0 and hpc in the next state equals
+\*   "idle"), or (cs equals "BusyBlocking" and q equals 0 and RogueServer is
+\*   not true, and hpc in the next state equals "unlocked", and reply and q are
+\*   unchanged), or (cs equals "BusyBlocking" and q equals 0 and RogueServer is
+\*   true, and reply in the next state equals the record whose field kind is
+\*   "blocking" and whose field size is 0, and hpc in the next state equals
+\*   "idle", and q is unchanged); and cs, sent, adds, signal, aw,
+\*   emptyBlockingAccepted and refused are unchanged."
 HandlerCheck ==
     /\ hpc = "check"
     /\ \/ /\ cs = "BusyNonBlocking"
@@ -159,6 +201,9 @@ HandlerCheck ==
 
 \* In English: "Having released the lock, the handler calls WaitForMessage.
 \* An AddMessage may run in between."
+\* Literally: "HandlerWait is defined as: hpc equals "unlocked", and hpc in the
+\*   next state equals "wait", and cs, sent, q, adds, signal, aw, reply,
+\*   emptyBlockingAccepted and refused are unchanged."
 HandlerWait ==
     /\ hpc = "unlocked"
     /\ hpc' = "wait"
@@ -167,6 +212,10 @@ HandlerWait ==
 
 \* In English: "The waiting handler takes the signal from the slot and
 \* looks at the queue again."
+\* Literally: "HandlerWake is defined as: hpc equals "wait" and signal is true,
+\*   and signal in the next state equals FALSE and hpc in the next state equals
+\*   "check", and cs, sent, q, adds, aw, reply, emptyBlockingAccepted and
+\*   refused are unchanged."
 HandlerWake ==
     /\ hpc = "wait" /\ signal
     /\ signal' = FALSE /\ hpc' = "check"
@@ -177,6 +226,9 @@ HandlerWake ==
 (* The application.                                                        *)
 
 \* In English: "The application calls WaitForMessage."
+\* Literally: "AppWait is defined as: AppWaits is true and aw equals "no", and
+\*   aw in the next state equals "wait", and cs, sent, q, adds, signal, hpc,
+\*   reply, emptyBlockingAccepted and refused are unchanged."
 AppWait ==
     /\ AppWaits /\ aw = "no"
     /\ aw' = "wait"
@@ -184,6 +236,10 @@ AppWait ==
                    emptyBlockingAccepted, refused>>
 
 \* In English: "The application's WaitForMessage takes the signal."
+\* Literally: "AppWake is defined as: aw equals "wait" and signal is true, and
+\*   signal in the next state equals FALSE and aw in the next state equals
+\*   "done", and cs, sent, q, adds, hpc, reply, emptyBlockingAccepted and
+\*   refused are unchanged."
 AppWake ==
     /\ aw = "wait" /\ signal
     /\ signal' = FALSE /\ aw' = "done"
@@ -195,6 +251,18 @@ AppWake ==
 \* including a handler that has released the lock but not yet started to
 \* wait (it took the channel to wait on under the lock).
 \* Unbuffered (mutation): hand the signal to one ready waiter, or drop it."
+\* Literally: "AddMessage is defined as: adds is less than MaxAdds, and q in
+\*   the next state equals q plus 1 and adds in the next state equals adds plus
+\*   1, and if Broadcast is true, then hpc in the next state equals (if hpc is
+\*   a member of the set containing "unlocked" and "wait" then "check", else
+\*   hpc), and aw in the next state equals (if aw equals "wait" then "done",
+\*   else aw), and signal is unchanged; else if Unbuffered is true, then
+\*   (either (hpc equals "wait" and hpc in the next state equals "check" and aw
+\*   is unchanged), or (aw equals "wait" and aw in the next state equals "done"
+\*   and hpc is unchanged), or (hpc does not equal "wait" and aw does not equal
+\*   "wait" and hpc and aw are unchanged)), and signal is unchanged; else
+\*   signal in the next state equals TRUE, and hpc and aw are unchanged; and
+\*   cs, sent, reply, emptyBlockingAccepted and refused are unchanged."
 AddMessage ==
     /\ adds < MaxAdds
     /\ q' = q + 1 /\ adds' = adds + 1
@@ -218,6 +286,11 @@ AddMessage ==
 \* In English: "Nothing more happens: the run ended or was refused, or the
 \* client has sent its requests and no step is pending - including a
 \* blocking request that waits for a message that will never be added."
+\* Literally: "Quiet is defined as: (cs equals "Done", or refused is true, or
+\*   (sent equals MaxRequests and cs equals "Idle"), or (cs equals
+\*   "BusyBlocking" and hpc equals "wait" and q equals 0 and adds equals
+\*   MaxAdds)), and (aw does not equal "wait", or adds equals MaxAdds), and
+\*   vars is unchanged."
 Quiet ==
     /\ \/ cs = "Done" \/ refused
        \/ /\ sent = MaxRequests /\ cs = "Idle"
@@ -225,31 +298,48 @@ Quiet ==
     /\ aw /= "wait" \/ adds = MaxAdds
     /\ UNCHANGED vars
 
+\* In English: "A step is a client step, a handler step, an application step,
+\* an AddMessage, or, once nothing more happens, nothing."
+\* Literally: "Next is defined as: Request, or ClientDone, or Receive, or
+\*   HandlerCheck, or HandlerWait, or HandlerWake, or AppWait, or AppWake, or
+\*   AddMessage, or Quiet."
 Next ==
     \/ Request \/ ClientDone \/ Receive
     \/ HandlerCheck \/ HandlerWait \/ HandlerWake
     \/ AppWait \/ AppWake \/ AddMessage
     \/ Quiet
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* Literally: "Spec is defined as: Init holds at the start, and always, every
+\*   step is a Next step or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 
 \* In English: "A handler waiting while messages are queued always has a
 \* signal in the slot to wake it."
+\* Literally: "WakeupNotLost is defined as: if hpc equals "wait" and q is
+\*   greater than 0, then signal is true."
 WakeupNotLost == (hpc = "wait" /\ q > 0) => signal
 
 \* In English: "The client never accepts an empty blocking reply [C1][R2]."
+\* Literally: "NoEmptyBlocking is defined as: emptyBlockingAccepted is not
+\*   true."
 NoEmptyBlocking == ~emptyBlockingAccepted
 
 \* Probes, each EXPECTED to be violated.
 \* In English: "The handler never waits." Violated = it does.
+\* Literally: "ProbeNeverWaits is defined as: hpc does not equal "wait"."
 ProbeNeverWaits == hpc /= "wait"
 \* In English: "A blocking request is never answered after a wait."
 \* Violated = the handler waits, wakes, and answers.
+\* Literally: "ProbeNeverWokenReply is defined as: it is not the case that
+\*   (reply's kind equals "blocking", and reply's size is greater than 0, and
+\*   sent equals 1, and adds equals MaxAdds)."
 ProbeNeverWokenReply == ~(reply.kind = "blocking" /\ reply.size > 0 /\ sent = 1
                           /\ adds = MaxAdds)
 \* In English: "The application's WaitForMessage never returns." Violated =
 \* it does.
+\* Literally: "ProbeAppNeverWakes is defined as: aw does not equal "done"."
 ProbeAppNeverWakes == aw /= "done"
 =============================================================================

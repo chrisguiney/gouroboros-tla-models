@@ -99,43 +99,76 @@ CONSTANTS
                          \* FALSE: an older version, which an older node may be speaking
     PrintTable           \* TRUE: print the receive table when TLC starts
 
+\* Literally: "Roles is defined as the set containing "Client" and "Server"."
 Roles == {"Client", "Server"}
 
 \* The busy state's kind is part of the state's name [R1] StBusyKind.
+\* Literally: "BusyStates is defined as the set containing "StBusyNextTx",
+\*   "StBusyHasTx", "StBusyGetSizes" and "StBusyGetMeasures"."
 BusyStates == {"StBusyNextTx", "StBusyHasTx", "StBusyGetSizes", "StBusyGetMeasures"}
+\* Literally: "States is defined as the union of the set containing "StIdle",
+\*   "StAcquiring", "StAcquired" and "StDone", and BusyStates."
 States == {"StIdle", "StAcquiring", "StAcquired", "StDone"} \cup BusyStates
 
 \* "MsgAcquire" sent in StAcquired is MsgAwaitAcquire: the two are the same
 \* bytes on the wire [R2], so a receiver tells them apart only by its state.
+\* Literally: "Queries is defined as the set containing "MsgNextTx",
+\*   "MsgHasTx", "MsgGetSizes" and "MsgGetMeasures"."
 Queries == {"MsgNextTx", "MsgHasTx", "MsgGetSizes", "MsgGetMeasures"}
+\* Literally: "Replies is defined as the set containing "MsgReplyNextTx",
+\*   "MsgReplyHasTx", "MsgReplyGetSizes" and "MsgReplyGetMeasures"."
 Replies == {"MsgReplyNextTx", "MsgReplyHasTx", "MsgReplyGetSizes", "MsgReplyGetMeasures"}
+\* Literally: "MsgTypes is defined as the union of the set containing
+\*   "MsgAcquire", "MsgAcquired", "MsgRelease" and "MsgDone", Queries, and
+\*   Replies."
 MsgTypes == {"MsgAcquire", "MsgAcquired", "MsgRelease", "MsgDone"} \cup Queries \cup Replies
 
 \* In English: "The busy state a query leads to, and the one reply that
 \* answers it." [R1] 226-273.
+\* Literally: "BusyOf of q is defined as: in the case q equals "MsgNextTx",
+\*   "StBusyNextTx"; in the case q equals "MsgHasTx", "StBusyHasTx"; in the
+\*   case q equals "MsgGetSizes", "StBusyGetSizes"; in the case q equals
+\*   "MsgGetMeasures", "StBusyGetMeasures"."
 BusyOf(q) == CASE q = "MsgNextTx"      -> "StBusyNextTx"
              []   q = "MsgHasTx"       -> "StBusyHasTx"
              []   q = "MsgGetSizes"    -> "StBusyGetSizes"
              []   q = "MsgGetMeasures" -> "StBusyGetMeasures"
+\* Literally: "ReplyOf of q is defined as: in the case q equals "MsgNextTx",
+\*   "MsgReplyNextTx"; in the case q equals "MsgHasTx", "MsgReplyHasTx"; in the
+\*   case q equals "MsgGetSizes", "MsgReplyGetSizes"; in the case q equals
+\*   "MsgGetMeasures", "MsgReplyGetMeasures"."
 ReplyOf(q) == CASE q = "MsgNextTx"      -> "MsgReplyNextTx"
               []   q = "MsgHasTx"       -> "MsgReplyHasTx"
               []   q = "MsgGetSizes"    -> "MsgReplyGetSizes"
               []   q = "MsgGetMeasures" -> "MsgReplyGetMeasures"
 \* In English: "The query that put the protocol in busy state s."
+\* Literally: "QueryOf of s is defined as the q, chosen from Queries, such that
+\*   BusyOf of q equals s."
 QueryOf(s) == CHOOSE q \in Queries : BusyOf(q) = s
 
 \* Snapshots are numbered by how many times the mempool has changed: two
 \* snapshots with the same number are the same snapshot [R5] isSameSnapshot.
+\* Literally: "Snaps is defined as 0 through MaxChanges."
 Snaps == 0..MaxChanges
 
 \* A message is a record: its type, and the snapshot number, which only
 \* MsgAcquired uses (it stands for the slot number it carries).
+\* Literally: "Msg of t and n is defined as the record whose field type is t
+\*   and whose field snap is n."
 Msg(t, n) == [type |-> t, snap |-> n]
+\* Literally: "Messages is defined as the set of Msg of t and n, for every t
+\*   that is a member of MsgTypes and every n that is a member of Snaps."
 Messages == {Msg(t, n) : t \in MsgTypes, n \in Snaps}
 
+\* Literally: "Failures is defined as the set containing "Violation" and
+\*   "TimedOut"."
 Failures == {"Violation", "TimedOut"}
 
 \* In English: "Who may send in each state" [S2] agency table, [R1] 285-289.
+\* Literally: "Agency of s is defined as: in the case s is a member of the set
+\*   containing "StIdle" and "StAcquired", "Client"; in the case s is a member
+\*   of the union of the set containing "StAcquiring" and BusyStates, "Server";
+\*   in the case s equals "StDone", "Nobody"."
 Agency(s) == CASE s \in {"StIdle", "StAcquired"}    -> "Client"
              []   s \in {"StAcquiring"} \cup BusyStates -> "Server"
              []   s = "StDone"                      -> "Nobody"
@@ -147,6 +180,14 @@ Agency(s) == CASE s \in {"StIdle", "StAcquired"}    -> "Client"
 \*    From StAcquired, MsgAcquire (that is, MsgAwaitAcquire) goes back to
 \*    StAcquiring, MsgRelease to StIdle, and each query to its busy state.
 \*    From each busy state, its own reply goes back to StAcquired."
+\* Literally: "Transitions is defined as the set containing these five tuples:
+\*   <<"StIdle", "MsgAcquire", "StAcquiring">>, <<"StIdle", "MsgDone",
+\*   "StDone">>, <<"StAcquiring", "MsgAcquired", "StAcquired">>,
+\*   <<"StAcquired", "MsgAcquire", "StAcquiring">>, and <<"StAcquired",
+\*   "MsgRelease", "StIdle">>; union the set of the tuple of "StAcquired", q
+\*   and BusyOf of q, for every q that is a member of Queries; union the set of
+\*   the tuple of BusyOf of q, ReplyOf of q, and "StAcquired", for every q that
+\*   is a member of Queries."
 Transitions ==
     { <<"StIdle",      "MsgAcquire",  "StAcquiring">>,
       <<"StIdle",      "MsgDone",     "StDone">>,
@@ -158,12 +199,24 @@ Transitions ==
 
 \* In English: "Message type t is legal in state s if some row starts with
 \* s and t", and "After(s, t) is where that row leads".
+\* Literally: "IsLegal of s and t is defined as: there exists a tr that is a
+\*   member of Transitions such that element 1 of tr equals s and element 2 of
+\*   tr equals t."
 IsLegal(s, t) == \E tr \in Transitions : tr[1] = s /\ tr[2] = t
+\* Literally: "After of s and t is defined as element 3 of the tr, chosen from
+\*   Transitions, such that element 1 of tr equals s and element 2 of tr equals
+\*   t."
 After(s, t)   == (CHOOSE tr \in Transitions : tr[1] = s /\ tr[2] = t)[3]
 
+\* In English: "The peer of the client is the server, and vice versa."
+\* Literally: "Peer of r is defined as: if r equals "Client" then "Server",
+\*   else "Client"."
 Peer(r) == IF r = "Client" THEN "Server" ELSE "Client"
 
 \* In English: "Side r is waiting for its peer in state s."
+\* Literally: "Awaiting of r and s is defined as: s is a member of States
+\*   without the members of the set containing "StDone", and Agency of s equals
+\*   Peer of r."
 Awaiting(r, s) == s \in States \ {"StDone"} /\ Agency(s) = Peer(r)
 
 (***************************************************************************)
@@ -173,6 +226,12 @@ Awaiting(r, s) == s \in States \ {"StDone"} /\ Agency(s) = Peer(r)
 (*   - A message with no row from s aborts the connection.                 *)
 (*   - Otherwise follow the row.                                           *)
 (***************************************************************************)
+\* Literally: "Judge of r, s and m is defined as: if r equals "Server" and m's
+\*   type equals "MsgGetMeasures" and ServerKnowsMeasures is not true, then
+\*   "Violation"; else if BusyKinds is not true and s is a member of BusyStates
+\*   and m's type is a member of Replies, then "StAcquired"; else if IsLegal of
+\*   s and m's type is not true, then "Violation"; else After of s and m's
+\*   type."
 Judge(r, s, m) ==
     IF r = "Server" /\ m.type = "MsgGetMeasures" /\ ~ServerKnowsMeasures
                                     THEN "Violation"     \* undecodable: hang up
@@ -182,6 +241,8 @@ Judge(r, s, m) ==
     ELSE After(s, m.type)                                \* otherwise: follow the row
 
 \* In English: "A new run starts in StIdle."
+\* Literally: "RunState of s is defined as: if s equals "StDone" then "StIdle",
+\*   else s."
 RunState(s) == IF s = "StDone" THEN "StIdle" ELSE s
 
 (***************************************************************************)
@@ -190,6 +251,10 @@ RunState(s) == IF s = "StDone" THEN "StIdle" ELSE s
 (* read yet (see Model 01, [S8] there). "Held": the client's run is over   *)
 (* and nothing reads it. After MsgDone a server restarts in StIdle [S5].   *)
 (***************************************************************************)
+\* Literally: "ReceiveTable of r, s and t is defined as: if s equals "StDone",
+\*   then (if r equals "Server" and ServerRestarts is true, then Judge of r,
+\*   "StIdle", and Msg of t and 0; else "Held"); else if Agency of s equals r,
+\*   then "Waits"; else Judge of r, s, and Msg of t and 0."
 ReceiveTable(r, s, t) ==
     IF s = "StDone"
         THEN IF r = "Server" /\ ServerRestarts
@@ -222,14 +287,24 @@ VARIABLES
     stop,       \* the client's Stop: "no", "requested" (called, not yet returned), or "done"
     cancelled   \* TRUE once Stop ended a call that was waiting for the server
 
+\* Literally: "vars is defined as the tuple of all fifteen variables."
 vars == <<view, inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait,
           sameSnap, result, queries, runs, rogueLeft, lock, stop, cancelled>>
 
 \* The variables only the client's call lock and Stop touch.
+\* Literally: "stopVars is defined as the tuple of lock, stop and cancelled."
 stopVars == <<lock, stop, cancelled>>
 
 \* In English: "At the start both sides think it is StIdle, nothing is in
 \* flight, the mempool is snapshot 0, and nothing has been answered."
+\* Literally: "Init is defined as: view equals the function that maps every r
+\*   in Roles to "StIdle", and inbox equals the function that maps every r in
+\*   Roles to the empty sequence, and mempool equals 0, and srvSnap equals 0,
+\*   and srvAwait equals FALSE, and cliSnap equals 0, and cliAwait equals
+\*   FALSE, and sameSnap equals FALSE, and result equals the tuple of "none"
+\*   and "none", and queries equals 0, and runs equals 1, and rogueLeft equals
+\*   RogueMessages, and lock equals "free", and stop equals "no", and cancelled
+\*   equals FALSE."
 Init ==
     /\ view = [r \in Roles |-> "StIdle"]
     /\ inbox = [r \in Roles |-> <<>>]
@@ -250,6 +325,9 @@ Init ==
 \* In English: "The server is waiting, as [R5] says it must, for the mempool
 \* to change: it serves an MsgAwaitAcquire and the mempool is still the
 \* snapshot it holds."
+\* Literally: "ServerBlocked is defined as: view of "Server" equals
+\*   "StAcquiring", and srvAwait is true, and AwaitWaitsForChange is true, and
+\*   mempool equals srvSnap."
 ServerBlocked ==
     /\ view["Server"] = "StAcquiring"
     /\ srvAwait
@@ -258,6 +336,11 @@ ServerBlocked ==
 
 \* In English: "The connection is over when someone hung up, or both sides
 \* are done and the client may start no more runs."
+\* Literally: "Ended is defined as: there exists an r in Roles such that view
+\*   of r is a member of Failures; or view of "Client" equals "Closed" and stop
+\*   equals "done"; or view of "Client" equals "StDone" and runs equals
+\*   MaxRuns, and view of "Server" equals "StDone" and inbox of "Server" equals
+\*   the empty sequence."
 Ended ==
     \/ \E r \in Roles : view[r] \in Failures
     \/ view["Client"] = "Closed" /\ stop = "done"
@@ -267,6 +350,8 @@ Ended ==
 \* In English: "Nothing more can happen but the wait for a mempool change
 \* the model has run out of. The reference client blocks here, which is
 \* correct [R1] MsgAwaitAcquire."
+\* Literally: "WaitsForever is defined as: ServerBlocked is true, and mempool
+\*   equals MaxChanges, and RogueMessages equals 0."
 WaitsForever ==
     /\ ServerBlocked
     /\ mempool = MaxChanges
@@ -277,6 +362,15 @@ WaitsForever ==
 \* In English: "From StIdle or StAcquired the client can send MsgAcquire.
 \* From StAcquired that is MsgAwaitAcquire [R2]; gOuroboros's Acquire()
 \* sends the same bytes in both states."
+\* Literally: "ClientAcquire is defined as: view of "Client" is a member of the
+\*   set containing "StIdle" and "StAcquired", and lock equals "free" and stop
+\*   equals "no", and lock in the next state equals "call", and cliAwait in the
+\*   next state equals (view of "Client" equals "StAcquired"), and view in the
+\*   next state equals view except that its "Client" entry is "StAcquiring",
+\*   and inbox in the next state equals inbox except that its "Server" entry is
+\*   the old entry with Msg of "MsgAcquire" and 0 appended, and mempool,
+\*   srvSnap, srvAwait, cliSnap, sameSnap, result, queries, runs, rogueLeft,
+\*   stop and cancelled are unchanged."
 ClientAcquire ==
     /\ view["Client"] \in {"StIdle", "StAcquired"}
     /\ lock = "free" /\ stop = "no"
@@ -290,11 +384,22 @@ ClientAcquire ==
 \* In English: "The client may send MsgGetMeasures: it has a call for it,
 \* and either the handshake agreed NodeToClientV_20 or later or the client
 \* does not check" [R6].
+\* Literally: "MayAskMeasures is defined as: ClientSendsMeasures is true, and
+\*   (NegotiatedV20 is true, or ClientChecksVersion is not true)."
 MayAskMeasures == ClientSendsMeasures /\ (NegotiatedV20 \/ ~ClientChecksVersion)
 
 \* In English: "From StAcquired, with queries left, the client can send a
 \* query q (MsgGetMeasures only if it may, above). It then waits in q's busy
 \* state."
+\* Literally: "ClientQuery of q is defined as: view of "Client" equals
+\*   "StAcquired", and queries is less than MaxQueries, and (q does not equal
+\*   "MsgGetMeasures", or MayAskMeasures is true), and lock equals "free" and
+\*   stop equals "no", and lock in the next state equals "call", and view in
+\*   the next state equals view except that its "Client" entry is BusyOf of q,
+\*   and inbox in the next state equals inbox except that its "Server" entry is
+\*   the old entry with Msg of q and 0 appended, and queries in the next state
+\*   equals queries plus 1, and mempool, srvSnap, srvAwait, cliSnap, cliAwait,
+\*   sameSnap, result, runs, rogueLeft, stop and cancelled are unchanged."
 ClientQuery(q) ==
     /\ view["Client"] = "StAcquired"
     /\ queries < MaxQueries
@@ -308,6 +413,13 @@ ClientQuery(q) ==
                    result, runs, rogueLeft, stop, cancelled>>
 
 \* In English: "From StAcquired the client can release the snapshot."
+\* Literally: "ClientRelease is defined as: view of "Client" equals
+\*   "StAcquired", and lock equals "free" and stop equals "no", and view in the
+\*   next state equals view except that its "Client" entry is "StIdle", and
+\*   inbox in the next state equals inbox except that its "Server" entry is the
+\*   old entry with Msg of "MsgRelease" and 0 appended, and mempool, srvSnap,
+\*   srvAwait, cliSnap, cliAwait, sameSnap, result, queries, runs, rogueLeft
+\*   and stopVars are unchanged."
 ClientRelease ==
     /\ view["Client"] = "StAcquired"
     /\ lock = "free" /\ stop = "no"
@@ -318,6 +430,11 @@ ClientRelease ==
 
 \* In English: "Stop is called. It may be called at any time during a run,
 \* including while another call waits for the server."
+\* Literally: "StopRequest is defined as: stop equals "no", and view of
+\*   "Client" is a member of States without the members of the set containing
+\*   "StDone", and stop in the next state equals "requested", and view, inbox,
+\*   mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap, result, queries,
+\*   runs, rogueLeft, lock and cancelled are unchanged."
 StopRequest ==
     /\ stop = "no"
     /\ view["Client"] \in States \ {"StDone"}
@@ -327,6 +444,11 @@ StopRequest ==
 
 \* In English: "With StopCancelsWait, Stop ends a call that holds the lock
 \* waiting for the server's answer; the call returns, freeing the lock."
+\* Literally: "StopCancel is defined as: StopCancelsWait is true, and stop
+\*   equals "requested", and lock equals "call", and lock in the next state
+\*   equals "free", and cancelled in the next state equals TRUE, and view,
+\*   inbox, mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap, result,
+\*   queries, runs, rogueLeft and stop are unchanged."
 StopCancel ==
     /\ StopCancelsWait
     /\ stop = "requested"
@@ -345,6 +467,25 @@ StopCancel ==
 \* has no row from StAcquired, so its own send loop refuses it and tears the
 \* connection down." Taking and freeing the lock is one step: nothing in
 \* Stop waits for the server once it holds it.
+\* Literally: "ClientStop is defined as: stop equals "requested", and lock
+\*   equals "free", and stop in the next state equals "done", and either
+\*   (cancelled is true, and view of "Client" is a member of States, and view
+\*   in the next state equals view except that its "Client" entry is "Closed",
+\*   and inbox is unchanged), or (view of "Client" is a member of Failures, and
+\*   view and inbox are unchanged), or (cancelled is not true, and view of
+\*   "Client" equals "StIdle", and view in the next state equals view except
+\*   that its "Client" entry is "StDone", and inbox in the next state equals
+\*   inbox except that its "Server" entry is the old entry with Msg of
+\*   "MsgDone" and 0 appended), or (cancelled is not true, and view of "Client"
+\*   equals "StAcquired", and StopReleases is true, and view in the next state
+\*   equals view except that its "Client" entry is "StDone", and inbox in the
+\*   next state equals inbox except that its "Server" entry is the old entry
+\*   followed by the tuple of Msg of "MsgRelease" and 0, and Msg of "MsgDone"
+\*   and 0), or (cancelled is not true, and view of "Client" equals
+\*   "StAcquired", and StopReleases is not true, and view in the next state
+\*   equals view except that its "Client" entry is "Violation", and inbox is
+\*   unchanged); and mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap,
+\*   result, queries, runs, rogueLeft, lock and cancelled are unchanged."
 ClientStop ==
     /\ stop = "requested"
     /\ lock = "free"
@@ -375,6 +516,12 @@ ClientStop ==
 
 \* In English: "When the client's run is over and it may start another, it
 \* can."
+\* Literally: "ClientRestart is defined as: view of "Client" equals "StDone",
+\*   and runs is less than MaxRuns, and view in the next state equals view
+\*   except that its "Client" entry is "StIdle", and runs in the next state
+\*   equals runs plus 1, and stop in the next state equals "no", and inbox,
+\*   mempool, srvSnap, srvAwait, cliSnap, cliAwait, sameSnap, result, queries,
+\*   rogueLeft, lock and cancelled are unchanged."
 ClientRestart ==
     /\ view["Client"] = "StDone"
     /\ runs < MaxRuns
@@ -389,6 +536,14 @@ ClientRestart ==
 \* In English: "In StAcquiring the server can answer MsgAcquired with the
 \* current snapshot, unless it serves an MsgAwaitAcquire and must wait for
 \* the mempool to change [R5]."
+\* Literally: "ServerAcquired is defined as: view of "Server" equals
+\*   "StAcquiring", and ServerBlocked is not true, and view in the next state
+\*   equals view except that its "Server" entry is "StAcquired", and inbox in
+\*   the next state equals inbox except that its "Client" entry is the old
+\*   entry with Msg of "MsgAcquired" and mempool appended, and srvSnap in the
+\*   next state equals mempool, and srvAwait in the next state equals FALSE,
+\*   and mempool, cliSnap, cliAwait, sameSnap, result, queries, runs, rogueLeft
+\*   and stopVars are unchanged."
 ServerAcquired ==
     /\ view["Server"] = "StAcquiring"
     /\ ~ServerBlocked
@@ -401,6 +556,13 @@ ServerAcquired ==
 
 \* In English: "In a busy state the server answers with that state's reply
 \* [R4] ServerStBusy."
+\* Literally: "ServerReply is defined as: view of "Server" is a member of
+\*   BusyStates, and view in the next state equals view except that its
+\*   "Server" entry is "StAcquired", and inbox in the next state equals inbox
+\*   except that its "Client" entry is the old entry with Msg of (ReplyOf of
+\*   QueryOf of view of "Server") and 0 appended, and mempool, srvSnap,
+\*   srvAwait, cliSnap, cliAwait, sameSnap, result, queries, runs, rogueLeft
+\*   and stopVars are unchanged."
 ServerReply ==
     /\ view["Server"] \in BusyStates
     /\ view' = [view EXCEPT !["Server"] = "StAcquired"]
@@ -413,6 +575,10 @@ ServerReply ==
 
 \* In English: "Transactions come and go: the mempool can change, a bounded
 \* number of times."
+\* Literally: "MempoolChange is defined as: mempool is less than MaxChanges,
+\*   and mempool in the next state equals mempool plus 1, and view, inbox,
+\*   srvSnap, srvAwait, cliSnap, cliAwait, sameSnap, result, queries, runs,
+\*   rogueLeft and stopVars are unchanged."
 MempoolChange ==
     /\ mempool < MaxChanges
     /\ mempool' = mempool + 1
@@ -430,6 +596,26 @@ MempoolChange ==
 \* reply in a busy state hands <<query, reply>> to its caller. A call
 \* waiting on the client returns, freeing the lock, once the client holds
 \* agency again or the protocol failed."
+\* Literally: "Recv of r is defined as: inbox of r does not equal the empty
+\*   sequence, and (Awaiting of r and view of r, or r equals "Server" and view
+\*   of r equals "StDone" and ServerRestarts is true), and, letting m be the
+\*   head of inbox of r, s be RunState of view of r, and next be Judge of r, s
+\*   and m: view in the next state equals view except that its r entry is next;
+\*   and srvAwait in the next state equals (if r equals "Server" and m's type
+\*   equals "MsgAcquire" then s equals "StAcquired", else srvAwait); and
+\*   cliSnap in the next state equals (if r equals "Client" and next equals
+\*   "StAcquired" and m's type equals "MsgAcquired" then m's snap, else
+\*   cliSnap); and sameSnap in the next state equals sameSnap, or (r equals
+\*   "Client" and m's type equals "MsgAcquired" and next equals "StAcquired"
+\*   and cliAwait is true and m's snap equals cliSnap); and result in the next
+\*   state equals (if r equals "Client" and s is a member of BusyStates and
+\*   next equals "StAcquired" then the tuple of QueryOf of s and m's type, else
+\*   result); and lock in the next state equals (if r equals "Client" and lock
+\*   equals "call" and (next is a member of Failures or Agency of next equals
+\*   "Client") then "free", else lock); and inbox in the next state equals
+\*   inbox except that its r entry is the tail of the old entry; and mempool,
+\*   srvSnap, cliAwait, queries, runs, rogueLeft, stop and cancelled are
+\*   unchanged."
 Recv(r) ==
     /\ inbox[r] /= <<>>
     /\ \/ Awaiting(r, view[r])
@@ -457,6 +643,11 @@ Recv(r) ==
 
 \* In English: "While the rogue peer has allowance left, it can put any
 \* message into r's inbox."
+\* Literally: "Inject of r and m is defined as: rogueLeft is greater than 0,
+\*   and inbox in the next state equals inbox except that its r entry is the
+\*   old entry with m appended, and rogueLeft in the next state equals
+\*   rogueLeft minus 1, and view, mempool, srvSnap, srvAwait, cliSnap,
+\*   cliAwait, sameSnap, result, queries, runs and stopVars are unchanged."
 Inject(r, m) ==
     /\ rogueLeft > 0
     /\ inbox' = [inbox EXCEPT ![r] = Append(@, m)]
@@ -473,6 +664,14 @@ Inject(r, m) ==
 \* In English: "With client timeouts, a client waiting in StAcquiring or a
 \* busy state, with nothing to read, gives up while the server is blocked.
 \* The waiting call then returns, freeing the lock."
+\* Literally: "Timeout is defined as: ClientTimeouts is true, and view of
+\*   "Client" is a member of the union of the set containing "StAcquiring" and
+\*   BusyStates, and inbox of "Client" equals the empty sequence, and
+\*   ServerBlocked is true, and view in the next state equals view except that
+\*   its "Client" entry is "TimedOut", and lock in the next state equals (if
+\*   lock equals "call" then "free", else lock), and inbox, mempool, srvSnap,
+\*   srvAwait, cliSnap, cliAwait, sameSnap, result, queries, runs, rogueLeft,
+\*   stop and cancelled are unchanged."
 Timeout ==
     /\ ClientTimeouts
     /\ view["Client"] \in {"StAcquiring"} \cup BusyStates
@@ -487,6 +686,13 @@ Timeout ==
 \* mempool change, a read, a timeout, a rogue injection, or, once nothing
 \* more can happen, nothing changing (so that TLC does not report the end as
 \* a deadlock)."
+\* Literally: "Next is defined as: ClientAcquire, or ClientRelease, or
+\*   ClientRestart, or StopRequest, or StopCancel, or ClientStop, or there
+\*   exists a q in Queries such that ClientQuery of q, or ServerAcquired, or
+\*   ServerReply, or MempoolChange, or there exists an r in Roles such that
+\*   Recv of r, or Timeout, or there exists an r in Roles and an m in Messages
+\*   such that Inject of r and m, or (Ended or WaitsForever) and vars is
+\*   unchanged."
 Next ==
     \/ ClientAcquire \/ ClientRelease \/ ClientRestart
     \/ StopRequest \/ StopCancel \/ ClientStop
@@ -498,11 +704,27 @@ Next ==
     \/ \E r \in Roles, m \in Messages : Inject(r, m)
     \/ (Ended \/ WaitsForever) /\ UNCHANGED vars
 
+\* In English: "Start in Init, and from then on every step is a Next step."
+\* Literally: "Spec is defined as: Init holds at the start, and always, every
+\*   step is a Next step or a step that leaves vars unchanged."
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 (* Invariants. *)
 
+\* In English: "Every variable holds the kind of value it should."
+\* Literally: "TypeOK is defined as: view is a member of the set of functions
+\*   from Roles to the union of States, Failures and the set containing
+\*   "Closed", and inbox is a member of the set of functions from Roles to the
+\*   set of sequences of members of Messages, and mempool, srvSnap and cliSnap
+\*   are members of Snaps, and srvAwait, cliAwait and sameSnap are members of
+\*   BOOLEAN, and result is a member of the union of the set containing the
+\*   tuple of "none" and "none", and the Cartesian product of Queries and
+\*   Replies, and queries is a member of 0 through MaxQueries, and runs is a
+\*   member of 1 through MaxRuns, and rogueLeft is a member of 0 through
+\*   RogueMessages, and lock is a member of the set containing "free", "call"
+\*   and "stop", and stop is a member of the set containing "no", "requested"
+\*   and "done", and cancelled is a member of BOOLEAN."
 TypeOK ==
     /\ view \in [Roles -> States \cup Failures \cup {"Closed"}]
     /\ inbox \in [Roles -> Seq(Messages)]
@@ -517,16 +739,22 @@ TypeOK ==
     /\ cancelled \in BOOLEAN
 
 \* In English: "No side has hung up or given up."
+\* Literally: "NoFailures is defined as: for all r in Roles, view of r is not a
+\*   member of Failures."
 NoFailures == \A r \in Roles : view[r] \notin Failures
 
 \* In English: "The client never hands a caller a reply to a different
 \* query: whatever it last handed over is the reply of the query it sent."
 \* This is the request/response correlation the busy kind exists for.
+\* Literally: "RepliesMatchQueries is defined as: if result does not equal the
+\*   tuple of "none" and "none", then element 2 of result equals ReplyOf of
+\*   element 1 of result."
 RepliesMatchQueries ==
     result /= <<"none", "none">> => result[2] = ReplyOf(result[1])
 
 \* In English: "An MsgAwaitAcquire is never answered with the snapshot the
 \* client already holds" [R1] 217-224, [R5].
+\* Literally: "AwaitGetsNewSnapshot is defined as: sameSnap is not true."
 AwaitGetsNewSnapshot == ~sameSnap
 
 \* In English: "While the connection is up, a message waiting for the server
@@ -534,10 +762,17 @@ AwaitGetsNewSnapshot == ~sameSnap
 \* client's next run is read by a restarted server [S5][R7], not left on a
 \* server whose run is over." (Rogue configs leave it out: a rogue message
 \* can arrive while the server itself holds agency.)
+\* Literally: "NewRunServed is defined as: if inbox of "Server" does not equal
+\*   the empty sequence and NoFailures is true, then Recv of "Server" is
+\*   enabled."
 NewRunServed ==
     (inbox["Server"] /= <<>> /\ NoFailures) => ENABLED Recv("Server")
 
 \* In English: "The client and the server never both believe they may send."
+\* Literally: "NeverBothHaveAgency is defined as: it is not the case that (view
+\*   of "Client" is a member of States and Agency of view of "Client" equals
+\*   "Client", and view of "Server" is a member of States and Agency of view of
+\*   "Server" equals "Server")."
 NeverBothHaveAgency ==
     ~ /\ view["Client"] \in States /\ Agency(view["Client"]) = "Client"
       /\ view["Server"] \in States /\ Agency(view["Server"]) = "Server"
@@ -545,6 +780,9 @@ NeverBothHaveAgency ==
 \* In English: "Whenever the server is busy with a query, the client is
 \* waiting in a busy state too (or has hung up): the client cannot move on,
 \* say to another query, before the answer arrives."
+\* Literally: "BusyViewsAgree is defined as: if view of "Server" is a member of
+\*   BusyStates, then view of "Client" is a member of the union of BusyStates,
+\*   Failures, and the set containing "Closed"."
 BusyViewsAgree ==
     view["Server"] \in BusyStates =>
         view["Client"] \in BusyStates \cup Failures \cup {"Closed"}
@@ -554,10 +792,16 @@ BusyViewsAgree ==
 \* that has to wait for the lock while a call waits for an answer the
 \* server may withhold (an MsgAwaitAcquire with no mempool change, or a
 \* query with no QueryTimeout) violates this.
+\* Literally: "StopNeverWaitsOnPeer is defined as: if stop equals "requested",
+\*   then (StopCancel or ClientStop) is enabled."
 StopNeverWaitsOnPeer ==
     stop = "requested" => ENABLED (StopCancel \/ ClientStop)
 
 \* In English: "In every step, a side that has hung up stays hung up."
+\* Literally: "FailuresAreFinal is defined as: always, every step is a step in
+\*   which, for all r in Roles, if view of r is a member of Failures, then view
+\*   in the next state of r equals view of r; or a step that leaves vars
+\*   unchanged."
 FailuresAreFinal ==
     [][\A r \in Roles : view[r] \in Failures => view'[r] = view[r]]_vars
 
@@ -566,23 +810,37 @@ FailuresAreFinal ==
 (* that it does in the passing configs, or a pass would be vacuous.        *)
 
 \* In English: "The server never blocks waiting for the mempool to change."
+\* Literally: "ProbeServerNeverBlocks is defined as: ServerBlocked is not
+\*   true."
 ProbeServerNeverBlocks == ~ServerBlocked
 
 \* In English: "No MsgAwaitAcquire is ever answered." (cliAwait stays TRUE
 \* from an await until the next acquire, so an acquired client with cliAwait
 \* set had its await answered.)
+\* Literally: "ProbeAwaitNeverAnswered is defined as: it is not the case that
+\*   (cliAwait is true and view of "Client" equals "StAcquired")."
 ProbeAwaitNeverAnswered == ~(cliAwait /\ view["Client"] = "StAcquired")
 
 \* In English: "Nobody is ever in StBusy GetMeasures."
+\* Literally: "ProbeNoGetMeasures is defined as: for all r in Roles, view of r
+\*   does not equal "StBusyGetMeasures"."
 ProbeNoGetMeasures == \A r \in Roles : view[r] /= "StBusyGetMeasures"
 
 \* In English: "The client never starts a second run."
+\* Literally: "ProbeNoSecondRun is defined as: runs equals 1."
 ProbeNoSecondRun == runs = 1
 
 \* In English: "Stop never cancels a waiting MsgAwaitAcquire."
+\* Literally: "ProbeNoCancelledAwait is defined as: it is not the case that
+\*   (cancelled is true, and cliAwait is true, and view of "Client" equals
+\*   "Closed")."
 ProbeNoCancelledAwait == ~(cancelled /\ cliAwait /\ view["Client"] = "Closed")
 
 \* In English: "Stop never releases a snapshot before MsgDone."
+\* Literally: "ProbeNoReleaseThenDone is defined as: it is not the case that
+\*   there exists an i in 1 through the length of inbox of "Server" minus 1
+\*   such that element i of inbox of "Server"'s type equals "MsgRelease" and
+\*   element i plus 1 of inbox of "Server"'s type equals "MsgDone"."
 ProbeNoReleaseThenDone ==
     ~ \E i \in 1..(Len(inbox["Server"]) - 1) :
           /\ inbox["Server"][i].type = "MsgRelease"
