@@ -313,8 +313,9 @@ nothing is left running once the muxer stops. Model 02 put bytes and the
 connection around it and showed the harm: the restarted instance can handle a
 message, running application callbacks, after `stopProtocols`. A Go test then
 reproduced it with chain-sync on gOuroboros's `main`, 10 times out of 10.
-Reported as gOuroboros issue #3085 and fixed by pull request #3087: each
-restarting server has its own guarded `Stop`, and `stopProtocols` calls it.
+Reported as gOuroboros issue #3085; pull request #3087, in review, fixes
+it: each restarting server has its own guarded `Stop`, and `stopProtocols`
+calls it.
 The constant `ShutdownStopsServer` switches between the two behaviors.
 
 ## The Go tests this model drove
@@ -331,6 +332,7 @@ cells as `make keepalive-table`.
 | `TestStateMapTimeoutsMatchSpec` | The per-state timeouts are 97 s and 60 s. |
 | `TestServerStopWinsOverRestart` | `KeepAliveLifecycleStopBug.cfg`'s trace: `Stop` during a restart still stops the server. |
 | `TestServerStopAfterRestartBeganReleasesReceiver` | `KeepAliveLifecycleSlotBug.cfg`'s trace: a restart cancelled by `Stop` releases the muxer receiver. |
+| `TestServerStopAfterRestartBeganReleasesReceiver` in `protocol/chainsync` (pull request #3087) | The same trace for the servers that share chain-sync's restart code. |
 
 Against gOuroboros today, exactly six cells fail, all from the bug: the server
 after `MsgDone` (five kinds), and `MsgDone` followed by a new run. A prototype
@@ -344,15 +346,16 @@ limit.
 
 - **A bug**: the keep-alive server does not restart after `MsgDone`. See
   [The bug](#the-bug). Reported as gOuroboros issue #3076, fixed by pull
-  request #3077.
+  request #3080 (merged). Pull request #3077 had the same change and was
+  closed in favor of #3080 to re-sign its commits.
 - **Two bugs in that fix**: `Stop` could lose to a restart in progress
   (caught before publishing), and a restart cancelled by `Stop` left its
   muxer receiver suspended (caught in review, then modelled). See
   [The restart lifecycle](#the-restart-lifecycle-keepalivelifecycletla).
 - **A shutdown bug in every restarting server**: during a connection close, a
   restart could start an instance after the old one was stopped, and serve a
-  message. Reproduced in Go, reported as gOuroboros issue #3085, fixed by
-  pull request #3087. Same section, and
+  message. Reproduced in Go, reported as gOuroboros issue #3085; the fix,
+  pull request #3087, is in review. Same section, and
   [Model 02, part 2](../02-connection/README.md#part-2-stop-and-shutdown-during-a-restart-muxhandovertla).
 - **gOuroboros follows the specification** on every within-run cell,
   including cookies and size limits.

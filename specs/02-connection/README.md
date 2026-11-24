@@ -127,16 +127,28 @@ For keep-alive the handler answers a ping. For chain-sync, block-fetch,
 tx-submission, peer-sharing, and the Leios servers, which restart the same
 way, it is application callbacks running after shutdown began.
 
-**Reproduced and fixed.** A Go test held chain-sync's server inside its
+**Reproduced, and fixed in review.** A Go test held chain-sync's server inside its
 `MsgDone` handler on gOuroboros's `main`, stopped its instance the way
 `stopProtocols` did, and let the restart continue: a new instance answered the
 next `FindIntersect` and called the application's `FindIntersectFunc`, 10
-times out of 10. Reported as gOuroboros issue #3085; pull request #3087 gives
+times out of 10. Reported as gOuroboros issue #3085; pull request #3087 (in
+review) gives
 each restarting server a `Stop` that records the request under its lock, so a
 restart racing with it installs nothing (and releases its muxer receiver),
 and makes `stopProtocols` call those servers' `Stop`. In the model that is
 `ShutdownStopsServer`: connection shutdown now sets the same stop request
 `Server.Stop` does.
+
+**A lesson from that pull request's review.** Its first tests stopped each
+server while it was held *before* `StopForRestart`. That ordering is the
+model's `StopRead`-before-`StopForRestart` path, where `Stop` unregisters the
+receiver itself, so they passed even with every server's release of a
+cancelled restart deleted - the reviewer checked. The ordering that needs the
+release is the one `KeepAliveLifecycleSlotBug.cfg` and part 2's `Install`
+step show: `StopForRestart` first, then `Stop`, then the restart's guard. The
+added chain-sync test stops the server from a hook at exactly that point.
+When turning a trace into a Go test, hold the code at the trace's own
+ordering, and prove the test fails without the step the trace is about.
 
 Step 3 of the trace is where the fix bites: the restart's guard now fires,
 because shutdown recorded the request.
@@ -229,8 +241,8 @@ change that lets a protocol fail between the handshake and
 - **A shutdown bug**: during a connection close, a restarting server
   re-registered with the muxer and could handle a message after
   `stopProtocols` (part 2). Reproduced in Go with chain-sync, reported as
-  gOuroboros issue #3085, fixed by pull request #3087, and checked fixed
-  here (`MuxHandoverClose.cfg`).
+  gOuroboros issue #3085; its fix, pull request #3087, is in review and is
+  checked here (`MuxHandoverClose.cfg`).
 - **A backpressure hazard** for applications whose block-fetch callbacks wait
   on another protocol (part 3).
 - **A latent panic** in the shutdown order, unreachable today (part 4).
