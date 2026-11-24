@@ -91,6 +91,9 @@ protocol.
   to Babbage.
 - [Model 19: the Byron ledger](specs/19-ledger-byron/README.md): the
   UTxO rule, fees and heavyweight delegation.
+- [Model 22: the UTXOW witness rules](specs/22-ledger-witnesses/README.md):
+  key witnesses, native scripts, needed and supplied scripts, redeemers,
+  datums and the script integrity hash, Shelley to Dijkstra.
 - [Model 23: the block-body rule](specs/23-ledger-bbody/README.md): body
   size and hash, transactions applied in order, execution-unit and
   reference-script totals, and the header's protocol version.
