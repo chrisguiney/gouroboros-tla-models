@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-83 entries. On `main`: does not conform 37; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
+85 entries. On `main`: does not conform 37; conforms 24; conforms (implementation choice) 15; conforms (stricter) 8; n/a (library contract) 1.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -140,6 +140,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L16](#l16) | ledger | PlutusV1 TxInfo with a redeemer that points at nothing | Ignored: a V1 TxInfo carries no redeemers | `NewTxInfoV1FromTransaction` resolves every redeemer and returns an error | n/a | conforms (stricter) | Phase-1 rejects such a transaction (extraneous redeemer) before any script runs, so the outcome is the same. The golden test clears the Alonzo generator's arbitrary redeemers for V1 |
 | [L19](#l19) | ledger | Committee certificate after an in-block UpdateCommittee proposal | Accepted: GOVCERT counts the proposals the block's earlier transactions left as potential members | main: `BlockLedgerState` committee lookups ask only the wrapped state, so the certificate is rejected; branch: in-block proposals count | Silent | does not conform → conforms | Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet. Reaches Dingo through `utxoref.StateOverlay` |
 | [L20](#l20) | ledger | `VerifyBlock` issuer in a TPraos overlay slot (d > 0) | Active slot: the scheduled genesis delegate, its VRF key, no stake; non-active slot: rejected | main: every issuer looked up in the pool distribution, so valid delegate blocks are rejected and pool blocks in non-active slots accepted; branch: `VerifyConfig.TPraosOverlay` | OVERLAY rule | does not conform → conforms | Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet. Breaking for callers with stake-pool validation on TPraos blocks. Dingo skips that validation |
+| [L21](#l21) | ledger | Leios voting key past its honoured age | Seated keyless once `epoch >= registeredIn + maxKeyAge`, `maxKeyAge = ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2`; a certificate it signs is refused (`SignerWithoutKey`) | `DijkstraLeiosCertificateState` asks only for keys "from the snapshot's registered pool parameters"; an aged-out key handed over verifies like any other | Voting keys rotate with a time-to-live | n/a (library contract) | Recorded (model `ledger-leios`, `LeiosVoting`); the contract text needs a decision. Go: `TestLeiosVotingEverySignerSet/aged/aged-key-handed-over` on `test/leios-voting-model` |
+| [L22](#l22) | ledger | Leios vote encoding | `[announcing_rb_hash, voter_id (Word16), signature]` | `LeiosPrototypeVote` matches (`uint64` id); `LeiosVote`, used by the LeiosFetch vote messages, is `[slot, eb_hash, voter_id, signature]` | `[announcing_rb_hash, voter_id, vote_signature]` | conforms (implementation choice) | Recorded. Only the gOuroboros-only LeiosFetch vote messages (N46) carry `LeiosVote` |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1146,6 +1148,28 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet: `VerifyConfig.TPraosOverlay`, required for Shelley-to-Alonzo blocks unless `SkipStakePoolValidation`. 11 of 17 `TestVerifyBlockStateTPraosOverlay` cells fail with main's issuer path. The classification duplicates `consensus.classifyOverlaySlot` (C15); sharing one is a follow-up. Dingo calls `VerifyBlock` with stake-pool validation skipped and checks the overlay itself
 
+### L21
+
+**Leios voting key past its honoured age** (kind 6: state gOuroboros leaves to its caller)
+
+- **What differs.** Reference: committee selection offers a pool's key only while `epoch < registeredIn + maxKeyAge`; past that the seat is keyless and `verifyLeiosCert` refuses any certificate that marks it. gOuroboros: verifies against the keys the caller hands over; the interface contract asks for registered keys and says nothing about age, so a caller that follows it literally makes gOuroboros accept a certificate the reference refuses.
+- **Spec.** CIPs `db48da14bff1` `CIP-0164/README.md`, "Key Registration and Rotation", lines 826-834: voting keys rotate on a cadence "which a corresponding key time-to-live should enforce".
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/State/Leios.hs` 115-121 (`honouredKey`), `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Snap.hs` 157-180 (`maxKeyAgeEpochs`); cardano-base `242f1ebde40b` `cardano-crypto-leios/src/Cardano/Crypto/Leios.hs` 312-315
+- **gOuroboros.** gOuroboros `ebc63eab` `ledger/common/state.go` 206-217 (`DijkstraLeiosCertificateState`)
+- **Verdict.** n/a (library contract)
+- **Status.** Recorded (model `ledger-leios` `LeiosVotingAgedKeyCallerBug`). Needs a decision: document the age rule in the interface, or take the epoch and `maxKeyAge` and check it.
+
+### L22
+
+**Leios vote encoding** (kind 5: gOuroboros-only addition)
+
+- **What differs.** Reference and CIP: a vote is `[announcing_rb_hash, voter_id, vote_signature]`, the id a `Word16` in the reference. gOuroboros: `LeiosPrototypeVote` has that shape with a `uint64` id; `LeiosVote`, the earlier draft's `[slot, eb_hash, voter_id, signature]`, is what the LeiosFetch vote messages carry.
+- **Spec.** CIPs `db48da14bff1` `CIP-0164/README.md` 3397-3410 (CDDL `leios_vote`)
+- **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/Leios/Types.hs` 254-278
+- **gOuroboros.** gOuroboros `ebc63eab` `ledger/common/leios.go` 71-90; `protocol/leiosfetch/validate.go` 141
+- **Verdict.** conforms (implementation choice)
+- **Status.** Recorded. LeiosFetch vote messages are themselves a gOuroboros extension (N46), so no reference peer sends or reads `LeiosVote`.
+
 ## Pipeline
 
 ### P1
@@ -1215,7 +1239,7 @@ gOuroboros keeps no ledger state. These rules exist in the spec and the referenc
 - **Byron update mechanism**: gOuroboros checks proposals and votes only statelessly (`ledger/byron/payload.go`); registration, vote tally, confirmation, endorsement and adoption are the caller's.
 - **Byron heavyweight delegation**: `ApplyPayloadCbor` must be called once per main block, in slot order, keeping the result only if the block is adopted (`consensus/byron/pbft_delegation.go`).
 - **Chain selection**: `PreferCandidate` does not enforce k; the caller must offer only candidates within k for Praos. For Genesis the caller must anchor fragments at one point, wait for windows to fill, and decide when to use the density rule (`ShouldUseGenesis` is a threshold it applies); see C2, C6, C7.
-- **Leios**: applying an endorser block, checking it against the announced hash and size, applying it at most once, and rollback (model `ledger-leios`); the caller supplies the seated committee.
+- **Leios**: applying an endorser block, checking it against the announced hash and size, applying it at most once, and rollback (model `ledger-leios`); the caller supplies the seated committee: top `Nc` by stake, ties by ascending pool id, keyless when the key is missing or aged out (L21). Vote collection is the caller's too: keep the first valid vote of each seat per election, whichever announcement it is for, and aggregate once the tally reaches the quorum; a certificate cannot show an equivocating seat counted twice (model `ledger-leios` `LeiosVoting`).
 - **Peer trust**: whether a chain-sync peer is trusted (N8).
 - **Epoch nonce**: holding the evolving, candidate and lab nonces, ticking and freezing (strict `<` with the era's window), deriving each block's 32-byte nonce, and restoring the state on rollback (model `consensus-nonce`). The spec takes the lab nonce from the previous epoch's last block's own hash (cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/chain.tex` line 478: "seed generated from hash of previous epoch's last block header"); the reference and the network use that block's predecessor hash. `CalculateEpochNonce`'s `prevEpochFirstBlockHash` names neither, so the caller must pass the reference's value.
 - **Mempool change signal** for a local-tx-monitor server that awaits (N27).
@@ -1229,6 +1253,7 @@ Not drift, since gOuroboros matches the reference, but worth knowing. Details an
 - Byron zero-valued outputs and the redeem-only fee exemption, and Mary's token-exempt output minimum. Models `ledger-utxo` and `ledger-byron`.
 - A deregistration refunds the deposit recorded at registration, not the current `keyDeposit`. Model `ledger-shelley`.
 - Conway bootstrap rules: the return account is not checked in protocol version 9, and committee voters must be in the enacted committee only from version 11. Model `ledger-governance`.
+- Leios quorum: CIP-0164 Step 4 says the stake must "exceed" tau, but its formula and the reference (`verifyLeiosCert`, `recordVote`) use `>=`; gOuroboros uses `>=`. Model `ledger-leios`.
 - Endorser-block encoding: a bare map with `uint32` sizes (the node) instead of the CIP's array around an ordered map. Model `ledger-leios`.
 - Message submission window rules (a non-blocking request may ask for 0 ids if it acknowledges some) and empty `MsgRequestMessages`. Model `dmq`.
 

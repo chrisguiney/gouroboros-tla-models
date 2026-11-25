@@ -457,7 +457,7 @@ gOuroboros 1559924b (origin/main). Static reading only; no tests run. 'Blueprint
 
 | Item | Functions | Class | Evidence |
 |---|---|---|---|
-| Leios certificate verification (committee, bitfield, quorum, aggregate signature) | VerifyDijkstraCertificateForMessage | modelled | specs/ledger-leios/LeiosCommittee.tla AcceptAgrees, GoSound; real rc-2026w41 certificate TestVerifyDijkstraCertificateRcPrototypeCertificate. DRIFT L9 defect (exactly Nc seats) open: fix branch fix/leios-committee-size, no PR; TestCertificateModelCells not on main |
+| Leios certificate verification (committee, bitfield, quorum, aggregate signature) | VerifyDijkstraCertificateForMessage | modelled | specs/ledger-leios/LeiosCommittee.tla AcceptAgrees, GoSound; LeiosVoting.tla GoAcceptsCerts, GoAgrees (certificates formed by the reference vote collection; Go on test/leios-voting-model `eb73b151`); real rc-2026w41 certificate TestVerifyDijkstraCertificateRcPrototypeCertificate. DRIFT L9 defect (exactly Nc seats) open: fix branch fix/leios-committee-size, no PR; TestCertificateModelCells not on main |
 | BLS possession-proof verification | VerifyPossessionProofForDomain | vectors | TestVerifyPossessionProofRcPrototypeKeys: 2 rc-2026w41 prototype testnet keys (ledger/leios/testdata) |
 
 #### Not-covered notes: ledger-utxo, ledger-witnesses, ledger-hash-cache, ledger-bbody, ledger-leios
@@ -493,9 +493,9 @@ gOuroboros 1559924b (origin/main). Static reading only; no tests run. 'Blueprint
 | ledger-bbody | header size and cryptography | vectors | VRF/KES vectors (internal/test/conformance), real mainnet headers; header size bound has only unit tests |
 | ledger-bbody | transaction-index limit 65,536 | gap | unreachable |
 | ledger-bbody | execution units as two dimensions | gap | hand test TestSumBlockExUnits |
-| ledger-leios | voting protocol and vote aggregation | caller-contract | ledger-leios README 'What gOuroboros does'; wire side specs/leios-peras/LeiosVotes.tla EveryRequestAnswered |
-| ledger-leios | committee selection | caller-contract | ledger-leios README; DRIFT 'Library boundary: Leios' (caller supplies the seated committee) |
-| ledger-leios | BLS cryptography | vectors | rc-2026w41 certificate and possession proofs (ledger/leios/certificate_rc_test.go) |
+| ledger-leios | voting protocol and vote aggregation | modelled | specs/ledger-leios/LeiosVoting.tla OneVotePerSeat, TallyMatches, CertAtQuorum, CertsVerify, AtMostOneCert, GoAcceptsCerts (16 Bug configs, 7 probes); Go TestLeiosVotingReferenceCertificates/MutatedAggregation/EquivocationIsTheCallers on branch test/leios-voting-model, NOT on main. Collection itself stays the caller's (gOuroboros has none); wire side specs/leios-peras/LeiosVotes.tla |
+| ledger-leios | committee selection | modelled | specs/ledger-leios/LeiosVoting.tla CommitteeSize, SeatOrder, TopStake, OnlyHonouredKeys, GoAgrees (truncation per CIP-0164 db48da14; the persistent/non-persistent wFA^LS split is not on the Leios path at ouroboros-consensus ec239d57f618, Peras only); Go TestLeiosVotingCommitteeSeating/EverySignerSet/KeylessBitsDoNotCount on test/leios-voting-model. Seating stays the caller's; key age is a contract gap (DRIFT L21) |
+| ledger-leios | BLS cryptography | vectors | rc-2026w41 certificate and possession proofs (ledger/leios/certificate_rc_test.go); no BLS aggregation goldens at the pinned revisions (cardano-crypto-leios tests are properties). Quorum arithmetic: 13 boundary vectors derived from verifyLeiosCert's rule, TestCertificateQuorumBoundary on test/leios-voting-model |
 | ledger-leios | announced EB size bounds, maxEndorserBlockTxsSize, closure size | gap | unit tests only |
 | ledger-leios | fork choice and EB propagation | caller-contract | DRIFT 'Library boundary' (chain selection, Leios) |
 | ledger-leios | node-to-client inlined CertRBs | gap | Go table TestLeiosLedgerModelGoChecks is on branch test/leios-ledger-model, not main; DRIFT L11 |
