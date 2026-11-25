@@ -41,6 +41,24 @@
 (*   - Start registers it (RegisterProtocol), resuming a suspended one.    *)
 (*   - A stopped muxer holds no receivers.                                 *)
 (*                                                                         *)
+(*   Reader, optional: an application goroutine calling one of the       *)
+(*   server's methods (DoneChan, IsDone, or SendMessage on the instance)   *)
+(*   while the restart runs. It reads which instance is current either    *)
+(*   under protocolMu (ProtocolInstance, and the server's own Start,       *)
+(*   EnsureRegistered, DoneChan, StopChan and IsDone), or with no lock,    *)
+(*   as a method promoted from an embedded *protocol.Protocol field did.   *)
+(*                                                                         *)
+(* The same restart (StopForRestart; install under protocolMu unless Stop  *)
+(* set `stopped`, else CancelRestart; Start) and the same Stop (`stopped`  *)
+(* set and the current instance read under protocolMu) are in every        *)
+(* gOuroboros server that restarts after MsgDone: block-fetch, chain-sync, *)
+(* keep-alive, local-state-query, peer-sharing, tx-submission,             *)
+(* leios-fetch, leios-notify, leios-votes, message-submission,             *)
+(* local-message-submission, local-message-notification,                   *)
+(* local-tx-submission, local-tx-monitor and peras-votes (each package's   *)
+(* server.go: handleDone or handleClientDone, initProtocol, Stop). This    *)
+(* module stands for all of them.                                          *)
+(*                                                                         *)
 (* HOW TO READ IT                                                          *)
 (*   Each goroutine is a little program counter: `restart` and `stopper`   *)
 (*   name the step each goroutine will run next, like a line number. A     *)
@@ -54,9 +72,13 @@ CONSTANTS
     Stopper,            \* "Server" or "Connection": who stops the server
     StopGuard,          \* TRUE: Server.Stop sets a flag that a later restart honours
     CancelUnregisters,  \* TRUE: a restart cancelled by the guard unregisters the slot
-    ShutdownStopsServer \* TRUE (gOuroboros since the fix for issue 3085): connection
+    ShutdownStopsServer, \* TRUE (gOuroboros since the fix for issue 3085): connection
                         \* shutdown calls the server's Stop. FALSE (before it): shutdown
                         \* stops only the instance it reads, and records no request.
+    Reader              \* "none": no application goroutine reads the instance.
+                        \* "locked": it reads under protocolMu (ProtocolInstance).
+                        \* "unlocked": it reads the field with no lock, as a method
+                        \* promoted from an embedded *protocol.Protocol did.
 
 \* The instances that can exist: the first one, plus one per restart.
 \* Literally: "Instances is defined as 1 through MaxDones plus 1."
@@ -75,11 +97,19 @@ VARIABLES
     snap,           \* the instance the stopper read
     stopRequested,  \* the flag Server.Stop sets when StopGuard is on
     dones,          \* MsgDone received so far
-    lateError       \* a restart failed to register after the muxer stopped
+    lateError,      \* a restart failed to register after the muxer stopped
+    installing,     \* the restart holds protocolMu and is writing `current`
+    reader,         \* the reader's next step: "idle" or "done"
+    racedRead       \* the reader read `current` while the restart was writing it
 
-\* Literally: "vars is defined as the tuple of all twelve variables."
+\* Literally: "vars is defined as the tuple of all fifteen variables."
 vars == <<status, current, nextId, muxer, slot, restart, old, stopper, snap,
-          stopRequested, dones, lateError>>
+          stopRequested, dones, lateError, installing, reader, racedRead>>
+
+\* In English: "the variables only the reader and the locked write touch."
+\* Literally: "readVars is defined as the tuple of installing, reader and
+\*   racedRead."
+readVars == <<installing, reader, racedRead>>
 
 \* In English: "At the start, instance 1 is running and registered with a
 \* running muxer, and both goroutines are idle."
@@ -102,6 +132,9 @@ Init ==
     /\ stopRequested = FALSE
     /\ dones = 0
     /\ lateError = FALSE
+    /\ installing = FALSE           \* nobody holds protocolMu
+    /\ reader = "idle"              \* the reader has not read yet
+    /\ racedRead = FALSE
 
 \* In English: "Stop or StopForRestart on instance i does something only if
 \* i has not been stopped already" (Go's sync.Once).
@@ -129,6 +162,7 @@ RecvDone ==
     /\ dones' = dones + 1
     /\ UNCHANGED <<status, current, nextId, muxer, slot, stopper, snap,
                    stopRequested, lateError>>
+    /\ UNCHANGED readVars
 
 \* Step 1, proto.StopForRestart().
 \* In English: "If the old instance was not stopped yet, stop it, and
@@ -149,11 +183,14 @@ StopOld ==
     /\ restart' = "install"             \* next, step 2 is due
     /\ UNCHANGED <<current, nextId, muxer, old, stopper, snap,
                    stopRequested, dones, lateError>>
+    /\ UNCHANGED readVars
 
 \* Step 2, under protocolMu.
 \* In English: "If the guard is on and Stop was requested: install nothing,
 \* end the restart, and (with CancelUnregisters) empty the muxer slot.
 \* Otherwise: create the next instance, make it current, and go to step 3."
+\* The install branch holds protocolMu until Unlock, so a reader can see
+\* the write in progress.
 \* Literally: "Install is defined as: restart equals "install", and if
 \*   StopGuard is true and stopRequested is true, then (restart in the next
 \*   state equals "idle", and slot in the next state equals (if
@@ -161,8 +198,10 @@ StopOld ==
 \*   are unchanged), else (status in the next state equals status except that
 \*   its nextId entry is "new", and current in the next state equals nextId,
 \*   and nextId in the next state equals nextId plus 1, and restart in the next
-\*   state equals "start", and slot is unchanged); and muxer, old, stopper,
-\*   snap, stopRequested, dones and lateError are unchanged."
+\*   state equals "unlock", and installing in the next state equals TRUE, and
+\*   slot is unchanged); and if restart in the next state equals "idle" then
+\*   installing is unchanged; and muxer, old, stopper, snap, stopRequested,
+\*   dones, lateError, reader and racedRead are unchanged."
 Install ==
     /\ restart = "install"              \* this is step 2
     /\ IF StopGuard /\ stopRequested    \* if Stop was requested
@@ -172,9 +211,25 @@ Install ==
           ELSE /\ status' = [status EXCEPT ![nextId] = "new"]   \* else: a new instance exists
                /\ current' = nextId                             \* and is now current
                /\ nextId' = nextId + 1
-               /\ restart' = "start"                            \* next, step 3 is due
+               /\ restart' = "unlock"                           \* next, protocolMu is released
+               /\ installing' = TRUE                            \* while the write is in progress
                /\ UNCHANGED slot
-    /\ UNCHANGED <<muxer, old, stopper, snap, stopRequested, dones, lateError>>
+    /\ restart' = "idle" => UNCHANGED installing
+    /\ UNCHANGED <<muxer, old, stopper, snap, stopRequested, dones, lateError,
+                   reader, racedRead>>
+
+\* Step 2, end: release protocolMu.
+\* In English: "The write to `current` is finished and protocolMu is free
+\* again; step 3 is due."
+\* Literally: "Unlock is defined as: restart equals "unlock", and installing
+\*   in the next state equals FALSE, and restart in the next state equals
+\*   "start", and every other variable is unchanged."
+Unlock ==
+    /\ restart = "unlock"              \* the restart still holds protocolMu
+    /\ installing' = FALSE             \* next, the write is over and the lock free
+    /\ restart' = "start"              \* next, step 3 is due
+    /\ UNCHANGED <<status, current, nextId, muxer, slot, old, stopper, snap,
+                   stopRequested, dones, lateError, reader, racedRead>>
 
 \* Step 3, start the new instance.
 \* In English: "If the new instance was already stopped, nothing happens.
@@ -204,6 +259,7 @@ StartNew ==
     /\ restart' = "idle"                \* the restart is over
     /\ UNCHANGED <<current, nextId, muxer, old, stopper, snap,
                    stopRequested, dones>>
+    /\ UNCHANGED readVars
 
 -----------------------------------------------------------------------------
 (* The stopper. *)
@@ -211,18 +267,21 @@ StartNew ==
 \* In English: "The stopper reads which instance is current. Server.Stop
 \* also records that Stop was requested; so does connection shutdown, once
 \* it calls Server.Stop (ShutdownStopsServer)."
-\* Literally: "StopRead is defined as: stopper equals "idle", and snap in the
+\* Literally: "StopRead is defined as: stopper equals "idle", and installing
+\*   is false (protocolMu is free), and snap in the
 \*   next state equals current, and stopRequested in the next state equals
 \*   (Stopper equals "Server" or ShutdownStopsServer is true), and stopper in
 \*   the next state equals "stop", and status, current, nextId, muxer, slot,
 \*   restart, old, dones and lateError are unchanged."
 StopRead ==
     /\ stopper = "idle"                         \* the stopper has not started
+    /\ ~installing                              \* and can take protocolMu
     /\ snap' = current                          \* next, it holds the current instance
     /\ stopRequested' = (Stopper = "Server" \/ ShutdownStopsServer)  \* next, the flag is set if this is Server.Stop
     /\ stopper' = "stop"                        \* next, its second step is due
     /\ UNCHANGED <<status, current, nextId, muxer, slot, restart, old, dones,
                    lateError>>
+    /\ UNCHANGED readVars
 
 \* In English: "Stop the instance it read: if that does anything, the
 \* instance is stopped and the muxer slot is emptied. Connection shutdown
@@ -243,6 +302,7 @@ StopSnap ==
     /\ stopper' = IF Stopper = "Connection" THEN "muxer" ELSE "done"
     /\ UNCHANGED <<current, nextId, muxer, restart, old, snap,
                    stopRequested, dones, lateError>>
+    /\ UNCHANGED readVars
 
 \* In English: "Connection shutdown stops the muxer, which drops every
 \* receiver."
@@ -258,6 +318,7 @@ MuxerStop ==
     /\ stopper' = "done"
     /\ UNCHANGED <<status, current, nextId, restart, old, snap,
                    stopRequested, dones, lateError>>
+    /\ UNCHANGED readVars
 
 \* In English: "Once the muxer has stopped, any running instance's loops
 \* exit, one instance at a time."
@@ -273,6 +334,40 @@ LoopsExit ==
          /\ status' = [status EXCEPT ![i] = "stopped"]
     /\ UNCHANGED <<current, nextId, muxer, slot, restart, old, stopper, snap,
                    stopRequested, dones, lateError>>
+    /\ UNCHANGED readVars
+
+-----------------------------------------------------------------------------
+(* The reader. *)
+
+\* In English: "The reader takes protocolMu, which it can only do while the
+\* restart does not hold it, and reads the current instance."
+\* Literally: "ReadLocked is defined as: Reader equals "locked", and reader
+\*   equals "idle", and installing is false, and reader in the next state
+\*   equals "done", and every other variable is unchanged."
+ReadLocked ==
+    /\ Reader = "locked"               \* the reader uses ProtocolInstance
+    /\ reader = "idle"                 \* and has not read yet
+    /\ ~installing                     \* and can take protocolMu
+    /\ reader' = "done"
+    /\ UNCHANGED <<status, current, nextId, muxer, slot, restart, old, stopper,
+                   snap, stopRequested, dones, lateError, installing, racedRead>>
+
+\* In English: "The reader reads the field with no lock, at any moment. If
+\* the restart is writing it at that moment, the two accesses are concurrent:
+\* a data race. Overlap is the witness the model can show; the Go race
+\* detector reports any unlocked read not ordered after the write, which
+\* includes this one."
+\* Literally: "ReadUnlocked is defined as: Reader equals "unlocked", and
+\*   reader equals "idle", and reader in the next state equals "done", and
+\*   racedRead in the next state equals installing, and every other variable
+\*   is unchanged."
+ReadUnlocked ==
+    /\ Reader = "unlocked"             \* the reader uses the embedded field
+    /\ reader = "idle"                 \* and has not read yet
+    /\ reader' = "done"
+    /\ racedRead' = installing         \* it raced if the write is in progress
+    /\ UNCHANGED <<status, current, nextId, muxer, slot, restart, old, stopper,
+                   snap, stopRequested, dones, lateError, installing>>
 
 \* In English: "When both goroutines are finished, nothing changes any
 \* more." This tells TLC that this is an expected ending, not a deadlock.
@@ -283,14 +378,15 @@ Finished ==
     /\ stopper = "done"
     /\ UNCHANGED vars
 
-\* In English: "A step is any one step of either goroutine, or loops
-\* exiting, or staying finished."
+\* In English: "A step is any one step of the restart, the stopper or the
+\* reader, or loops exiting, or staying finished."
 \* Literally: "Next is defined as: RecvDone, or StopOld, or Install, or
-\*   StartNew, or StopRead, or StopSnap, or MuxerStop, or LoopsExit, or
-\*   Finished."
+\*   Unlock, or StartNew, or StopRead, or StopSnap, or MuxerStop, or
+\*   LoopsExit, or ReadLocked, or ReadUnlocked, or Finished."
 Next ==
-    \/ RecvDone \/ StopOld \/ Install \/ StartNew
+    \/ RecvDone \/ StopOld \/ Install \/ Unlock \/ StartNew
     \/ StopRead \/ StopSnap \/ MuxerStop \/ LoopsExit
+    \/ ReadLocked \/ ReadUnlocked
     \/ Finished
 
 \* In English: "Start in Init, and from then on every step is a Next step."
@@ -312,14 +408,18 @@ Running == {i \in Instances : status[i] = "running"}
 \*   from Instances to the set containing "unused", "new", "running" and
 \*   "stopped", and current is a member of Instances, and muxer is a member of
 \*   the set containing "running" and "stopped", and slot is a member of the
-\*   set containing "empty", "registered" and "suspended", and lateError is a
-\*   member of BOOLEAN."
+\*   set containing "empty", "registered" and "suspended", and lateError,
+\*   installing and racedRead are members of BOOLEAN, and reader is "idle" or
+\*   "done"."
 TypeOK ==
     /\ status \in [Instances -> {"unused", "new", "running", "stopped"}]
     /\ current \in Instances
     /\ muxer \in {"running", "stopped"}
     /\ slot \in {"empty", "registered", "suspended"}
     /\ lateError \in BOOLEAN
+    /\ installing \in BOOLEAN
+    /\ reader \in {"idle", "done"}
+    /\ racedRead \in BOOLEAN
 
 \* In English: "At most one instance is running at any moment": never two
 \* keep-alive servers reading the connection at once.
@@ -354,4 +454,8 @@ StopReleasesSlot ==
 \* model.
 \* Literally: "NoStartAfterClose is defined as: lateError is not true."
 NoStartAfterClose == ~lateError
+\* In English: "The reader never reads `current` while the restart is
+\* writing it."
+\* Literally: "NoRacingRead is defined as: racedRead is not true."
+NoRacingRead == ~racedRead
 =============================================================================
