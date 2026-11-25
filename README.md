@@ -235,3 +235,14 @@ and the model checker (TLC) tries **every** order those moves can happen in,
 checking your rules after each one. When a rule breaks, TLC prints the exact
 sequence of steps that broke it. Those sequences are the test cases nobody
 thought to write.
+
+## Fixes made without a model
+
+Each line is a change to gouroboros that alters no protocol or ledger
+behaviour, so no model state or config covers it.
+
+- #3279: guard `len(parts) != 2` in `MaryTransactionOutputValue.UnmarshalCBOR` before indexing; `ValidateDefiniteCBORArrayLength` already enforces the length, so the guard is unreachable and only satisfies NilAway.
+- #3325: `ArrayHeaderSize` test key `1 << 31` overflows `int` on 386; replaced with `math.MaxInt32` (same five-byte header). Compile fix.
+- #3323: rules-only conformance test reads `byFamily[f]` with an ok check. NilAway fix in a test.
+- #3321: fee, size and min-coin golden helpers check component counts before indexing. NilAway fix in a test.
+- #3319: localstatequery era-summary golden checks the item count with `t.Fatalf` before indexing. NilAway fix in a test.
