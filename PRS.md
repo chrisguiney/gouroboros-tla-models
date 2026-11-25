@@ -103,6 +103,7 @@ closes. A PR can draw on more than one model.
 | `ledger-leios` (`LeiosVoteShape`, L22) | #3333 (CIP-0164 vote shape; breaking) | #3329 | open |
 | `consensus-nonce` (`EpochNonce`, GoBytes "Family") | #3334 (epoch nonce over whole chains) | #3330 | open |
 | `consensus-eras` (`EraHistoryDecode`, tagged reply) | #3336 (tagged era history refused) | #3335 | open |
+| `ledger-codec` (`TxSizeFraming`, L33) | local branch `fix/txsize-shelley-framing` (`aada8626`; Shelley-family transaction size measured from its parts), not yet published | #3337 | local |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 

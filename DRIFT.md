@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-110 entries. On `main`: does not conform 63; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+111 entries. On `main`: does not conform 64; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -159,6 +159,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L30](#l30) | ledger | Tag 258 on a pre-Conway set-shaped field | Refused before version 9: `decodeSet` (versions 2-8) and the witness decoders' `decodeList` take no tag | main: accepted on pool owners, Alonzo/Babbage collateral, required signers, reference inputs and every Shelley-Babbage witness list | Silent (the CDDL's `set<a>` allows the tag from Conway) | does not conform → conforms | Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), open PR #3289 (model `ledger-codec`; other tags on witness sets still decode) |
 | [L31](#l31) | cbor | `ConstructorEncoder` field list encoding | Non-empty fields as an indefinite list, empty as `0x80` (`encodeData` with the Serialise list instance) | main: a definite list; nil fields as null | Plutus Data CDDL allows either | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), open PR #3290; changes the bytes and hashes of Data built with it (model `cbor-codec`; four residual shapes) |
 | [L32](#l32) | cbor | Map entry order in Value's Plutus Data JSON | Wire order (`plutusDataToJson` over the entry list) | main: entries sorted by their JSON key; Value holds maps as Go maps, so wire order is gone | Silent | does not conform | Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus |
+| [L33](#l33) | ledger | Shelley, Allegra and Mary transaction size under another outer-array framing | A one-byte array header plus body, witness set and auxiliary data (null as one byte), whatever framing was received: `sizeShelleyTxF` | main: the length of the stored bytes, so `98 03` or `9f ... ff` framing adds a byte; branch: measured from the parts | Silent | does not conform → conforms | Fixed on local branch `fix/txsize-shelley-framing` (`aada8626`), not yet published (model `ledger-codec`) |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1376,6 +1377,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform
 - **Status.** Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus. Recorded by `TestValueJSONAsReferencePlutusDataToJson`, whose maps are in sorted order
 
+### L33
+
+**Shelley, Allegra and Mary transaction size under another outer-array framing** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: `sizeShelleyTxF` is the length of `toCBORForSizeComputation`, `encodeListLen 3` then the body, the witness set and `encodeNullStrictMaybe` of the auxiliary data, for Shelley, Allegra and Mary alike. The size does not depend on the received outer array. gOuroboros main returns the length of the stored CBOR for these eras (Alonzo to Conway were already measured from their parts), so an outer array written as `98 03` or `9f ... ff` measures one byte more.
+- **Spec.** Silent
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/shelley/impl/src/Cardano/Ledger/Shelley/Tx.hs` 155-177, 186-195; `eras/allegra/impl/src/Cardano/Ledger/Allegra/Tx.hs` 74; `eras/mary/impl/src/Cardano/Ledger/Mary/Tx.hs` 71
+- **gOuroboros.** gOuroboros `6eeaef4a` `ledger/common/rules.go` `TxSize` (and `TxSizeForFee`, which returns it), called by the Shelley, Allegra and Mary `UtxoValidateMaxTxSizeUtxo` and fee rules
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/txsize-shelley-framing` (`aada8626`), not yet published. `TestTxSizeShelleyFamilyIgnoresOuterArrayFraming` fails 18 of its 24 cells on main (every non-definite framing, three eras, null and present metadata). A null auxiliary data is one byte in both. Byron is measured by its received length and is unchanged. Model `ledger-codec` `TxSizeFramingMainBug.cfg`, `TxSizeFramingMainIndependenceBug.cfg` (main) / `TxSizeFraming.cfg` (fix).
+
 ## Pipeline
 
 ### P1
@@ -1510,6 +1522,7 @@ No pull request yet (decide whether and how to fix):
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
 
 - **L32** Map entry order in Value's Plutus Data JSON. Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus.
+- **L33** Shelley, Allegra and Mary transaction size under another outer-array framing. Fixed on local branch `fix/txsize-shelley-framing` (`aada8626`), no PR yet.
 - `IndefLengthByteString` does not check that its chunks are definite byte strings (RFC 8949 F.1); recorded, not changed.
 
 - **N52** DMQ KES signature checked at the current period. Fixed on local branch `fix/dmq-kes-claimed-period` (`7e1a0820`, `db6103a6`), no PR yet.

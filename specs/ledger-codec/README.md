@@ -97,4 +97,4 @@ scripts/run-model.sh specs/ledger-codec
 cd specs/ledger-codec && ../../bin/tlc -config ProtVerWidthMainBug.cfg ProtVerWidth.tla
 ```
 
-All 16 configs run in a few seconds.
+All 17 configs run in a few seconds.
