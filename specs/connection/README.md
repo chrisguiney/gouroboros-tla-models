@@ -396,6 +396,19 @@ invariant: `NoMetricsCallbackAfterClose`.
   by honest traffic (part 3), and `Close` always returns after shutdown
   (part 4).
 
+## After merging main (`5e91f77c`) into #3239
+
+Merge `92f9a687`, then `f60a0213` (head). Main added #3197, which restarts
+six servers after the client's done message by starting a new protocol
+instance, and #3194 (handshake data). A restarted instance starts its loops
+through the same tracked start, so `CloseProtocolLoops` refuses it once
+shutdown has begun, and `stopProtocols` stops the restarting servers before
+the join; #3194 does not touch teardown. Restarting servers are not in
+`ConnectionTeardown.tla`; the restart and handshake package tests pass on the
+merge (`-race -count=3`). `f60a0213` only asserts a test's captured
+connection is set before reading it (a static nil check), which cannot
+affect the model.
+
 ## Not modelled yet
 
 Byte sizes beyond "fits or not", timeouts, and the egress side of the

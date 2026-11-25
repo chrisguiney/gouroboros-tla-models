@@ -233,6 +233,12 @@ build it in memory); governance proposal policy scripts (model `ledger-governanc
 Plutus evaluation, well-formedness and cost-model contents; metadata
 hashes; more than one needed key or script per cell.
 
+## Changes that cannot affect the model
+
+- #3211 `137d618a` (after merging main, `c6733b93`): the witness-table test
+  unwraps witness-set pointers before computing the integrity hash, for a
+  static nil check. Test code only.
+
 ## Running it
 
 ```sh

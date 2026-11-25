@@ -290,6 +290,11 @@ got 1") and pass after it.
 - Node-to-client inlined CertRBs in the TLA+ model: they change only the
   "no transactions" clause, which the Go table covers both ways.
 
+## Changes that cannot affect the model
+
+- #3192 `a21029c8` (after merging main, `8ccaf407`): a test asserts the
+  validation error is set before reading its type, for a static nil check.
+
 ## Running it
 
 ```sh

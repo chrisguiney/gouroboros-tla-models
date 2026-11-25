@@ -118,6 +118,12 @@ state object), which is a contract on callers rather than an interleaving; a
 it would wait on itself; no caller does); and the other leaf-locked caches in
 `ledger/common`, whose read-compute-write races only duplicate work.
 
+## Changes that cannot affect the model
+
+- #3234 `aeccd05f` (after merging main, `49845b74`): the memo lookup skips a
+  nil entry, for a static nil check. Only non-nil entries are ever added, so
+  the model's memo, a set of entries, is unchanged.
+
 ## Running it
 
 ```sh
