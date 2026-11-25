@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-102 entries. On `main`: does not conform 55; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+107 entries. On `main`: does not conform 60; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -151,6 +151,11 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L22](#l22) | ledger | Leios vote encoding | `[announcing_rb_hash, voter_id (Word16), signature]` | main: `LeiosVote`, carried by LeiosVotes `MsgVote` and the LeiosFetch vote messages, is `[slot, eb_hash, voter_id, signature]`; branch: the CIP shape, `voter_id` 16 bits | `[announcing_rb_hash, voter_id, vote_signature]`; LeiosVotes `MsgLeiosVote` carries it | does not conform → conforms | Fixed on local branch `fix/leios-vote-shape` (`eb4c2421`), no PR yet (breaking; Dingo's `ledger/leios` and `ouroboros` packages use the old fields). The rc-2026w41 prototype vote is the golden vector. A LeiosFetch votes reply is matched by voter only: a vote names its announcing block, not its slot |
 | [L23](#l23) | ledger | Dijkstra committee certificate for a member an earlier level proposed | Accepted: each level's GOVCERT counts the UpdateCommittee proposals the earlier levels left as potential members | main: the governance view consults only the wrapped state, so a top-level (or later sub-transaction) authorization or resignation is rejected | Same rule (Conway GOVCERT isPotentialFutureMember; Dijkstra LEDGER/SUBLEDGER) | does not conform → conforms | Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet |
 | [L24](#l24) | ledger | Dijkstra parameter-update well-formedness: eMax and pledge leverage | Refused: a set eMax of zero, or a pledge leverage cap below 1 (removing the cap is allowed) | main: accepted (only Conway's non-zero fields and a non-negative leverage are checked) | Leverage cap at least 1; eMax not listed (see below) | does not conform → conforms | Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet |
+| [L25](#l25) | cbor | Tags before a tag 30 rational | At most one tag, and only 30 (`allowTag 30`) | main: every leading tag stripped, so tag 31, tag 258 or tag 30 twice decodes as a rational | RFC 8949 tag 30 is one tag around [n, d] | does not conform → conforms | Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), no PR yet |
+| [L26](#l26) | cbor | Plutus Data constructor whose fields are not a list | Refused (`decodeListOf`) | main: `ConstructorDecoder` and `Value` accept 121(1) or 102([3, 1]); only `ParsedFields`/JSON fail later | Plutus Data CDDL: a constructor's fields are `[* plutus_data]` | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), no PR yet |
+| [L27](#l27) | cbor | Generic `Value` decode of a tag 258 set of maps with composite keys | Not applicable (typed decoders); RFC 8949 allows any item as a map key | main: `Value` and `LazyValue.Decode` fail, including on the cardano-ledger Conway and Dijkstra golden transactions (proposal procedures) | RFC 8949 section 3.1 | does not conform → conforms | Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet |
+| [L28](#l28) | ledger | Bignum MultiAsset quantity | Refused: output quantities use `decodeWord64`, mint quantities `decodeIntegerBounded64` | main: a tag 2/3 bignum quantity is accepted in outputs and mint at every version | CDDL `positive_coin`/`nonZeroInt64` are plain integers | does not conform → conforms | Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet |
+| [L29](#l29) | ledger | PlutusV2 cost model in an Alonzo parameter update | Accepted: the pre-Conway cost-model decoder takes PlutusV1 and PlutusV2 (exact parameter counts) in every era | main: Alonzo refuses language 1 (only Babbage accepts it) | Silent on the decoder; the Alonzo spec lists PlutusV1 only | does not conform → conforms | Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1279,6 +1284,61 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet. `TestDijkstraParameterUpdateWellFormedEMaxAndPledgeLeverage` fails 2 of 6 cases on the parent commit. Two existing tests that asserted acceptance of a leverage of 0 and 1/2 now expect refusal. Model `specs/ledger-conway-dijkstra` `SubGovGoPpuMainBug.cfg`; with the fix all 1,308 proposal-check cells agree, and 96 fail without it. Where the spec and the reference differ on `eMax` and the Leios quorum, gOuroboros follows the reference
 
+### L25
+
+**Tags before a tag 30 rational** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: `decodeRational` (version 9 and later) consumes one tag 30 if present and fails on any other tag number; the list decoder that follows refuses a second tag. gOuroboros main: `Rat.UnmarshalCBOR` calls `SkipTags`, which removes every leading tag of any number.
+- **Spec.** RFC 8949 section 3.4 and the IANA tag 30 registration (one tag around a two-element array)
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Decoding/Decoder.hs` 465-484 (`decodeRational`), 1347-1354 (`allowTag`)
+- **gOuroboros.** gOuroboros `2fe26494` `cbor/tags.go` `Rat.UnmarshalCBOR`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), no PR yet. `TestRatAcceptsOnlyOneTag30` fails on the parent for `d81f820102` and `d81ed81e820102`. `TestRatRejectsOversizedArrayBeforeDecoding/nested_tags` asserted the old read-through-every-tag behaviour and now expects the second-tag refusal
+
+### L26
+
+**Plutus Data constructor whose fields are not a list** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: `decodeConstr` reads the content of tags 121-127 and 1280-1400, and the second element under tag 102, with `decodeListOf`, so any other item fails. gOuroboros main: `ConstructorDecoder.UnmarshalCBOR` keeps whatever item follows as the fields.
+- **Spec.** conway.cddl `constr<a0>` (`#6.121([* a0])` ... `#6.102([uint, [* a0]])`)
+- **Reference.** plutus `bdc12f105a98` `plutus-core/plutus-core/src/PlutusCore/Data.hs` 286-307 (`decodeConstr`)
+- **gOuroboros.** gOuroboros `2fe26494` `cbor/constructor.go` `ConstructorDecoder.UnmarshalCBOR`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), no PR yet. `TestConstructorFieldsMustBeAList` fails 12 checks on the parent (six encodings, each through `ConstructorDecoder` and `Value`)
+
+### L27
+
+**Generic `Value` decode of a tag 258 set of maps with composite keys** (kind 1: local branch moves to the reference)
+
+- **What differs.** gOuroboros main: `Value` hands tag 258 content to the library's interface decoding, which cannot hold a map keyed by an array or a map. RFC 8949 permits such keys and Conway proposal procedures (a tag 258 set) contain committee-update maps keyed by credentials.
+- **Spec.** RFC 8949 section 3.1 (map keys are any data item)
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/golden/tx.cbor` (field 20) decodes with the reference
+- **gOuroboros.** gOuroboros `2fe26494` `cbor/value.go` `Value.unmarshalCBOR` (tag branch)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet. `TestValueDecodesSetMembersWithCompositeMapKeys` fails on the parent for three encodings and the Conway golden
+
+### L28
+
+**Bignum MultiAsset quantity** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: Mary `decodeMultiAssetMaps` and the mint decoder read each quantity as a plain CBOR integer. gOuroboros main: `MultiAsset[T].UnmarshalCBOR` decodes into `big.Int`-capable targets, which take a bignum.
+- **Spec.** conway.cddl `multiasset<positive_coin>` and `mint = multiasset<nonZeroInt64>`
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/mary/impl/src/Cardano/Ledger/Mary/Value.hs` 299-308, 369-393
+- **gOuroboros.** gOuroboros `2fe26494` `ledger/common/common.go` `MultiAsset.UnmarshalCBOR`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet. `TestMultiAssetBignumQuantityAsReference` fails on the parent at pv 8, 9 and 12
+
+### L29
+
+**PlutusV2 cost model in an Alonzo parameter update** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: the legacy `CostModels` decoder used before version 9 accepts PlutusV1 and PlutusV2. gOuroboros main: `AlonzoProtocolParameterUpdate.ValidateProtocolParameterUpdateVersion` allows only PlutusV1.
+- **Spec.** Alonzo ledger spec: `Language` is PlutusV1 only (the reference decoder is wider)
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/Plutus/CostModels.hs` 307-338
+- **gOuroboros.** gOuroboros `2fe26494` `ledger/alonzo/pparams.go` `ValidateProtocolParameterUpdateVersion`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet. `TestAlonzoCostModelUpdateLanguagesAsReference` fails on the parent with "unknown cost model language 1" at pv 5. `classic_ppup_rules_test.go` asserted the old refusal and is updated; conformance vectors pass. Where spec and reference differ, gOuroboros follows the reference
+
 ## Pipeline
 
 ### P1
@@ -1398,6 +1458,14 @@ No pull request yet (decide whether and how to fix):
 - **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
 - **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. Unreachable on chain today.
 - **L24** Dijkstra parameter-update well-formedness (eMax, pledge leverage). Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet.
+- **L25** Tags before a tag 30 rational. Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), no PR yet.
+- **L26** Plutus Data constructor whose fields are not a list. Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), no PR yet.
+- **L27** Generic `Value` decode of a tag 258 set of maps with composite keys. Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet.
+- **L28** Bignum MultiAsset quantity. Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet.
+- **L29** PlutusV2 cost model in an Alonzo parameter update. Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet.
+
+- Recorded, not changed: `ConstructorEncoder` writes a constructor's fields as given, so a `[]any` becomes a definite list; plutus `encodeData` writes a non-empty field list indefinite (`Data.hs` 147-160). Datum and redeemer hashes use the bytes carried in the transaction, so this only matters to callers that build and hash Data; passing `IndefLengthList` gives the reference bytes. `IndefLengthByteString` does not check that its chunks are definite byte strings (RFC 8949 F.1).
+- Decision needed: before version 9, `decodeSet` refuses tag 258 (Decoder.hs 943-953), so a pre-Conway pool registration whose owners carry the tag does not decode in the reference; gOuroboros accepts it in every era. Babbage and Alonzo bodies also call the tag-only `CheckForDuplicates` on collateral, required signers and reference inputs, refusing tagged duplicates the pre-9 reference would refuse for the tag itself and silently deduplicate untagged.
 - **L23** Dijkstra committee certificate for a member an earlier level proposed. Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet.
 - **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
 - **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.
