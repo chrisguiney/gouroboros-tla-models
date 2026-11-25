@@ -17,6 +17,7 @@ The engine is modelled in slices, simplest first:
 | 4 | `EngineLifecycle.tla` | `Start`, `Stop` and `StopForRestart` against the five goroutines `Start` launches, one Go primitive per step |
 | 5 | `EngineSendBeforeStart.tla` | A message sent before or during `Start` |
 | 6 | `EngineIngressOwner.tla` | A stopped instance must not change the ingress settings of the instance registered after it |
+| 7 | `EngineRoundTripVerdict.tla` | What a test can observe when a client sends a second request before the server answers the first |
 
 Read [Model `keepalive`](../keepalive/README.md) first.
 
@@ -486,4 +487,28 @@ no run-time setting an instance can change.
 
 ```sh
 bin/tlc -config specs/engine/EngineIngressOwnerStaleBug.cfg specs/engine/EngineIngressOwner.tla
+```
+
+## Slice 7: the verdict on a second request (`EngineRoundTripVerdict.tla`)
+
+One segment carries two requests for a protocol that does not pipeline.
+`readLoop` admits the first, then snapshots the state when the second starts
+and decides admission against the state at that moment, while `recvLoop`
+applies the first request's transition, runs its handler, and the handler
+replies. The model shows two interleavings a test must not assume away:
+the second request is refused while the handler has not run yet, and the
+second request is admitted when its snapshot is taken after the whole round
+trip. The defect is in the test, not in `protocol.go`: both outcomes follow
+from the admission rules. Holding the handler's reply until the test has
+read the refusal removes both.
+
+| Config | Handler | Result |
+| --- | --- | --- |
+| `EngineRoundTripVerdictEarlyBug` | replies at once; error read, count asserted | fails: error read before the handler ran |
+| `EngineRoundTripVerdictAdmittedBug` | replies at once | fails: second request admitted, no error ever |
+| `EngineRoundTripVerdict` | held until the error is read | passes, no deadlock |
+| `EngineRoundTripVerdictRefused` | held until the error is read | passes: always refused |
+
+```sh
+bin/tlc -config specs/engine/EngineRoundTripVerdictEarlyBug.cfg specs/engine/EngineRoundTripVerdict.tla
 ```
