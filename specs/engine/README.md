@@ -410,3 +410,24 @@ callback runs and goleak lists the goroutine.
 make engine-lifecycle
 ```
 
+
+## Slice 5: a message sent before Start (`EngineSendBeforeStart.tla`)
+
+Hazard A9, gOuroboros #3274 (`fix/protocol-send-before-start`).
+
+On main `Start` makes `sendQueueChan` and registration sets `muxerDoneChan`,
+both under `lifecycleMu`, while `enqueueMessage` reads both with no lock. A
+send before `Start` selects on a nil queue, which never becomes ready even
+after `Start` makes the queue. The fix makes the queue in `New` and reads the
+muxer's done channel under `lifecycleMu`.
+
+| Config | Behaviour | Result |
+| --- | --- | --- |
+| `EngineSendBeforeStartLostBug` | main, send before `Start` | **fails** `SentBeforeStartIsWritten`: the sender's context ends and the message is never written (`TestSendMessageBeforeStartIsQueued`: context deadline exceeded) |
+| `EngineSendBeforeStartRaceBug` | main, send during `Start` | **fails** `NoRacingRead` (`TestSendMessageDuringStartDoesNotRace` under `-race`) |
+| `EngineSendBeforeStart` | the fix, with or without a `Stop` | passes both |
+
+```sh
+scripts/run-model.sh specs/engine   # or one config:
+bin/tlc -config specs/engine/EngineSendBeforeStartLostBug.cfg specs/engine/EngineSendBeforeStart.tla
+```

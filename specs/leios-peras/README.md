@@ -236,6 +236,77 @@ identifiers that arrive or `MsgServerIdle`. `PerasVotesFixed.cfg` checks it:
 `ReferenceServer` and `ClientKnowsAwait` both describe the fixed code, and
 `PerasVotesFixedIdleProbesBug.cfg` shows the idle path is reached.
 
+## LeiosFetch range delivery (`LeiosFetchRangeDelivery.tla`)
+
+Hazard C8, gOuroboros #3232 (`fix/leiosfetch-range-delivery-leak`).
+
+### What the code does
+
+A block-range request gets several replies, the last one terminal. The
+receive loop hands each to the request slot (`deliverRange`), which queues it
+on the request's delivery; the delivery goroutine (`requestDelivery.run`)
+moves the queue into the caller's one-slot channel. The terminal reply clears
+the slot's waiter and frees the slot at once, while earlier replies may still
+be unread. A caller that leaves early calls `abandon(w)` (its context ended)
+or `release(w)` (the protocol ended); both act only while `w` is the live
+waiter.
+
+### The answers
+
+| Config | Behaviour | Result |
+| --- | --- | --- |
+| `LeiosFetchRangeDeliveryLeakBug` | main, the caller leaves through `abandon` after the terminal reply | **fails** `DeliveryEndsWhenCallerLeaves`: `run` holds a reply, blocked on the full channel |
+| `LeiosFetchRangeDeliveryLeakReleaseBug` | main, the protocol ends (`release`) after the terminal reply | **fails** the same way |
+| `LeiosFetchRangeDeliverySecondLeakBug` | main, with a second request on the freed slot | **fails** the same way |
+| `LeiosFetchRangeDelivery` | the fix: the slot keeps a finished range's delivery, keyed by its waiter, until its caller's `abandon` or `release` stops it | passes `DeliveryEndsWhenCallerLeaves`, `OwnDeliveryOnly` |
+| `LeiosFetchRangeDeliverySecond` | the fix, with a second request taking the freed slot | passes: a late `abandon`/`release` by the first caller stops only its own range, never the newer waiter |
+
+The counterexample is the Go test's: three replies queued, the terminal one
+frees the slot, the caller leaves, and the delivery goroutine stays blocked
+(`TestRangeDeliveryEndsWhenCallerLeavesAfterLastReply`, subtests `abandon` and
+`release`; goleak finds `run`). TLC's shortest trace leaves before reading any
+reply; the test reads one first, which changes nothing.
+
+## Peras client exchange lock and server await (`PerasClientOpMu.tla`)
+
+Hazards C13, C14, C15, gOuroboros #3276
+(`fix/perasvotes-op-lock-and-await-panic`).
+
+### What the code does
+
+Every client call holds one lock for its whole exchange; `Sync` holds it for
+its whole life and runs `VoteFunc` under it. On main the lock is a
+`sync.Mutex` (`opMu`). The fix makes it a one-slot channel taken in a select
+with the caller's context, and a call whose context carries the client's
+`VoteFunc` marker fails at once with `ErrCalledFromVoteFunc`. On the server,
+`AwaitObjectIDsFunc` ran on a bare goroutine; the fix starts it through
+`RunLoop`, which recovers a panic and puts the goroutine in `Stop`'s join.
+
+### The answers
+
+| Config | Behaviour | Result |
+| --- | --- | --- |
+| `PerasClientOpMuReentryBug` | C13, main: `VoteFunc` calls the client with its callback context | **fails** `VoteFuncCallReturns` (`TestVoteFuncCallingItsClientReturnsAtOnce`) |
+| `PerasClientOpMuReentryCancelBug` | C13 sibling, main: the call back's context ends | **fails** `VoteFuncCallReturns`: a mutex ignores the context |
+| `PerasClientOpMuDoneCtxBug` | C14, main: `Sync` holds the lock while the server withholds its answer; `Done` with an ended context | **fails** `CancelledDoneReturns` (`TestDoneHonoursContextWhileSyncRuns`) |
+| `PerasClientOpMuAwaitPanicBug` | C15, main: `AwaitObjectIDsFunc` panics on a bare goroutine | **fails** `NoProcessCrash` (`TestAwaitObjectIDsPanicIsContained` crashes the binary) |
+| `PerasClientOpMuAwaitUnjoinedBug` | C15 unjoined part (C11), main: `Stop` returns nil while the await goroutine runs | **fails** `StopJoinsAwait` |
+| `PerasClientOpMu` | the fix, own-context call back, `Done` caller, await that returns, panics or ignores its context | passes all five invariants |
+| `PerasClientOpMuAnswered` | the fix, server answering, call back on another context that ends | passes, including `EveryCallReturns` |
+| `PerasClientOpMuForeignBackgroundProbeBug` | probe, the fix: a call back on another context that never ends | **fails** `EveryCallReturns`: it waits for the `Sync` running it, as `Sync`'s doc says. Contract, not a defect |
+
+## The three servers' promoted methods (C9, C12, C20)
+
+The leios-fetch, leios-votes and leios-notify servers embedded the
+`*protocol.Protocol` they replace on restart, so a promoted method read it
+with no lock (gOuroboros #3273, `fix/leios-server-protocol-race`). Their
+restart is the same as keep-alive's (`StopForRestart`; install under
+`protocolMu`; `Start`), so `specs/keepalive` `KeepAliveLifecycle.tla`, which
+names all three in its header, covers it: `KeepAliveLifecycleReaderUnlockedBug`
+fails `NoRacingRead`, `KeepAliveLifecycleReader` passes. The join of their
+`RunLoop` goroutines (C11, C18, C21) is a separate change, modelled in
+`specs/engine` (`EngineLifecycleCtxRunLoopUnjoinedBug`).
+
 ## Spec, reference, and gOuroboros
 
 | Question | Specification / CIP | Reference | gOuroboros | Verdict |
@@ -315,4 +386,7 @@ for c in LeiosNotifyQuitRaceBug LeiosNotifyRogueCancelBug LeiosNotifyNoCancelBug
 for c in LeiosFetchAbandonFreesBug LeiosFetchProbesBug; do ../../bin/tlc -config $c.cfg LeiosFetch.tla; done
 for c in LeiosVotesCipClientBug LeiosVotesNoDrainBug LeiosVotesProbesBug; do ../../bin/tlc -config $c.cfg LeiosVotes.tla; done
 for c in PerasVotesReferenceServerBug PerasVotesEmptyServerBug PerasVotesProbesBug PerasVotesFixedIdleProbesBug; do ../../bin/tlc -config $c.cfg PerasVotes.tla; done
+# Range delivery (C8) and the Peras exchange lock (C13-C15), both ways:
+for c in LeiosFetchRangeDelivery*.cfg; do ../../bin/tlc -config $c LeiosFetchRangeDelivery.tla; done
+for c in PerasClientOpMu*.cfg; do ../../bin/tlc -config $c PerasClientOpMu.tla; done
 ```

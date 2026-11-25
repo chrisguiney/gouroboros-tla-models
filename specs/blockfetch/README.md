@@ -347,6 +347,26 @@ pipeline context), `failRequest` from `handleBlock` (a resolve on `recvLoop`
 under its own `deliveryMu`, the same shape as `BlockFunc`), the 250 ms
 `MsgClientDone` write (one non-blocking step: it is bounded), and the server.
 
+## Slice 4: a fetch during a restart (`BlockFetchClientReader.tla`)
+
+Hazard B4, gOuroboros #3264 (`fix/blockfetch-client-protocol-race`).
+
+`GetBlockRange` and `GetBlock` logged through the embedded `c.Protocol` and
+read `c.DoneChan()` with no lock, before `sendRequestRange` read the
+instance under `protocolMu` and sent on it. The fix logs through
+`ProtocolInstance()` and watches `req.protocol.DoneChan()`, the instance the
+request went out on. Initial state as in the Go test: the client was started
+and stopped once, and `Start` installs a second instance while the fetch runs.
+
+| Config | Behaviour | Result |
+| --- | --- | --- |
+| `BlockFetchClientReaderUnlockedBug` | main | **fails** `NoRacingRead`: the fetch reads the field while `Start` writes it (`TestFetchDuringRestartReadsProtocolUnderLock` under `-race`) |
+| `BlockFetchClientReaderOtherInstanceBug` | main | **fails** `WatchesOwnInstance`: the done channel read before sending is the stopped instance's, the request goes out on the new one, and the fetch fails at once while its request is live |
+| `BlockFetchClientReader` | the fix | passes `NoRacingRead`, `WatchesOwnInstance`, `FetchReturns` |
+
+The second failure is the one the fix's comment names ("a concurrent Start
+may already have installed a newer one"); the Go test checks only the race.
+
 ## Spec, reference, and gOuroboros
 
 | Question | Specification | Reference | gOuroboros | Verdict |
