@@ -728,7 +728,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **What differs.** Reference: the hard-fork combinator's `QueryAnytime` (`GetEraStart`) and Byron's own queries are decoded; the era history (`GetInterpreter` result) is written as an indefinite-length list; UTxO address and input filters keep tag 258 from Conway. gOuroboros: `BlockQuery` knows only `QueryIfCurrent` and the hard-fork queries, so `QueryAnytime` and Byron queries fail to decode; decoded UTxO filters are plain slices and re-encode without the tag; the era history reply has no list encoder (each era summary re-encodes byte for byte).
 - **Spec.** Silent
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/HardFork/Combinator/Ledger/Query.hs` 106-108 (`QueryAnytime`); goldens `Query_AnytimeByron`, `Query_AnytimeShelley`, `Query_Byron`, `Result_HardFork`
-- **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/queries.go` 175-199; pinned by `reference_golden_test.go` on `test/localstatequery-reference` `925d1263`
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/queries.go` 175-199; pinned by `reference_golden_test.go` on `test/localstatequery-reference` `a83f7d2b`
 - **Verdict.** does not conform (decode); conforms (re-encode: both forms decode)
 - **Status.** Recorded
 
