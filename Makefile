@@ -156,7 +156,7 @@ consensus-genesis: ## Check the Genesis density model (GDD, LoE, GenesisSelector
 ledger-byron: ## Check the Byron ledger model (UTxO, heavyweight delegation)
 	@scripts/run-model.sh specs/ledger-byron
 
-ledger-leios: ## Check the Leios ledger model (certification, EB application, committee)
+ledger-leios: ## Check the Leios ledger model (certification, EB application, committee, voting)
 	@scripts/run-model.sh specs/ledger-leios
 
 consensus-nonce: ## Check the epoch nonce model (evolving, candidate, tick)

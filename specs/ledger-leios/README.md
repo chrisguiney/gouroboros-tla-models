@@ -9,12 +9,14 @@ carries no transactions of its own.
 
 The network side (LeiosNotify, LeiosFetch, LeiosVotes) is in
 [Model `leios-peras`](../leios-peras/README.md). This model covers what happens
-once the blocks have arrived. It has two parts:
+once the blocks have arrived. It has three parts:
 
 - `LeiosLedger.tla`: announcement, certification, EB application and
   rollback across a short chain.
 - `LeiosCommittee.tla`: whether one certificate verifies against the
   committee.
+- `LeiosVoting.tla`: seating the committee, collecting votes and forming
+  certificates.
 
 Leios is a draft. Where the CIP, the reference ledger, and the prototype
 node disagree, the model records each and says which one gOuroboros
@@ -199,6 +201,149 @@ hand over the seated committee, not `Nc` padded seats
 | `LeiosCommitteeCountPaddingBug` | `AcceptAgrees` fails |
 | `LeiosCommitteeProbeBug` | some certificate is accepted |
 
+## Part 3: committee selection and vote aggregation (`LeiosVoting.tla`)
+
+### What the reference does, and which reference
+
+CIP-0164 at `db48da14bff1` seats the committee by **stake-based
+truncation**: the top `Nc` pools by active stake, ties by ascending pool
+id, every pool if fewer [C1][C2]. The persistent/non-persistent split
+(wFA^LS: persistent voters plus per-EB sortition) appeared in earlier
+drafts and is now only a recorded alternative ("Design Decisions",
+2797-2869). ouroboros-consensus `ec239d57f618` still ships
+`Ouroboros/Consensus/Committee/WFALS.hs`, but only Peras uses it
+(`Peras/Vote/V1.hs`, `Peras/Cert/V1.hs`, `Peras/Voting/V1.hs`); Leios
+takes its committee from cardano-ledger's `selectLeiosCommittee`
+(truncation) through the ledger view, and votes and certificates from
+cardano-base `cardano-crypto-leios`. So there is no persistent/
+non-persistent split to model for Leios: a reference for it exists, but
+not on the Leios path, and the CIP no longer specifies it.
+
+The reference pieces, all at the revisions `ec239d57f618` builds:
+
+- Seating: cardano-ledger `1210d37f` (identical at `b21c518e`, which
+  `ec239d57f618` pins) `State/Leios.hs` 93-121. Weight is the pool's stake
+  over the total active stake (`State/SnapShots.hs` 228). A key is offered
+  only while honoured: `epoch < registeredIn + maxKeyAge`, with
+  `maxKeyAge = ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2`
+  (`Dijkstra/Rules/Snap.hs` 157-180); a key whose proof of possession
+  fails is seated keyless (cardano-base `242f1ebde40b`, the
+  `cardano-crypto-leios` 0.3.0.0 that `ec239d57f618`'s CHaP index
+  resolves, `Leios.hs` 156-170).
+- Votes: `Leios/VoteState.hs` 224-399. A vote of a seat the node already
+  holds a vote of, in that election slot, is dropped unverified
+  (`AlreadyKnown`), whichever announcement it is for: duplicates and
+  equivocations alike. Then `validateVote`: `SeatNotResolvable`,
+  `SeatHasNoKey`, `BadSignature`. A kept vote adds its seat's weight to its
+  announcement's tally; the first time a tally reaches the quorum
+  (`quorum <= tally`) the votes for that announcement are aggregated
+  (`aggregateLeiosCert`), once.
+- Verification: `Leios.hs` 291-342 `verifyLeiosCert`.
+
+gOuroboros does neither seating nor collection: `DijkstraLeiosCertificateState`
+hands it the seated committee, and `VerifyDijkstraCertificateForMessage`
+verifies a certificate (Part 2).
+
+### What the model contains
+
+The committee is chosen once, in `Init`, by ranking each pool by how many
+pools beat it (more stake, or equal stake and a smaller id). Four
+scenarios: `ties` (stakes 4,2,2,2,1, `Nc` 3, three pools tied at the seat
+boundary, a badly proven key in seat 2, quorum 6/11 reachable exactly),
+`wide` (four keyed seats), `few` (two pools, three seats, one keyless) and
+`aged` (an aged-out key in seat 2). One election slot with two
+announcements, `a` and `b` (an equivocating pair). A vote is a voter id
+(including ids past the committee), an announcement and a good or bad
+signature; votes arrive in any order, any number of times. `GoExactNc`
+selects gOuroboros main's committee-size check (DRIFT L9);
+`CallerDropsAgedKeys` says whether the caller withholds aged-out keys.
+
+### The answers
+
+| Invariant | Meaning | Holds |
+| --- | --- | --- |
+| `CommitteeSize`, `SeatOrder`, `TopStake`, `OnlyHonouredKeys` | the seating matches the CIP's rule | yes |
+| `OneVotePerSeat` | one kept vote per seat per election | yes |
+| `OnlyValidVotes` | kept votes are from keyed seats, well signed | yes |
+| `TallyMatches` | each tally is the weight of its kept votes | yes |
+| `CertAtQuorum` | a tally at quorum has its certificate | yes |
+| `CertsVerify` | every formed certificate passes `verifyLeiosCert` | yes |
+| `AtMostOneCert` | with tau > 1/2, at most one announcement per election is certified | yes |
+| `GoAcceptsCerts` | gOuroboros accepts every formed certificate | yes, except with fewer pools than `Nc` on main (L9) |
+| `GoAgrees` | over every signer set, gOuroboros accepts exactly what the reference does | yes if the caller withholds aged-out keys; **no** otherwise (L21) |
+
+Two rules are invisible to a certificate and so to gOuroboros: one vote per
+seat per election (break it and both announcements of an election are
+certified, each certificate valid on its own), and key age (an aged-out key
+verifies like any other). Both are the caller's.
+
+### Checking the checks
+
+| Config | Mutation | Fails |
+| --- | --- | --- |
+| `LeiosVotingNoTruncationBug` | every pool seated | `CommitteeSize` |
+| `LeiosVotingTieBreakOrderBug` | ties by descending id | `SeatOrder` |
+| `LeiosVotingTieBreakTopBug` | the same | `TopStake` |
+| `LeiosVotingHonourAgedKeyBug` | aged-out key stays keyed | `OnlyHonouredKeys` |
+| `LeiosVotingCountEquivocationBug` | a seat's vote for the other announcement kept | `OneVotePerSeat` |
+| `LeiosVotingTwoCertsBug` | the same | `AtMostOneCert` |
+| `LeiosVotingCountDuplicateBug` | a repeated vote counted again | `TallyMatches` |
+| `LeiosVotingDuplicateCertBug` | the same | `CertsVerify` (certificate below quorum) |
+| `LeiosVotingAcceptKeylessBug` | keyless seat's vote kept | `OnlyValidVotes` |
+| `LeiosVotingKeylessCertBug` | the same | `CertsVerify` |
+| `LeiosVotingAcceptBadSigBug` | signature not checked | `CertsVerify` |
+| `LeiosVotingAggregateAllBug` | certificate aggregates the other announcement's votes | `CertsVerify` |
+| `LeiosVotingStrictTallyBug` | aggregator waits for more than quorum | `CertAtQuorum` |
+| `LeiosVotingStrictQuorumBug` | gOuroboros demands more than quorum | `GoAcceptsCerts` |
+| `LeiosVotingGoExactNcBug` | gOuroboros main, fewer pools than `Nc` (L9) | `GoAcceptsCerts` |
+| `LeiosVotingAgedKeyCallerBug` | caller hands over an aged-out key (L21) | `GoAgrees` |
+
+Probes (expected to be violated): `LeiosVotingProbeCertBug`,
+`...ProbeEquivocationBug`, `...ProbeDuplicateBug`, `...ProbeKeylessBug`,
+`...ProbeUnresolvableBug`, `...ProbeBadSignatureBug`, `...ProbeSplitBug`
+(both announcements hold votes).
+
+State counts: `LeiosVoting` 264, `LeiosVotingWide` 690, `LeiosVotingFew`
+72, `LeiosVotingAged` 164 distinct states.
+
+### Go tests (gOuroboros)
+
+Branch `test/leios-voting-model` (`eb73b151`, tests only),
+`ledger/leios/voting_test.go`: the four scenarios with real BLS keys.
+
+- `TestLeiosVotingCommitteeSeating`: the test's seating against seat lists
+  read off the CIP by hand.
+- `TestLeiosVotingReferenceCertificates`: walks every state of the
+  reference vote collection (`ties` 9, `wide` 87, `few` 3, `aged` 11
+  states; votes from every voter id, both announcements, good and bad
+  signatures) and verifies every certificate formed.
+- `TestLeiosVotingMutatedAggregation`: each dropped check
+  (`CountDuplicate` 2,304 states, `AcceptKeyless` on `ties` and `few`,
+  `AcceptBadSig`, `AggregateAllSeats`), gOuroboros against
+  `verifyLeiosCert` on every certificate formed, and at least one rejected.
+- `TestLeiosVotingEquivocationIsTheCallers`: counting equivocations
+  certifies both announcements; gOuroboros accepts both.
+- `TestLeiosVotingEverySignerSet`: every signer set, aged keys withheld
+  (agrees) and handed over (disagrees only on `aged`: L21).
+- `TestLeiosVotingKeylessBitsDoNotCount`: keyless seat bits beside keyed
+  signatures are refused.
+- `TestCertificateQuorumBoundary`: 13 threshold vectors computed from
+  `verifyLeiosCert`'s rule (exact, one below, odd totals, tau 0 and 1, 2/3
+  of 2^64-1).
+
+Mutations of `certificate.go` killed: quorum `<` to `<=` (reference,
+mutated and boundary tests), keyless signer counted without its key
+(`KeylessBitsDoNotCount` on `few` and `aged`; on `ties` the keyless seat
+has a badly proven key and fails its proof first), aggregate signature
+unchecked (`AcceptBadSig`, `AggregateAllSeats`), invalid proof ignored
+(`AcceptKeyless` on `ties`, `EverySignerSet`).
+
+No BLS aggregation golden vectors exist at the pinned revisions:
+`cardano-crypto-leios`'s tests are properties over generated keys, and
+cardano-crypto-class's `bls12-381-test-vectors` cover the augmented
+scheme, not proof-of-possession aggregation. The rc-2026w41 certificate
+(Part 2) remains the only captured aggregate.
+
 ## Go tests and mutations (gOuroboros)
 
 Branch `test/leios-ledger-model` (tests only):
@@ -241,6 +386,13 @@ got 1") and pass after it.
 | Bitfield length | `ceil(N/8)`, N the committee | `ceil(n/8)`, n the committee | `ceil(Nc/8)` (same defect) |
 | Padding bits | not specified | ignored | ignored |
 | Keyless signer | ineligible | `SignerWithoutKey` (invalid proofs seated keyless) | `ErrKeylessSigner`; invalid proof `ErrInvalidProof` (both reject) |
+| Seating (Part 3; CIP `db48da14bff1`) | top `Nc` by active stake, ties by ascending pool id | same (`selectLeiosCommittee`) | caller's |
+| Persistent/non-persistent voters | dropped: wFA^LS is a recorded alternative only | wFA^LS exists in consensus `ec239d57f618` but only Peras uses it | none |
+| Key age | keys rotate with a time-to-live | keyless after `ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2` epochs | caller's; not in `DijkstraLeiosCertificateState`'s contract (L21) |
+| Vote weight | the pool's active stake | stake / total active stake | stake, compared with the total by cross-multiplying (same) |
+| Quorum | prose "exceeds"; formula `>=` | `>=` | `>=` |
+| One vote per seat per election | "at most one vote per committee member per slot" forwarded | first vote kept, later ones dropped unverified, any announcement | caller's (a certificate cannot show it) |
+| Vote shape | `[announcing_rb_hash, voter_id, signature]` | same, `voter_id` a `Word16` | `LeiosPrototypeVote` same (`uint64` id); `LeiosVote` (LeiosFetch) `[slot, eb_hash, voter_id, signature]` (L22) |
 
 ## Sources
 
@@ -276,11 +428,31 @@ got 1") and pass after it.
   `ledger/verify_block.go` 155-454, `ledger/leios/certificate.go`
   102-235, `ledger/common/leios_endorser_block.go` 121-138.
 
+- For Part 3: CIP-0164 at cardano-foundation/CIPs `db48da14bff1`,
+  `CIP-0164/README.md`: Step 4 (374-391), Key Registration and Rotation
+  (800-849), Committee Structure (851-887), Vote Structure (889-909),
+  Certificate Validation (911-930), Voting & Certification (1074-1103),
+  Committee Selection (1146-1158), Design Decisions (2797-2869), CDDL
+  (3397-3440). ouroboros-consensus `ec239d57f618`
+  `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/Leios/VoteState.hs`
+  224-399, `.../MiniProtocol/LeiosNotify/Client/State.hs` 397-416
+  (`InvalidVoteReason`, `AcceptedVote`), `.../Leios/Types.hs` 254-278 (vote
+  encoding), `.../Committee/WFALS.hs` (Peras only); `cabal.project` pins
+  cardano-ledger `b21c518e` and CHaP index 2026-10-22 (cardano-crypto-leios
+  0.3.0.0 = cardano-base `242f1ebde40b`). cardano-base `242f1ebde40b`
+  `cardano-crypto-leios/src/Cardano/Crypto/Leios.hs` 156-170, 229-265,
+  291-342. cardano-ledger `1210d37f` `State/Leios.hs` 93-121,
+  `State/SnapShots.hs` 228 and 453-466, `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/Snap.hs`
+  157-180. gOuroboros `ebc63eab` `ledger/leios/certificate.go` 102-235,
+  `ledger/common/state.go` 193-217, `ledger/common/leios.go` 71-90.
+
 ## Not modelled
 
-- The voting protocol and vote aggregation (Model `leios-peras` covers the wire side).
-- Committee selection itself (ranking, ties, key age): the caller supplies
-  the committee; only its size and keys matter to verification.
+- Vote timing: voting windows, late votes, pruning and the deadline (the
+  wire side is in Model `leios-peras`); `LeiosVoting.tla` has one open
+  election.
+- Which announcements a node relays (at most two per election, OCIN), and
+  the reference's thread race between recording a vote and aggregating.
 - BLS cryptography: a certificate's signature is valid exactly when it
   aggregates the signers' keys. The Go table test exercises the real
   curve.
@@ -303,4 +475,4 @@ make ledger-leios
 cd specs/ledger-leios && ../../bin/tlc -config LeiosLedgerGo.cfg LeiosLedger.tla
 ```
 
-The whole directory (29 configs) runs in about 15 seconds.
+The whole directory (56 configs) runs in about 40 seconds.
