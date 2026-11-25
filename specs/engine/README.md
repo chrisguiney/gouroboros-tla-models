@@ -339,8 +339,20 @@ Three-way comparison:
 | `EngineLifecycleCtxRunLoopUnjoinedBug.cfg` (mutation: `rl` not joined) | | `JoinedAfterCtxStop` violated |
 | `EngineLifecycleCtxNoMarkerBug.cfg`, `CtxRunLoopNoMarkerBug.cfg` (mutation: a callback's `Stop` carries no marker) | | deadlock: the handler, or the `RunLoop` callback, waits for its own goroutine |
 | `EngineLifecycleCtxProbeTimeoutBug.cfg` | | probe reached: `Stop` returns `ctx.Err()` while a `RunLoop` callback is held |
+| `EngineLifecycleCtxRestartFromCallbackBug.cfg` (adopted API, `RestartCarry = "wait"`) | | deadlock: `MessageReceivedFunc` calling `StopForRestart` with its own marker still waits on its own `readDoneChan` |
+| `EngineLifecycleCtxRestartDeferred.cfg` (adopted API, `RestartCarry = "deferred"`: the role is suspended at once with its carry pending, `readLoop` hands the carry over as it exits, and the next instance's `TakeCarriedIngress` waits for it; `MessageReceivedFunc` may call `StopForRestart`) | 158,218 | passes all six invariants, with `JoinedAfterCtxStop`, no deadlock |
+| `EngineLifecycleCtxRestartDeferredNoCarryWaitBug.cfg` (mutation: the next instance starts without waiting for the carry) | | `CarryCompleteBeforeNewInstance` violated |
 
 ### What slice 4 found
+
+- **`StopForRestart` from `MessageReceivedFunc` is fixed by deferring the
+  carry, not by skipping the wait.** Skipping the `readDoneChan` wait for any
+  caller carrying the instance's marker would also skip it for the `MsgDone`
+  handler on `recvLoop`, whose next instance would then register before the
+  role is suspended and read the queue ahead of the carried bytes. Under
+  `RestartCarry = "deferred"` no stop waits on `readLoop`, and the wait
+  moves to the next instance's `TakeCarriedIngress`, which no `readLoop`
+  callback runs.
 
 - **Inventory item A7 is overturned for every call site.** `StopForRestart`
   waits on `readDoneChan` with no other case, but the servers call it only
