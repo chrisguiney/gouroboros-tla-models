@@ -1,22 +1,22 @@
 package	function	class	item
 cbor	AnnotateAddresses	gap	Diagnostics and decode errors
-cbor	ArrayHeaderSize	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	ArrayInfo	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	CheckForDuplicateCBORMembers	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	ConstructorDecoder.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	ConstructorDecoder.ParsedFields	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	ConstructorDecoder.UnmarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	ConstructorEncoder.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	DecodeBool	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	DecodeById	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	ArrayHeaderSize	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	ArrayInfo	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	CheckForDuplicateCBORMembers	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	ConstructorDecoder.MarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	ConstructorDecoder.ParsedFields	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	ConstructorDecoder.UnmarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	ConstructorEncoder.MarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	DecodeBool	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeById	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	DecodeError.Error	gap	Diagnostics and decode errors
 cbor	DecodeError.Unwrap	gap	Diagnostics and decode errors
 cbor	DecodeError.WithDiagnostic	gap	Diagnostics and decode errors
 cbor	DecodeGeneric	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	DecodeIdFromList	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeIdFromList	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	DecodeStoreCbor.SetCbor	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
 cbor	DecodeStoreCbor.ShareWithinParent	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
-cbor	DecodeUntrustedExact	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeUntrustedExact	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	DiagnoseBlock	gap	Diagnostics and decode errors
 cbor	DiagnoseTransaction	gap	Diagnostics and decode errors
 cbor	DiagnosticNode.FormatDiagnostic	gap	Diagnostics and decode errors
@@ -24,51 +24,51 @@ cbor	DiagnosticNode.FormatDiagnosticPretty	gap	Diagnostics and decode errors
 cbor	DiagnosticNode.FormatHexDump	gap	Diagnostics and decode errors
 cbor	DiagnosticNode.GetNodeAtOffset	gap	Diagnostics and decode errors
 cbor	DiagnosticNode.GetPathToOffset	gap	Diagnostics and decode errors
-cbor	Encode	gap	Encode helpers and indefinite-length wrappers
+cbor	Encode	vectors	Encode helpers and indefinite-length wrappers
 cbor	EncodeGeneric	gap	Encode helpers and indefinite-length wrappers
 cbor	FormatBlockDiagnostic	gap	Diagnostics and decode errors
 cbor	FormatNativeScript	gap	Diagnostics and decode errors
 cbor	FormatPlutusData	gap	Diagnostics and decode errors
 cbor	FormatTransactionDiagnostic	gap	Diagnostics and decode errors
-cbor	IndefLengthByteString.MarshalCBOR	gap	Encode helpers and indefinite-length wrappers
-cbor	IndefLengthList.MarshalCBOR	gap	Encode helpers and indefinite-length wrappers
-cbor	IndefLengthMap.MarshalCBOR	gap	Encode helpers and indefinite-length wrappers
-cbor	IsEmptyCollection	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	LazyValue.Cbor	gap	Generic Value/LazyValue decode and JSON
-cbor	LazyValue.Decode	gap	Generic Value/LazyValue decode and JSON
-cbor	LazyValue.MarshalCBOR	gap	Generic Value/LazyValue decode and JSON
+cbor	IndefLengthByteString.MarshalCBOR	vectors	Encode helpers and indefinite-length wrappers
+cbor	IndefLengthList.MarshalCBOR	vectors	Encode helpers and indefinite-length wrappers
+cbor	IndefLengthMap.MarshalCBOR	vectors	Encode helpers and indefinite-length wrappers
+cbor	IsEmptyCollection	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	LazyValue.Cbor	vectors	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.Decode	vectors	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.MarshalCBOR	vectors	Generic Value/LazyValue decode and JSON
 cbor	LazyValue.MarshalJSON	gap	Generic Value/LazyValue decode and JSON
-cbor	LazyValue.UnmarshalCBOR	gap	Generic Value/LazyValue decode and JSON
-cbor	LazyValue.Value	gap	Generic Value/LazyValue decode and JSON
-cbor	ListLength	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	MapInfo	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	LazyValue.UnmarshalCBOR	vectors	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.Value	vectors	Generic Value/LazyValue decode and JSON
+cbor	ListLength	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	MapInfo	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	NewDecodeError	gap	Diagnostics and decode errors
 cbor	PlutusConstrFromTag	gap	Diagnostics and decode errors
-cbor	Rat.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	Rat.UnmarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	Rat.UnmarshalJSON	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	Rat.MarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	Rat.UnmarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	Rat.UnmarshalJSON	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
 cbor	RegisterAddressFormatter	gap	Diagnostics and decode errors
-cbor	SetType.CheckForDuplicates	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	SetType.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	SetType.MarshalJSON	gap	Tagged types: rational (tag 30), set (tag 258), constructors
-cbor	SetType.UnmarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	SetType.CheckForDuplicates	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	SetType.MarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	SetType.MarshalJSON	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	SetType.UnmarshalCBOR	vectors	Tagged types: rational (tag 30), set (tag 258), constructors
 cbor	SkipTags	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.Advance	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.Advance	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	StreamDecoder.DecodeAllDiagnosticWithLimits	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.DecodeArrayHeader	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.DecodeArrayItems	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeArrayHeader	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeArrayItems	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	StreamDecoder.DecodeDiagnosticWithLimits	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.Decode	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.DecodeMapHeader	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.DecodeRaw	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.RawBytes	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.Skip	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	StreamDecoder.SkipN	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	ValidateExact	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	ValidateMapFields	gap	Strict/untrusted decode, stream decoder and shape validators
-cbor	ValidateUntrustedExact	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.Decode	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeMapHeader	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeRaw	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.RawBytes	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.Skip	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.SkipN	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	ValidateExact	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	ValidateMapFields	vectors	Strict/untrusted decode, stream decoder and shape validators
+cbor	ValidateUntrustedExact	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	Value.MarshalJSON	gap	Generic Value/LazyValue decode and JSON
-cbor	Value.UnmarshalCBOR	gap	Generic Value/LazyValue decode and JSON
+cbor	Value.UnmarshalCBOR	vectors	Generic Value/LazyValue decode and JSON
 cbor	ViewWithin	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
 .	Connection.Close	modelled	Connection setup/close/dial
 connection	ConnectionId.String	gap	ConnectionId printing
@@ -465,7 +465,7 @@ ledger/common	CalculateOptimalPoolCount	gap	Reward arithmetic (ada pots, pool re
 ledger/common	CalculatePoolSaturation	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
 ledger/common	CalculateRewards	modelled	Reward update arithmetic
 ledger/common	CalculateRollingNonce	modelled	Nonce combination, rolling and epoch nonce
-ledger/common	CertificateLogicalKey	gap	Duplicate certificate/pool-owner detection
+ledger/common	CertificateLogicalKey	vectors	Duplicate certificate/pool-owner detection
 ledger/common	CertificateWrapper.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	CheckAccountAddress	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	CheckAddressFullyConsumed	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
@@ -565,9 +565,9 @@ ledger/common	MoveInstantaneousRewardsCertificate.Utxorpc	gap	UTxO RPC conversio
 ledger/common	MultiAsset.Add	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	MultiAsset.Asset	gap	MultiAsset accessors, era registry, AddInt64Checked
 ledger/common	MultiAsset.Assets	gap	MultiAsset accessors, era registry, AddInt64Checked
-ledger/common	MultiAsset.CheckForDuplicateKeys	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
-ledger/common	MultiAsset.CheckForEmptyMultiAsset	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
-ledger/common	MultiAsset.CheckForZeroAssets	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.CheckForDuplicateKeys	vectors	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.CheckForEmptyMultiAsset	vectors	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.CheckForZeroAssets	vectors	MultiAsset well-formedness (zero/negative/empty/duplicate)
 ledger/common	MultiAsset.Compare	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	MultiAsset.EncodedSize	gap	Output CBOR size and value size (min-UTxO, max value size)
 ledger/common	MultiAsset.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
@@ -578,8 +578,8 @@ ledger/common	MultiAsset.String	gap	JSON/text/bech32 codecs (incl. genesis pool 
 ledger/common	MultiAsset.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	MultiAsset.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	MultiAsset.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	MultiAsset.ValidateMintQuantities	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
-ledger/common	MultiAsset.ValidateOutputQuantities	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.ValidateMintQuantities	vectors	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.ValidateOutputQuantities	vectors	MultiAsset well-formedness (zero/negative/empty/duplicate)
 ledger/common	MustUtxoValidationRulesFromDescriptors	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	NativeScript.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	NativeScriptPubkey.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
@@ -634,14 +634,14 @@ ledger/common	PoolMetadata.Utxorpc	gap	UTxO RPC conversions
 ledger/common	PoolOwnersWitnessRequired	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	PoolRegistrationCertificate.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	PoolRegistrationCertificate.MarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	PoolRegistrationCertificate.RewardAccountCredential	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	PoolRegistrationCertificate.SetCbor	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	PoolRegistrationCertificate.SetRewardAccountCredential	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRegistrationCertificate.RewardAccountCredential	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRegistrationCertificate.SetCbor	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRegistrationCertificate.SetRewardAccountCredential	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	PoolRegistrationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	PoolRegistrationCertificate.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	PoolRegistrationCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	PoolRegistrationDepositDue	modelled	Pool deposit due and stake deposit refund
-ledger/common	PoolRelayIpv6WireOrder	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRelayIpv6WireOrder	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	PoolRelay.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	PoolRelay.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	PoolRelay.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
@@ -774,13 +774,13 @@ ledger/common	ValidateAuxiliaryDataScriptsWellFormed	vectors	Script well-formedn
 ledger/common	ValidateBlockBodyHash	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
 ledger/common	ValidateBootstrapWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	ValidateCBORArrayLength	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
-ledger/common	ValidateCertificateSet	gap	Duplicate certificate/pool-owner detection
-ledger/common	ValidateClassicCostModelUpdate	gap	Protocol parameter update domain checks (cost models, intervals, well-formedness)
+ledger/common	ValidateCertificateSet	vectors	Duplicate certificate/pool-owner detection
+ledger/common	ValidateClassicCostModelUpdate	vectors	Protocol parameter update domain checks (cost models, intervals, well-formedness)
 ledger/common	ValidateClassicProtocolParameterUpdates	modelled	MIR genesis quorum and classic PPUP rules
 ledger/common	ValidateClassicProtocolParameterUpdateWitnesses	modelled	MIR genesis quorum and classic PPUP rules
 ledger/common	ValidateCollateralKeyLocked	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	ValidateCollateralVKeyWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
-ledger/common	ValidateCostModelLanguageIDs	gap	Bounded rational / cost model language id validation by protocol version
+ledger/common	ValidateCostModelLanguageIDs	vectors	Bounded rational / cost model language id validation by protocol version
 ledger/common	ValidateDefiniteCBORArrayLength	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	ValidateExactExtraneousRedeemers	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	ValidateExtraneousRedeemers	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
@@ -792,22 +792,22 @@ ledger/common	ValidateMapFields	vectors	Ledger CBOR codecs (certificates, values
 ledger/common	ValidateMIRGenesisQuorum	modelled	MIR genesis quorum and classic PPUP rules
 ledger/common	ValidateNativeScriptConstructors	vectors	Script well-formedness and native constructor support
 ledger/common	ValidateNativeScriptOutputConstructor	vectors	Script well-formedness and native constructor support
-ledger/common	ValidateNonNegativeBoundedRatArrayCBORForVersion	gap	Bounded rational / cost model language id validation by protocol version
-ledger/common	ValidateNonNegativeBoundedRatCBORForVersion	gap	Bounded rational / cost model language id validation by protocol version
-ledger/common	ValidateNonNegativeInterval	gap	Protocol parameter update domain checks (cost models, intervals, well-formedness)
+ledger/common	ValidateNonNegativeBoundedRatArrayCBORForVersion	vectors	Bounded rational / cost model language id validation by protocol version
+ledger/common	ValidateNonNegativeBoundedRatCBORForVersion	vectors	Bounded rational / cost model language id validation by protocol version
+ledger/common	ValidateNonNegativeInterval	vectors	Protocol parameter update domain checks (cost models, intervals, well-formedness)
 ledger/common	ValidateNullOrFixedLengthByteStringCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	ValidateOutsideForecast	gap	Outside-forecast rule
 ledger/common	ValidatePlutusScriptResult	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	ValidatePlutusScriptsWellFormed	vectors	Script well-formedness and native constructor support
-ledger/common	ValidatePoolMargin	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	ValidatePoolMetadataForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidatePoolMargin	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidatePoolMetadataForProtocolVersion	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	ValidatePoolPledge	modelled	Reward update arithmetic
-ledger/common	ValidatePoolRegistrationOwners	gap	Duplicate certificate/pool-owner detection
-ledger/common	ValidatePoolRelaysForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	ValidatePreConwayCertificateTypes	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	ValidateProtocolParameterUpdateDomains	gap	Protocol parameter update domain checks (cost models, intervals, well-formedness)
+ledger/common	ValidatePoolRegistrationOwners	vectors	Duplicate certificate/pool-owner detection
+ledger/common	ValidatePoolRelaysForProtocolVersion	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidatePreConwayCertificateTypes	vectors	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidateProtocolParameterUpdateDomains	vectors	Protocol parameter update domain checks (cost models, intervals, well-formedness)
 ledger/common	ValidateRedeemerAndScriptWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
-ledger/common	ValidateRedeemerTagLimit	gap	Redeemer tag limit per era
+ledger/common	ValidateRedeemerTagLimit	vectors	Redeemer tag limit per era
 ledger/common	ValidateRequiredSpendingDatums	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	ValidateRequiredSpendingDatumsWithAvailableScripts	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	ValidateRequiredVKeyWitnessesWithPoolOwners	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
