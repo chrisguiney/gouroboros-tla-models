@@ -37,7 +37,7 @@ cbor	IsEmptyCollection	vectors	Strict/untrusted decode, stream decoder and shape
 cbor	LazyValue.Cbor	vectors	Generic Value/LazyValue decode and JSON
 cbor	LazyValue.Decode	vectors	Generic Value/LazyValue decode and JSON
 cbor	LazyValue.MarshalCBOR	vectors	Generic Value/LazyValue decode and JSON
-cbor	LazyValue.MarshalJSON	gap	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.MarshalJSON	vectors	Generic Value/LazyValue decode and JSON
 cbor	LazyValue.UnmarshalCBOR	vectors	Generic Value/LazyValue decode and JSON
 cbor	LazyValue.Value	vectors	Generic Value/LazyValue decode and JSON
 cbor	ListLength	vectors	Strict/untrusted decode, stream decoder and shape validators
@@ -67,7 +67,7 @@ cbor	StreamDecoder.SkipN	vectors	Strict/untrusted decode, stream decoder and sha
 cbor	ValidateExact	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	ValidateMapFields	vectors	Strict/untrusted decode, stream decoder and shape validators
 cbor	ValidateUntrustedExact	vectors	Strict/untrusted decode, stream decoder and shape validators
-cbor	Value.MarshalJSON	gap	Generic Value/LazyValue decode and JSON
+cbor	Value.MarshalJSON	vectors	Generic Value/LazyValue decode and JSON
 cbor	Value.UnmarshalCBOR	vectors	Generic Value/LazyValue decode and JSON
 cbor	ViewWithin	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
 .	Connection.Close	modelled	Connection setup/close/dial
@@ -523,8 +523,8 @@ ledger/common	ExUnits.UnmarshalCBOR	vectors	Protocol parameter CBOR codecs (ExUn
 ledger/common	FirstInvalidNativeScriptIn	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	FirstInvalidNativeScript	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
 ledger/common	FuturePoolParametersStateFor	modelled	BlockLedgerState account/pool fold and queries
-ledger/common	GenesisDelegationFromCertificate	gap	Genesis delegation scheduling within a block
-ledger/common	GenesisDelegationsFor	gap	Genesis delegation scheduling within a block
+ledger/common	GenesisDelegationFromCertificate	vectors	Genesis delegation scheduling within a block
+ledger/common	GenesisDelegationsFor	vectors	Genesis delegation scheduling within a block
 ledger/common	GenesisKeyDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	GovActionId.MarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	GovActionId.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
@@ -666,7 +666,7 @@ ledger/common	ResignCommitteeColdCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	ResolveInputUtxo	modelled	ResolveInputUtxo (input existence)
 ledger/common	RewardService.CalculateEpochRewards	modelled	Reward update arithmetic
 ledger/common	RewardService.ValidateRewardDistribution	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
-ledger/common	ScheduleGenesisDelegation	gap	Genesis delegation scheduling within a block
+ledger/common	ScheduleGenesisDelegation	vectors	Genesis delegation scheduling within a block
 ledger/common/script	AvailablePlutusScripts	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	BuildScriptPurpose	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	CheckPlutusV1V3Features	vectors	CheckPlutusV1V3Features (Conway features under PlutusV1/V2)
