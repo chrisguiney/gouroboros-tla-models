@@ -113,6 +113,34 @@ Other probes, each violated as expected under `LeiosNotify.cfg`:
 `ProbeNeverDone` (27 states), `ProbeNeverCanceled` (47). `ProbeNeverHeld`
 holds under the fix (160) and is violated today (30).
 
+## LeiosNotify pipelined requests and quit (`LeiosNotifyPipelinedQuit.tla`)
+
+### What the code does
+
+The server's read loop fires its quit signal as soon as it reads `MsgQuit`,
+before the message is queued. The receive loop hands the next request to a
+handler goroutine only once the previous one is answered. The handler
+(`serveRequestNext`) answers `MsgCanceled` without asking the notification
+source when the signal has already fired, and otherwise asks the source. A
+client that writes its whole burst and `MsgQuit` back to back can therefore
+get every request canceled with the source asked zero times or once, depending
+on whether the handler goroutine ran before the read loop reached `MsgQuit`.
+The reference states only that every outstanding request is answered with
+`MsgCanceled`, then `MsgDone` [R3].
+
+### The answers
+
+| Config | States | Result |
+| --- | --- | --- |
+| `LeiosNotifyPipelinedQuit.cfg`: today, back to back | 47 | passes `EveryRequestCanceled`, `SourceAskedAtMostOnce` |
+| `LeiosNotifyPipelinedQuitAssumptionBug.cfg`: assert the source is asked exactly once | 45 | **fails** `SourceAskedOnce` (asked zero times) |
+| `LeiosNotifyPipelinedQuitHandshake.cfg`: the client sends the rest once the source was asked | 20 | passes `SourceAskedOnce` |
+| `LeiosNotifyPipelinedQuitNoCheckBug.cfg`: mutation, the handler skips the quit check | 38 | **fails** `SourceAskedAtMostOnce` |
+
+The server is correct: it answers every request. The failing assertion is the
+test's, not the protocol's: asking the source exactly once holds only when the
+client waits for the first request to reach the source.
+
 ## LeiosFetch (`LeiosFetch.tla`)
 
 ### What the code does
