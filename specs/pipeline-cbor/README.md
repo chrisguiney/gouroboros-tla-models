@@ -459,8 +459,16 @@ watcher to have exited only once a `Stop` caller has returned
 | `PipelineLifecycleMainDrainPre3161Bug.cfg` (#3233 before the merge) | `NoCommitAfterDrain` violated | 9,295 |
 | `PipelineLifecycleMainNoMarkerBug.cfg` (no `ApplyContext` check) | `NoLeakWhenQuiescent` violated: `ApplyFunc`'s `Stop` waits for itself | 6,040 |
 | `PipelineLifecycleMainNoWatchJoinBug.cfg` (mutation) | `JoinedAfterStop` violated | 12,876 |
+| `PipelineLifecycleMainLateStopBug.cfg` (5cb98604: a `Stop` after the parent-cancel teardown returns before publishing `stopping`) | `StopPublished` violated | 544 |
 
 Every passing config also checks `NoLeakWhenQuiescent` and
 `MuNotHeldAcrossApply`. The resolution is a merge: no new behaviour beyond
 the two sides, so the Go tests are both sides' (`go test -race ./pipeline`
 passes at `5cb98604`).
+
+`StopPublished` (added to every passing `NewStop` config) says that once an
+explicit `Stop` has signalled, `stopping` is set, so `Start` returns
+`ErrPipelineStopped` and `WaitForDrain` treats the pipeline as stopping. At
+5cb98604 `requestStop` returned at `teardownStarted` before publishing it, so
+a `Stop` after the watcher's teardown left it false
+(`PipelineLifecycleMainLateStopBug`); the fix publishes it before that check.
