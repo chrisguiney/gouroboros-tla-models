@@ -47,7 +47,10 @@
 (* Muxer.Stop(ctx) (same branch, "muxerStop") makes the muxer's own Stop   *)
 (* wait for its cleanup goroutine, and so for the forwarders that run the  *)
 (* Metrics callbacks, unless ctx carries the muxer's callback marker. A    *)
-(* Metrics callback (mcb) may stop its own muxer (MetricsStopKinds).       *)
+(* Metrics callback (mcb) may stop its own muxer (MetricsStopKinds), or    *)
+(* close its connection (MetricsCloseKinds). Under "metricsClose", a Close *)
+(* carrying the muxer's callback marker requests shutdown and returns      *)
+(* without waiting for it, as Muxer.Stop does with that marker.            *)
 (*                                                                         *)
 (* No specification source: this is gOuroboros's own Go API.               *)
 (* Symbols are explained in specs/keepalive/KeepAlive.tla's header.        *)
@@ -76,13 +79,20 @@ CONSTANTS
                         \* Stop with the muxer's CallbackContext; "plain":
                         \* Stop with a context without that marker. Empty:
                         \* no Metrics callback runs.
+    MetricsCloseKinds,  \* how a Metrics callback may close its
+                        \* connection, a subset of {"own", "plain"}: "own":
+                        \* Close with the muxer's CallbackContext; "plain":
+                        \* Close with a context without that marker.
     UserMarker,         \* the user's Close: "none" (Close), or "foreign"
                         \* (CloseContext called from another connection's
                         \* callback, with that callback's context)
     Fix                 \* a subset of {"fence", "muxerGuard", "join",
                         \* "closeEarly", "anyMarker", "muxerJoin",
                         \* "excuseEntries", "muxerStop",
-                        \* "muxerStopNoMarker"}:
+                        \* "muxerStopNoMarker", "metricsClose"}:
+                        \* "metricsClose": Close with the muxer's
+                        \*   callback marker requests shutdown and returns
+                        \*   without waiting for connClosedChan.
                         \* "muxerStop": Muxer.Stop(ctx) waits for the
                         \*   muxer's cleanup goroutine unless ctx carries
                         \*   the muxer's callback marker; shutdown's Stop
@@ -121,8 +131,9 @@ CONSTANTS
 
 ASSUME Fix \subseteq {"fence", "muxerGuard", "join", "closeEarly", "anyMarker",
                       "muxerJoin", "excuseEntries", "muxerStop",
-                      "muxerStopNoMarker", "sockClose"}
+                      "muxerStopNoMarker", "sockClose", "metricsClose"}
 ASSUME MetricsStopKinds \subseteq {"own", "plain"}
+ASSUME MetricsCloseKinds \subseteq {"own", "plain"}
 ASSUME CloseCtxMayEnd \in BOOLEAN
 ASSUME OwnerLateLoop \in BOOLEAN
 ASSUME CallbackCloseKinds \subseteq {"own", "plain"}
@@ -160,8 +171,10 @@ VARIABLES
     loopLate,   \* the loop the callback's instance starts while the
                 \* callback is in Close: "none", "running" or "exited"
     mcb,        \* a Metrics callback on a muxer goroutine: "idle",
-                \* "running", "stopping" (in Muxer.Stop) or "done"
-    mcbKind     \* the context its Stop carries: "none", "own", "plain"
+                \* "running", "stopping" (in Muxer.Stop), "closing" (in
+                \* the connection's Close) or "done"
+    mcbKind     \* the context its Stop or Close carries: "none", "own",
+                \* "plain"
 
 chans == <<doneChan, errorChan, connClosed, conn, muxer>>
 wgv   == <<wg, waitBegan, lateAdd, wgMu>>
@@ -209,6 +222,12 @@ Init ==
 \* Literally: "Goto of p and s is defined as: pc in the next state equals pc
 \*   with p mapped to s."
 Goto(p, s) == pc' = [pc EXCEPT ![p] = s]
+
+\* In English: "The states in which a Metrics callback is still on its
+\* muxer goroutine."
+\* Literally: "MetricsBusy is defined as the set containing "running",
+\*   "stopping" and "closing"."
+MetricsBusy == {"running", "stopping", "closing"}
 
 \* In English: "requestClose: close doneChan under onceClose."
 \* Literally: "RequestClose is defined as: doneChan in the next state equals
@@ -790,12 +809,12 @@ ProtoFwd ==
 \* callback runs on one. Under muxerJoin or muxerStop, shutdown waits for
 \* it."
 \* Literally: "MuxCleanup is defined as: pc of "mc" equals "wait", and muxer
-\*   equals "stopped", and mcb is not a member of the set containing
-\*   "running" and "stopping", and conn in the next state equals "closed",
+\*   equals "stopped", and mcb is not a member of MetricsBusy, and conn
+\*   in the next state equals "closed",
 \*   and Goto of "mc" and "exited", and the rest is unchanged."
 MuxCleanup ==
     /\ pc["mc"] = "wait" /\ muxer = "stopped"
-    /\ mcb \notin {"running", "stopping"}
+    /\ mcb \notin MetricsBusy
     /\ conn' = "closed"
     /\ Goto("mc", "exited")
     /\ UNCHANGED <<doneChan, errorChan, connClosed, muxer, wgv, prot, flags>>
@@ -806,11 +825,12 @@ MuxCleanup ==
 
 \* In English: "A Metrics callback begins on a forwarder of the running
 \* muxer; none begins once it is stopping."
-\* Literally: "MetricsCb is defined as: MetricsStopKinds is not empty, and
+\* Literally: "MetricsCb is defined as: the union of MetricsStopKinds and
+\*   MetricsCloseKinds is not empty, and
 \*   mcb equals "idle", and muxer equals "running", and mcb in the next
 \*   state equals "running", and the rest is unchanged."
 MetricsCb ==
-    /\ MetricsStopKinds /= {}
+    /\ MetricsStopKinds \cup MetricsCloseKinds /= {}
     /\ mcb = "idle" /\ muxer = "running"
     /\ mcb' = "running"
     /\ UNCHANGED <<pc, chans, wgv, prot, flags, joinv, mcbKind>>
@@ -861,10 +881,40 @@ MetricsCbStopReturn ==
     /\ mcb' = "done"
     /\ UNCHANGED <<pc, chans, wgv, prot, flags, joinv, mcbKind>>
 
+\* In English: "The callback closes its connection with a context of kind
+\* k: Close requests shutdown (doneChan exists, since the muxer does)."
+\* Literally: "MetricsCbClose is defined as: mcb equals "running", and
+\*   there is some k in MetricsCloseKinds such that mcbKind in the next
+\*   state equals k, and RequestClose, and mcb in the next state equals
+\*   "closing", and the rest is unchanged."
+MetricsCbClose ==
+    /\ mcb = "running"
+    /\ \E k \in MetricsCloseKinds : mcbKind' = k
+    /\ RequestClose
+    /\ mcb' = "closing"
+    /\ UNCHANGED <<pc, errorChan, connClosed, conn, muxer, wgv, prot, flags,
+                   joinv>>
+
+\* In English: "Close returns once connClosedChan is closed, or at once
+\* under metricsClose when its context carries the muxer's marker. The
+\* shutdown that closes connClosedChan first waits for the muxer's
+\* goroutines, this callback's included."
+\* Literally: "MetricsCbCloseReturn is defined as: mcb equals "closing",
+\*   and (connClosed is true, or "metricsClose" is a member of Fix and
+\*   mcbKind equals "own"), and mcb in the next state equals "done", and
+\*   the rest is unchanged."
+MetricsCbCloseReturn ==
+    /\ mcb = "closing"
+    /\ connClosed \/ ("metricsClose" \in Fix /\ mcbKind = "own")
+    /\ mcb' = "done"
+    /\ UNCHANGED <<pc, chans, wgv, prot, flags, joinv, mcbKind>>
+
 \* Literally: "MetricsStep is defined as: MetricsCb, or MetricsCbReturn, or
-\*   MetricsCbStop, or MetricsCbStopReturn."
+\*   MetricsCbStop, or MetricsCbStopReturn, or MetricsCbClose, or
+\*   MetricsCbCloseReturn."
 MetricsStep ==
     \/ MetricsCb \/ MetricsCbReturn \/ MetricsCbStop \/ MetricsCbStopReturn
+    \/ MetricsCbClose \/ MetricsCbCloseReturn
 
 -----------------------------------------------------------------------------
 
@@ -878,8 +928,7 @@ MetricsStep ==
 \*   containing "notStarted" and "exited", and cb does not equal "running",
 \*   and hsErr does not equal "checked", and loopCb and loopOther do not
 \*   equal "running", and cbClose does not equal "waiting", and loopLate
-\*   does not equal "running", and mcb is not a member of the set
-\*   containing "running" and "stopping"."
+\*   does not equal "running", and mcb is not a member of MetricsBusy."
 Finished ==
     /\ pc["setup"] \in {"returned", "failed"}
     /\ pc["user"] \in {"returned", "returnedEarly", "returnedErr"}
@@ -888,7 +937,7 @@ Finished ==
     /\ cb /= "running" /\ hsErr /= "checked"
     /\ loopCb /= "running" /\ loopOther /= "running" /\ cbClose /= "waiting"
     /\ loopLate /= "running"
-    /\ mcb \notin {"running", "stopping"}
+    /\ mcb \notin MetricsBusy
 
 \* In English: "A step is one step of one goroutine or one event; once
 \* everything is over, nothing changes. Any other state with no step is a
@@ -981,10 +1030,9 @@ MuxerJoinedAfterClose ==
 \* In English: "After Close returns without an error, no Metrics callback
 \* runs, nor is one in Muxer.Stop."
 \* Literally: "NoMetricsCallbackAfterClose is defined as: if pc of "user"
-\*   equals "returned", then mcb is not a member of the set containing
-\*   "running" and "stopping"."
+\*   equals "returned", then mcb is not a member of MetricsBusy."
 NoMetricsCallbackAfterClose ==
-    pc["user"] = "returned" => mcb \notin {"running", "stopping"}
+    pc["user"] = "returned" => mcb \notin MetricsBusy
 
 (* Reachability probes: each is expected to be violated. *)
 
