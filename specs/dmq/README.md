@@ -127,6 +127,12 @@ for ids in its current window) show it; the fix, #3130 `50ef28f8` on merge
 `TestServerRestartForgetsRequestedIDs` fails without it. Every earlier config
 runs one run (`MaxRuns = 1`) and is unchanged.
 
+`4f710823` (test only, cannot affect the model): with the restart,
+`TestV1InboundMatchesReferenceOutbound` polled the Server's current
+instance for `IsDone` after `MsgDone`, which the restart replaces with a
+fresh one (81 of 200 failures on 386); it now watches the run's own
+instance, and its harness stops the Server with `Server.Stop`.
+
 ### Checking the checks
 
 | Config (expected to fail) | Safeguard removed from the outbound | Invariant broken |
