@@ -83,6 +83,21 @@ closes. A PR can draw on more than one model.
 | `cbor-codec` (L25-L28, L31), `ledger-codec` (`CostModelLanguages`, `PreConwaySetTag`); coverage gaps `cbor`, `ledger/common` | #3279 (bignum multiasset quantities), #3280 (Alonzo PlutusV2 cost model), #3282 (one tag 30), #3283 (constructor fields a list), #3284 (tag 258 set members in Value), #3289 (pre-Conway tag 258 refused), #3290 (ConstructorEncoder indefinite fields; datum bytes change) | #3260, #3261, #3263, #3265, #3266, #3270, #3271 | open |
 | `ledger-codec` (`TxOutValueData`; script context gap 1) | #3281 (zero ada kept in output Plutus data; TxInfo translation goldens) | #3262 | open |
 | `localstatequery` (`LocalStateQueryCodec`; goldens, gaps 9, 10) | #3286 (era filter set encoding), #3287 (GetAccountState in every Shelley era), #3288 (GetFuturePParams decoded) | #3267, #3268, #3269 | open |
+| `dmq` (`MessageValidityBatch`, N55) | #3298 (every counter re-checked at commit; merge 1 of 6) | #3291 | open |
+| `dmq` (`MessageValidity`, `MessageIngress`, N54) | #3299 (body 90 to 2000 bytes, refused at decode; merge 2 of 6) | #3292 | open |
+| `dmq` (`MessageValidity`, N52) | #3300 (KES at the claimed period; current slot dropped; merge 3 of 6) | #3293 | open |
+| `dmq` (`MessageValidity` `ExtrasBug`, N56) | #3301 (counters compared only with earlier messages; merge 4 of 6) | #3294 | open |
+| `dmq` (`MessageIngress`, N56) | #3302 (60 s per-pool rate limit; merge 5 of 6) | #3295 | open |
+| `dmq` (`MessageIngress`, N58) | #3303 (per-message receipt; merge 6 of 6; depends on #3130) | #3296 | open |
+| `ledger-leios` (`LeiosVoting` aged key, L21) | #3304 (aged-out voting keys refused; breaking) | #3297 | open |
+| `dmq` (`MessageValidity`) | #3317 (counter, stake and cold signature tests) | #3305 | open |
+| `ledger-leios` (`LeiosVoting`) | #3318 (reference-formed certificates; depends on #3304) | #3306 | open |
+| localstatequery goldens (gaps 9, 10) | #3319 (query and result goldens), #3320 (BuildHeader goldens) | #3307, #3308 | open |
+| coverage gaps 2, 7, 8 | #3321 (fee, size, min coin goldens), #3322 (update keys per era) | #3309, #3310 | open |
+| `ledger-governance` | #3323 (rules-only conformance replay, network-id and return-address tables) | #3311 | open |
+| `ledger-conway-dijkstra` (`SubCerts`, `SubGov`, `SubGuards`) | #3324 (sub-transaction cells) | #3312 | open |
+| coverage gaps `cbor`, `ledger/common` | #3325 (cbor reference; depends on #3284), #3326 (ledger/common reference; depends on #3279) | #3313, #3314 | open |
+| held | `fix/dmq-ttl-reference-bounds` (N53: no Bug config for the `IsValidAt` mempool expiry), `fix/dmq-payload-preserved-bytes` (N57: no Bug config), `fix/leios-vote-shape` (L22: no model), `test/consensus-nonce-model` (Bytes path describes pre-756a9a89 main) | | local |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 
