@@ -74,7 +74,8 @@
 (*   [R9] Praos/VRF.hs 64-78 and TPraos/BlockHeader.hs 422-435: the VRF   *)
 (*        input omits a NeutralNonce epoch nonce (slot bytes only).       *)
 (*                                                                         *)
-(* The gOuroboros code it is compared with. "Bytes" (commit d0b95845):    *)
+(* The gOuroboros code it is compared with. "Bytes" (d0b95845, and       *)
+(* CalculateRollingNonce from main 756a9a89 when GoBytes is "Family"):    *)
 (*   [G1] ledger/common/nonce.go CalculateRollingNonce 92-150              *)
 (*   [G2] ledger/common/nonce.go CalculateEpochNonce 152-187               *)
 (*   [G3] vrf/vrf.go MkInputVrf 245-267, MkSeedTPraos 313-345;             *)
@@ -120,7 +121,12 @@ CONSTANTS
                     \*  "Nonce": the block's 32-byte nonce [R2]
                     \*  "Raw": the 64-byte VRF output
     GoFix,          \* gOuroboros fixes in force on the "Bytes" path, a
-                    \*  subset of {"Neutral", "RawOperand"}; {} is d0b95845
+                    \*  subset of {"Neutral", "RawOperand"}; {} is d0b95845;
+                    \*  only read when GoBytes is "Legacy"
+    GoBytes,        \* which CalculateRollingNonce the "Bytes" path calls:
+                    \*  "Family": main from 756a9a89, where 32 zero bytes are
+                    \*    an ordinary nonce and a 64-byte operand is refused;
+                    \*  "Legacy": d0b95845, before it, with GoFix
     GoApi,          \* which gOuroboros functions the caller uses:
                     \*  "Bytes": the []byte functions [G1][G2][G3];
                     \*  "Nonce": the common.Nonce functions [G4][G5].
@@ -371,22 +377,44 @@ Dec(x) == IF x \in {Zero, Empty} THEN Neutral ELSE x
 \* Literally: "IsRaw of x is defined as: element 1 of x equals "vrfOutput"."
 IsRaw(x) == x[1] = "vrfOutput"   \* a 64-byte operand
 
-\* In English: CalculateRollingNonce(prev, x) [G1]. 32 zero bytes is
-\* NeutralNonce: main returns blake2b_256(x); the "Neutral" fix returns a
-\* 32-byte x unchanged, as * does. Otherwise main hashes prev || x, with a
-\* 64-byte x concatenated raw; the "RawOperand" fix hashes a 64-byte x first,
-\* as TPraos' bnonce does [R2].
-\* Literally: "GoRolling of prev and x is defined as: letting operand be: if
-\*   IsRaw of x and "RawOperand" is a member of GoFix then Hash of x, else x: if
-\*   prev equals Zero then (if IsRaw of x then Hash of x, else if "Neutral" is a
-\*   member of GoFix then x, else Hash of x), else Cat of prev and operand."
-GoRolling(prev, x) ==
+\* In English: a call CalculateRollingNonce refuses with an error.
+\* Literally: "Refused is defined as the tuple of "refused"."
+Refused == <<"refused">>
+
+\* In English: CalculateRollingNonce(prev, x) [G1] from 756a9a89 ("Family").
+\* It takes two 32-byte nonce hashes and hashes their concatenation; 32 zero
+\* bytes are an ordinary nonce, as an all-zero hash is in the reference [R1],
+\* and a 64-byte VRF output is refused, because its nonce depends on the
+\* consensus family [R2].
+\* Literally: "GoRollingFamily of prev and x is defined as: if IsRaw of x then
+\*   Refused, else Cat of prev and x."
+GoRollingFamily(prev, x) == IF IsRaw(x) THEN Refused ELSE Cat(prev, x)
+
+\* In English: CalculateRollingNonce(prev, x) [G1] before 756a9a89
+\* ("Legacy"). 32 zero bytes is NeutralNonce: d0b95845 returns
+\* blake2b_256(x); the "Neutral" fix returns a 32-byte x unchanged, as *
+\* does. Otherwise it hashes prev || x, with a 64-byte x concatenated raw;
+\* the "RawOperand" fix hashes a 64-byte x first, as TPraos' bnonce does
+\* [R2].
+\* Literally: "GoRollingLegacy of prev and x is defined as: letting operand
+\*   be: if IsRaw of x and "RawOperand" is a member of GoFix then Hash of x,
+\*   else x: if prev equals Zero then (if IsRaw of x then Hash of x, else if
+\*   "Neutral" is a member of GoFix then x, else Hash of x), else Cat of prev
+\*   and operand."
+GoRollingLegacy(prev, x) ==
     LET operand == IF IsRaw(x) /\ "RawOperand" \in GoFix THEN Hash(x) ELSE x
     IN IF prev = Zero
        THEN (IF IsRaw(x) THEN Hash(x)                          \* blake2b_256(output)
              ELSE IF "Neutral" \in GoFix THEN x                 \* fixed: identity
-             ELSE Hash(x))                                      \* main: hashed again
+             ELSE Hash(x))                                      \* d0b95845: hashed again
        ELSE Cat(prev, operand)
+
+\* Literally: "GoRolling of prev and x is defined as: if GoBytes equals
+\*   "Family" then GoRollingFamily of prev and x, else GoRollingLegacy of prev
+\*   and x."
+GoRolling(prev, x) ==
+    IF GoBytes = "Family" THEN GoRollingFamily(prev, x)
+    ELSE GoRollingLegacy(prev, x)
 
 \* In English: CalculateEpochNonce(c, l, ee) [G2]. Main hashes c || l and
 \* then that || ee unless ee is empty; zero bytes are hashed like any value.
@@ -707,6 +735,29 @@ EpochNonceAgrees == cs.eta0 = Hold(RefFold(chain).eta0)
 \* Literally: "VrfInputAgrees is defined as: GoVrfInputOf of cs's eta0 equals
 \*   RefVrfInput of RefFold of chain's eta0."
 VrfInputAgrees == GoVrfInputOf(cs.eta0) = RefVrfInput(RefFold(chain).eta0)
+
+\* In English: CalculateRollingNonce on its own [G1]. In the reference an
+\* all-zero hash is an ordinary Nonce and only NeutralNonce, a constructor
+\* of its own, is the identity [R1], so 32 zero bytes before a block nonce
+\* hash with it like any other nonce.
+\* Literally: "BytesZeroIsOrdinary is defined as: if chain has a length (it
+\*   always does), then for every b in 1 to
+\*   MaxBlocks, GoRolling of Zero and BlockNonce of b equals Op of Zero and
+\*   BlockNonce of b."
+BytesZeroIsOrdinary ==
+    Len(chain) >= 0 =>                   \* state level, so TLC reports a violation
+    \A b \in 1..MaxBlocks : GoRolling(Zero, BlockNonce(b)) = Op(Zero, BlockNonce(b))
+
+\* In English: CalculateRollingNonce refuses a 64-byte VRF output, which is
+\* not a nonce until the consensus family's derivation hashes it [R2].
+\* Literally: "BytesRefusesRaw is defined as: if chain has a length (it
+\*   always does), then for every b in 1 to MaxBlocks
+\*   and every p in the set of InitialNonce and Zero, GoRolling of p and
+\*   RawVrf of b equals Refused."
+BytesRefusesRaw ==
+    Len(chain) >= 0 =>                   \* state level, so TLC reports a violation
+    \A b \in 1..MaxBlocks, p \in {InitialNonce, Zero} :
+        GoRolling(p, RawVrf(b)) = Refused
 
 \* In English: the reference's candidate depends only on the blocks up to
 \* the last one before a freeze point.
