@@ -1061,7 +1061,7 @@ ledger/dijkstra	NewDijkstraGenesisFromFile	gap	Dijkstra pparams, genesis and scr
 ledger/dijkstra	NewDijkstraGenesisFromReader	gap	Dijkstra pparams, genesis and script context
 ledger/dijkstra	NewDijkstraTransactionBodyFromCbor	vectors	Dijkstra codecs
 ledger/dijkstra	NewDijkstraTransactionFromCborComponents	vectors	Dijkstra codecs
-ledger/dijkstra	UtxoValidateAccountBalanceIntervals	gap	Dijkstra legacy-mode value and account balance intervals
+ledger/dijkstra	UtxoValidateAccountBalanceIntervals	modelled	Dijkstra sub-transaction certificates, pool deposit and owner witnesses
 ledger/dijkstra	UtxoValidateBadInputsUtxo	modelled	Dijkstra sub-transaction batch rules
 ledger/dijkstra	UtxoValidateBatchWithdrawals	modelled	Dijkstra sub-transaction batch rules
 ledger/dijkstra	UtxoValidateBootstrapAllowedGovActions	gap	Dijkstra pool, governance, metadata and IsValid rules

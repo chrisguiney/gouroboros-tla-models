@@ -52,7 +52,7 @@
 (*   [G2] dijkstraGovernanceStateView.CommitteeCredentialMember: tracked  *)
 (*        committee changes, then the wrapped state. It does not look at  *)
 (*        the earlier levels' UpdateCommittee proposals (the Mutation     *)
-(*        "GoComMain" models it; DRIFT L21).                              *)
+(*        "GoComMain" models it; DRIFT L23).                              *)
 (*                                                                         *)
 (* HOW TO READ THE SYMBOLS: see the README section "Reading a formula     *)
 (* literally" and specs/keepalive/KeepAlive.tla.                          *)

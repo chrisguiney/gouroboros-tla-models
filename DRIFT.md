@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-100 entries. On `main`: does not conform 53; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+101 entries. On `main`: does not conform 54; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -149,6 +149,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L20](#l20) | ledger | `VerifyBlock` issuer in a TPraos overlay slot (d > 0) | Active slot: the scheduled genesis delegate, its VRF key, no stake; non-active slot: rejected | main: every issuer looked up in the pool distribution, so valid delegate blocks are rejected and pool blocks in non-active slots accepted; branch: `VerifyConfig.TPraosOverlay` | OVERLAY rule | does not conform → conforms | Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet. Breaking for callers with stake-pool validation on TPraos blocks. Dingo skips that validation |
 | [L21](#l21) | ledger | Leios voting key past its honoured age | Seated keyless once `epoch >= registeredIn + maxKeyAge`, `maxKeyAge = ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2`; a certificate it signs is refused (`SignerWithoutKey`) | `DijkstraLeiosCertificateState` asks only for keys "from the snapshot's registered pool parameters"; an aged-out key handed over verifies like any other | Voting keys rotate with a time-to-live | does not conform → conforms | Fixed on local branch `fix/leios-voting-key-age` (`93c3df5d`), no PR yet: gOuroboros judges key age itself, through the new required `DijkstraLeiosKeyAgeContext` method and `KeyRegisteredIn` (breaking). No implementer in Dingo or ouroboros-mock |
 | [L22](#l22) | ledger | Leios vote encoding | `[announcing_rb_hash, voter_id (Word16), signature]` | main: `LeiosVote`, carried by LeiosVotes `MsgVote` and the LeiosFetch vote messages, is `[slot, eb_hash, voter_id, signature]`; branch: the CIP shape, `voter_id` 16 bits | `[announcing_rb_hash, voter_id, vote_signature]`; LeiosVotes `MsgLeiosVote` carries it | does not conform → conforms | Fixed on local branch `fix/leios-vote-shape` (`eb4c2421`), no PR yet (breaking; Dingo's `ledger/leios` and `ouroboros` packages use the old fields). The rc-2026w41 prototype vote is the golden vector. A LeiosFetch votes reply is matched by voter only: a vote names its announcing block, not its slot |
+| [L23](#l23) | ledger | Dijkstra committee certificate for a member an earlier level proposed | Accepted: each level's GOVCERT counts the UpdateCommittee proposals the earlier levels left as potential members | main: the governance view consults only the wrapped state, so a top-level (or later sub-transaction) authorization or resignation is rejected | Same rule (Conway GOVCERT isPotentialFutureMember; Dijkstra LEDGER/SUBLEDGER) | does not conform → conforms | Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1255,6 +1256,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/leios-vote-shape` (`eb4c2421`), no PR yet. The vote captured from the rc-2026w41 prototype node decodes and re-encodes byte for byte (fails to decode on main: "cannot decode CBOR array to struct with different number of elements"). The reference ships no golden vote bytes at `ec239d57f618`. `LeiosLegacyVote` keeps the earlier shape for LeiosNotify offers. A LeiosFetch votes reply can now be matched to its request only by voter, since the vote no longer names its slot. Breaking for Dingo (`ledger/leios/manager.go`, `ouroboros/leios_*`)
 
+### L23
+
+**Dijkstra committee certificate for a member an earlier level proposed** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: a sub-transaction's SUBCERTS get the committee proposals of the state the earlier sub-transactions left, and the top's CERTS those after every sub-transaction, so an authorization or resignation by a cold credential an earlier level's UpdateCommittee proposal would add is accepted; a level's own proposal comes after its certificates and does not count. gOuroboros main: `dijkstraGovernanceStateView` records the earlier levels' proposals, but `CommitteeCredentialMember` consults only tracked committee changes and the wrapped state, so `UtxoValidateCommitteeCertificates` rejects the certificate ("not a CC member"). Same class as L19, inside one batch.
+- **Spec.** formal-ledger-specifications `60b68036c8b4` `src/Ledger/Dijkstra/Specification/Ledger.lagda.md` (LEDGER-V: top-level CERTS from the post-SUBLEDGERS state, `allColdCreds govState₁`; SUBLEDGER-V `allColdCreds govState₀`)
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs` (`isPotentialFutureMember`), `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubLedger.hs` 259-299, `.../Rules/Ledger.hs` 430-478
+- **gOuroboros.** gOuroboros `ebc63eab` `ledger/dijkstra/rules.go` `dijkstraGovernanceStateView.CommitteeCredentialMember`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet. `TestDijkstraCommitteeCertificateForEarlierLevelProposedMember` fails 2 of 4 cases on the parent commit. Model `specs/ledger-conway-dijkstra` `SubGovGoComMainBug.cfg`; with the fix applied, all 52,416 DRep and committee cells (proposals included) agree with the reference, and 7 fail without it. Only Dijkstra batches with sub-transactions reach it
+
 ## Pipeline
 
 ### P1
@@ -1372,6 +1384,7 @@ No pull request yet (decide whether and how to fix):
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
 - **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
 - **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. Unreachable on chain today.
+- **L23** Dijkstra committee certificate for a member an earlier level proposed. Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet.
 - **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
 - **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.
 
