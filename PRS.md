@@ -87,7 +87,7 @@ closes. A PR can draw on more than one model.
 | `dmq` (`MessageValidity`, `MessageIngress`, N54) | #3299 (body 90 to 2000 bytes, refused at decode; merge 2 of 6) | #3292 | open |
 | `dmq` (`MessageValidity`, N52) | #3300 (KES at the claimed period; current slot dropped; merge 3 of 6) | #3293 | open |
 | `dmq` (`MessageValidity` `ExtrasBug`, N56) | #3301 (counters compared only with earlier messages; merge 4 of 6) | #3294 | open |
-| `dmq` (`MessageIngress`, N56) | #3302 (60 s per-pool rate limit; merge 5 of 6) | #3295 | open |
+| `dmq` (`MessageIngress`, N56) | #3302 (60 s per-pool rate limit; merge 5 of 6; review: limit off never refuses at commit, `MessageIngressRecheckWhenOffBug.cfg` / `MessageIngressLimitOff.cfg`; a too-frequent message refused alone, reproduced by `MessageIngressAllOrNothingBug.cfg`) | #3295 | open |
 | `dmq` (`MessageIngress`, N58) | #3303 (per-message receipt; merge 6 of 6; depends on #3130) | #3296 | open |
 | `ledger-leios` (`LeiosVoting` aged key, L21) | #3304 (aged-out voting keys refused; breaking) | #3297 | open |
 | `dmq` (`MessageValidity`) | #3317 (counter, stake and cold signature tests) | #3305 | open |

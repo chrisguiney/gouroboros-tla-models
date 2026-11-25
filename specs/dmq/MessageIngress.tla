@@ -25,6 +25,8 @@
 (*                minimum delay.                                           *)
 (*   DuplicateNotFatal  a local submission that lost a race to the same   *)
 (*                message is not refused.                                  *)
+(*   OffNeverRefused  with the limit off (Delay 0), a valid local          *)
+(*                submission is never refused at commit.                   *)
 (*                                                                         *)
 (* Sources:                                                                *)
 (*   Reference, IntersectMBO/dmq-node a267003c14e9, dmq-node/:             *)
@@ -263,11 +265,15 @@ Prepare(w, id) ==
 \* connection won the race) succeeds without recording anything ("DupRaceFatal":
 \* it is refused); otherwise the rate limit is re-checked against the
 \* latest acceptance ("NoRateRecheck" skips it) and the acceptance is
-\* recorded."
+\* recorded. A Delay of 0 turns the limit off, as a vcMinSigDelay of zero
+\* does [R2]; the prepared time q.at may precede lastT (another
+\* acceptance landed after the prepare), so "RecheckWhenOff" (the first
+\* rate-limit branch) still compares, and refuses a negative gap."
 \* Literally: "Commit of w is defined as: pending of w is not Idle; letting
 \*   q be pending of w, held be whether q.id is a member of accepted, and
 \*   ok be q.ok and (if held then Mutation is not "DupRaceFatal" otherwise
-\*   (Mutation is "NoRateRecheck" or q.at minus lastT is at least Delay)):
+\*   ((Delay is 0 and Mutation is not "RecheckWhenOff") or Mutation is
+\*   "NoRateRecheck" or q.at minus lastT is at least Delay)):
 \*   if ok and not held, accepted gains q.id, lastT becomes q.at and q.at is
 \*   appended to history, otherwise they are unchanged; pending of w becomes
 \*   Idle; out becomes the record of kind "commit", held and ok."
@@ -276,7 +282,9 @@ Commit(w) ==
     /\ LET q == pending[w]
            held == q.id \in accepted
            ok == q.ok /\ IF held THEN Mutation # "DupRaceFatal"
-                         ELSE Mutation = "NoRateRecheck" \/ q.at - lastT >= Delay
+                         ELSE \/ Delay = 0 /\ Mutation # "RecheckWhenOff" \* limit off [R2]
+                              \/ Mutation = "NoRateRecheck"
+                              \/ q.at - lastT >= Delay
        IN /\ IF ok /\ ~held
                THEN /\ accepted' = accepted \cup {q.id}
                     /\ lastT' = q.at
@@ -323,6 +331,13 @@ DelayHeld ==
 \*   out.dup and out.valid, then out.ok."
 DuplicateNotFatal ==
     (out.kind = "commit" /\ out.dup /\ out.valid) => out.ok
+
+\* In English: "With the limit off, a valid local submission is never
+\* refused at commit."
+\* Literally: "OffNeverRefused is defined as: if Delay is 0, out.kind is
+\*   "commit" and out.valid, then out.ok."
+OffNeverRefused ==
+    (Delay = 0 /\ out.kind = "commit" /\ out.valid) => out.ok
 
 \* In English: "No reply both accepts a message and disconnects." Violated:
 \* as in the reference, the valid messages of a reply are kept even when
