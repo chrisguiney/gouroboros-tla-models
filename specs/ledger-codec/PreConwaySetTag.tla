@@ -24,6 +24,14 @@
 (* read as in specs/keepalive/KeepAlive.tla.                               *)
 (*   [S3] Decoder.hs 1347-1354 (allowTag): from version 9 decodeSet takes  *)
 (*        an optional tag 258 and fails on any other tag number.           *)
+(*   [S4] libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Encoding/  *)
+(*        Encoder.hs 479-491 (encodeSet): versions 2-8 write the set with  *)
+(*        no tag; from version 9 under tag 258.                            *)
+(*   [G1] e82a8a6c PoolRegistrationCertificate.MarshalCBOR writes the      *)
+(*        owner set under tag 258 in every era, so a Shelley to Babbage    *)
+(*        body built from these types is refused by its own decoder.       *)
+(*   [G2] the fix: the Shelley to Babbage body encoders write a built pool *)
+(*        registration's owner set with no tag.                            *)
 (* Checked in Go on 37968c05: a Conway witness-set field under tag 259 or  *)
 (* tag 30 is refused ("unexpected tag type"); a Conway pool owner set      *)
 (* under either decodes.                                                   *)
@@ -32,12 +40,13 @@ EXTENDS Naturals
 
 CONSTANTS
     Rule,   \* "main": before the fix; "fixed": e9dd7145; "anyTag": e82a8a6c
+            \* [G1]; "eraEncode": anyTag decoding with [G2] encoding
     Tags    \* the tags a field may carry: a subset of {"none", "258", "other"}
 
-\* Literally: "Rules is defined as the set containing "main", "fixed" and
-\*   "anyTag"."
-\* In English: the three gOuroboros behaviours a configuration can pick.
-Rules == {"main", "fixed", "anyTag"}
+\* Literally: "Rules is defined as the set containing "main", "fixed",
+\*   "anyTag" and "eraEncode"."
+\* In English: the four gOuroboros behaviours a configuration can pick.
+Rules == {"main", "fixed", "anyTag", "eraEncode"}
 ASSUME Rule \in Rules
 ASSUME Tags \subseteq {"none", "258", "other"}
 
@@ -148,4 +157,26 @@ Spec == Init /\ [][Next]_vars
 \* In English: gOuroboros decodes a tagged or untagged set field exactly
 \* when decodeSet or decodeList would [S1, S2].
 SetTagAsReference == GoDecodes <=> RefDecodes
+
+\* Literally: "GoEncodedOwnerTag is defined as: if Rule equals "eraEncode"
+\*   and era is not "Conway" then "none", else "258"."
+\* In English: the tag gOuroboros writes on a built pool registration's
+\* owner set: tag 258 in every era [G1], or only from Conway [G2].
+GoEncodedOwnerTag ==
+    IF Rule = "eraEncode" /\ era /= "Conway" THEN "none" ELSE "258"
+
+\* Literally: "RefEncodedOwnerTag is defined as: if era equals "Conway"
+\*   then "258", else "none"."
+\* In English: encodeSet writes the tag from version 9 only [S4].
+RefEncodedOwnerTag == IF era = "Conway" THEN "258" ELSE "none"
+
+\* Literally: "BuiltOwnersRoundTrip is defined as: if field is "poolOwners"
+\*   and tag equals GoEncodedOwnerTag, then GoDecodes, and
+\*   GoEncodedOwnerTag equals RefEncodedOwnerTag."
+\* In English: a pool owner set gOuroboros writes is one its own decoder
+\* reads, and has the tag the reference writes.
+BuiltOwnersRoundTrip ==
+    (field = "poolOwners" /\ tag = GoEncodedOwnerTag) =>
+        /\ GoDecodes                                \* the decoder reads it
+        /\ GoEncodedOwnerTag = RefEncodedOwnerTag   \* as encodeSet writes
 =============================================================================

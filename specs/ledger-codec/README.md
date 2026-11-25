@@ -45,6 +45,7 @@ far below `W16`, as in the real numbers.
 | `PreConwaySetTagMainOtherTagBug.cfg` | L30 | main | **fails** `SetTagAsReference` | any tag on pool owners and witness-set fields |
 | `PreConwaySetTag.cfg` | L30 | fixed | passes | tags none and 258, every era Shelley to Conway, every set field |
 | `PreConwaySetTagOtherTagBug.cfg` | L30 | fixed | **fails** `SetTagAsReference` (found by the model) | Shelley witness set, a field with a tag other than 258 and no tag 258 head elsewhere: decoded; the reference refuses every tag |
+| `PreConwaySetTagBuiltOwnersBug.cfg` | L30 | anyTag | **fails** `BuiltOwnersRoundTrip` | a built Shelley pool registration: owners written under tag 258, then refused by the decoder |
 | `TxOutValueDataMainBug.cfg` | L15 | main | **fails** `TransValueAsReference` | a Shelley output of coin 0 in a PlutusV3 TxInfo: no ada entry. `TestTxOutPlutusDataKeepsZeroAda` "shelley" |
 | `TxOutValueData.cfg` | L15 | fixed | passes | four output eras, PlutusV1 to V3, coin 0 or 1, with and without assets |
 
