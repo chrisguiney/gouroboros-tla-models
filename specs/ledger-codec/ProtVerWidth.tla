@@ -21,7 +21,9 @@
 (*                                                                         *)
 (* The gOuroboros code it is compared with is ledger/common/               *)
 (* pparam_update_validation.go (ValidateProtocolParameterUpdateDomains,    *)
-(* field 14) and ledger/common/rules.go (protocolVersionCanFollow).        *)
+(* field 14) and ledger/common/rules.go (protocolVersionCanFollow); from   *)
+(* 5efc10c0 the next minor is computed in 32 bits there and in             *)
+(* ledger/conway/rules.go (protocolVersionCanFollow, hard forks).          *)
 (*                                                                         *)
 (* Widths are scaled so TLC's integers suffice: W16 stands for 65,535 and  *)
 (* W32 for 4,294,967,295. Every era's major bound stays far below W16, as  *)
@@ -31,12 +33,13 @@
 EXTENDS Naturals
 
 CONSTANTS
-    Rule,       \* "main": gOuroboros before the fix; "fixed": the branch
+    Rule,       \* "main": before the fix; "fixed": 7bd145e3; "wrapped": 5efc10c0
     CurMinors   \* the current minor versions a run may start from
 
-\* Literally: "Rules is defined as the set containing "main" and "fixed"."
-\* In English: the two gOuroboros behaviours a configuration can pick.
-Rules == {"main", "fixed"}
+\* Literally: "Rules is defined as the set containing "main", "fixed" and
+\*   "wrapped"."
+\* In English: the three gOuroboros behaviours a configuration can pick.
+Rules == {"main", "fixed", "wrapped"}
 ASSUME Rule \in Rules
 
 \* Literally: "W16 is defined as 12."
@@ -98,12 +101,19 @@ GoMinorMax == IF Rule = "main" THEN W16 ELSE W32
 \* major fits in 16 bits whatever the era, and the minor in GoMinorMax.
 GoDecodes(p) == p[1] <= W16 /\ p[2] <= GoMinorMax
 
+\* Literally: "GoNextMinor of n is defined as: if Rule equals "wrapped"
+\*   then n plus 1 modulo W32 plus 1, else n plus 1."
+\* In English: the minor protocolVersionCanFollow expects next: computed in
+\* Go's uint before 5efc10c0, which does not wrap, and in 32 bits from it.
+GoNextMinor(n) == IF Rule = "wrapped" THEN (n + 1) % (W32 + 1) ELSE n + 1
+
 \* Literally: "GoFollows of c and p is defined as: element 1 of p equals
 \*   element 1 of c plus 1 and element 2 of p equals 0, or element 1 of p
-\*   equals element 1 of c and element 2 of p equals element 2 of c plus 1."
-\* In English: protocolVersionCanFollow, in Go's uint, which does not wrap.
+\*   equals element 1 of c and element 2 of p equals GoNextMinor of
+\*   element 2 of c."
+\* In English: protocolVersionCanFollow.
 GoFollows(c, p) == \/ p[1] = c[1] + 1 /\ p[2] = 0
-                   \/ p[1] = c[1] /\ p[2] = c[2] + 1
+                   \/ p[1] = c[1] /\ p[2] = GoNextMinor(c[2])
 
 \* Literally: "GoAccepts of c and p is defined as GoDecodes of p and
 \*   GoFollows of c and p."

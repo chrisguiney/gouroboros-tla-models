@@ -22,16 +22,22 @@
 (* (ValidatePreConwaySetTags, on the fix branch), and the Shelley, Alonzo  *)
 (* and Babbage body and witness-set decoders that call them. Symbols are   *)
 (* read as in specs/keepalive/KeepAlive.tla.                               *)
+(*   [S3] Decoder.hs 1347-1354 (allowTag): from version 9 decodeSet takes  *)
+(*        an optional tag 258 and fails on any other tag number.           *)
+(* Checked in Go on 37968c05: a Conway witness-set field under tag 259 or  *)
+(* tag 30 is refused ("unexpected tag type"); a Conway pool owner set      *)
+(* under either decodes.                                                   *)
 (***************************************************************************)
 EXTENDS Naturals
 
 CONSTANTS
-    Rule,   \* "main": gOuroboros before the fix; "fixed": the branch
+    Rule,   \* "main": before the fix; "fixed": e9dd7145; "anyTag": e82a8a6c
     Tags    \* the tags a field may carry: a subset of {"none", "258", "other"}
 
-\* Literally: "Rules is defined as the set containing "main" and "fixed"."
-\* In English: the two gOuroboros behaviours a configuration can pick.
-Rules == {"main", "fixed"}
+\* Literally: "Rules is defined as the set containing "main", "fixed" and
+\*   "anyTag"."
+\* In English: the three gOuroboros behaviours a configuration can pick.
+Rules == {"main", "fixed", "anyTag"}
 ASSUME Rule \in Rules
 ASSUME Tags \subseteq {"none", "258", "other"}
 
@@ -73,15 +79,18 @@ RefDecodes == tag = "none" \/ (era = "Conway" /\ tag = "258")
 
 \* Literally: "GoMainDecodes is defined as: case tag equals "none" gives
 \*   TRUE; tag equals "258" gives field is not "inputs" or era equals
-\*   "Conway"; otherwise field is "poolOwners" or "witness"."
+\*   "Conway"; otherwise field is "poolOwners", or field is "witness" and
+\*   era is not "Conway"."
 \* In English: gOuroboros before the fix: tag 258 is refused only on the
 \* spent inputs before Conway; another tag is refused by the typed input
-\* and signer sets ("unexpected tag type") but passes on pool owners and
-\* witness-set fields, whose decoders ignore an unknown tag.
+\* and signer sets and the Conway witness set ("unexpected tag type") but
+\* passes on pool owners and the Shelley-Babbage witness-set fields, whose
+\* decoders ignore an unknown tag.
 GoMainDecodes ==
     CASE tag = "none" -> TRUE
       [] tag = "258"  -> field /= "inputs" \/ era = "Conway"
-      [] OTHER        -> field \in {"poolOwners", "witness"}
+      [] OTHER        -> \/ field = "poolOwners"
+                         \/ field = "witness" /\ era /= "Conway"
 
 \* Literally: "GoFixedDecodes is defined as: case tag equals "none" gives
 \*   TRUE; era equals "Conway" gives GoMainDecodes; tag equals "258" gives
@@ -98,10 +107,24 @@ GoFixedDecodes ==
       [] tag = "258"     -> FALSE
       [] OTHER           -> field = "witness" /\ ~elsewhere258
 
-\* Literally: "GoDecodes is defined as: if Rule equals "main" then
-\*   GoMainDecodes else GoFixedDecodes."
+\* Literally: "GoAnyTagDecodes is defined as: case tag equals "none" gives
+\*   TRUE; tag equals "258" gives era equals "Conway"; otherwise FALSE."
+\* In English: gOuroboros on e82a8a6c: before Conway
+\* ValidatePreConwaySetTags re-reads the map whenever its bytes hold a tag
+\* head, and refuses a field headed by any tag; pool owners refuse any tag
+\* before Conway and any tag but a single 258 from Conway [S3].
+GoAnyTagDecodes ==
+    CASE tag = "none" -> TRUE
+      [] tag = "258"  -> era = "Conway"
+      [] OTHER        -> FALSE
+
+\* Literally: "GoDecodes is defined as: case Rule equals "main" gives
+\*   GoMainDecodes, Rule equals "fixed" gives GoFixedDecodes, otherwise
+\*   GoAnyTagDecodes."
 \* In English: the gOuroboros verdict under Rule.
-GoDecodes == IF Rule = "main" THEN GoMainDecodes ELSE GoFixedDecodes
+GoDecodes == CASE Rule = "main"  -> GoMainDecodes
+              [] Rule = "fixed" -> GoFixedDecodes
+              [] OTHER          -> GoAnyTagDecodes
 
 \* Literally: "Init is defined as: era is a member of Eras, field is a
 \*   member of Fields and HasField of era and field, tag is a member of

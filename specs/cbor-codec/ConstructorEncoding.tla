@@ -30,6 +30,10 @@
 (*        non-empty slice into an indefinite list; a Go array, or a value  *)
 (*        with its own MarshalCBOR (IndefLengthList), is written as given. *)
 (*        Items inside are written by the library on both commits.         *)
+(*   [G3] fix/cbor-constructor-indefinite-fields 3d91ad2f: every list at   *)
+(*        any depth (slice, array or IndefLengthList) is 0x80 when empty   *)
+(*        and indefinite otherwise; byte strings over 64 bytes are written *)
+(*        as an indefinite string of 64-byte chunks.                       *)
 (* Checked in Go on ad7a4f25: [2]uint64{1,2} gives d879820102;             *)
 (* []any{[]any{1}} gives d8799f8101ff; a 65-byte field gives a definite    *)
 (* 5841 string; IndefLengthList{} gives d8799fff. On the parent nil gives *)
@@ -42,7 +46,7 @@
 CONSTANTS
     Containers, \* Go values tried as fields, a subset of AllContainers
     ItemKinds,  \* item kinds tried inside them, a subset of AllItems
-    GoRule      \* "main" [G1] or "fix" [G2]
+    GoRule      \* "main" [G1], "fix" [G2] or "plutus" [G3]
 
 VARIABLE input  \* the one constructor this behaviour encodes
 
@@ -127,6 +131,23 @@ GoFixHead(i) ==
     ELSE IF i.container = "goArray" THEN "def"
     ELSE "indef"
 
+\* In English: "3d91ad2f's field list: plutusList writes 0x80 for no items
+\*   and an indefinite list otherwise, whatever the container." [G3]
+\* Literally: "GoPlutusHead of i is defined as: if the items of i is the
+\*   empty set then "empty", else "indef"."
+GoPlutusHead(i) == IF i.items = {} THEN "empty" ELSE "indef"
+
+\* In English: "How 3d91ad2f writes each kind of item: plutusBytes chunks a
+\*   long byte string, plutusList writes any nested list indefinite." [G3]
+\* Literally: "GoPlutusItem of k is defined as: if k is "int" then "int",
+\*   else if k is "shortBytes" then "bytes", else if k is "longBytes" then
+\*   "chunkedBytes", else "indefList"."
+GoPlutusItem(k) ==
+    IF k = "int" THEN "int"
+    ELSE IF k = "shortBytes" THEN "bytes"
+    ELSE IF k = "longBytes" THEN "chunkedBytes"
+    ELSE "indefList"
+
 \* In English: "The shape of plutus's bytes for this constructor."
 \* Literally: "RefBytes of i is defined as the record whose head is
 \*   RefHead of i and whose items is the set of RefItem of k for every k in
@@ -135,12 +156,16 @@ RefBytes(i) == [head |-> RefHead(i), items |-> {RefItem(k) : k \in i.items}]
 
 \* In English: "The shape of gOuroboros's bytes, by the rule this config
 \*   names."
-\* Literally: "GoBytes of i is defined as the record whose head is (if
-\*   GoRule equals "main" then GoMainHead of i, else GoFixHead of i) and
-\*   whose items is the set of GoItem of k for every k in the items of i."
+\* Literally: "GoBytes of i is defined as the record whose head is
+\*   GoMainHead, GoFixHead or GoPlutusHead of i by GoRule, and whose items
+\*   is the set of GoPlutusItem of k (GoRule "plutus") or GoItem of k
+\*   for every k in the items of i."
 GoBytes(i) ==
-    [head |-> IF GoRule = "main" THEN GoMainHead(i) ELSE GoFixHead(i),
-     items |-> {GoItem(k) : k \in i.items}]
+    [head |-> CASE GoRule = "main" -> GoMainHead(i)
+                [] GoRule = "fix"  -> GoFixHead(i)
+                [] OTHER           -> GoPlutusHead(i),
+     items |-> IF GoRule = "plutus" THEN {GoPlutusItem(k) : k \in i.items}
+               ELSE {GoItem(k) : k \in i.items}]
 
 \* In English: "Pick any one input."
 \* Literally: "Init is defined as: input is a member of Inputs."

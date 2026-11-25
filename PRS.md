@@ -102,6 +102,7 @@ closes. A PR can draw on more than one model.
 | `dmq` (`MessagePayloadBytes`, N57) | #3332 (payload bytes hashed as received) | #3328 | open |
 | `ledger-leios` (`LeiosVoteShape`, L22) | #3333 (CIP-0164 vote shape; breaking) | #3329 | open |
 | `consensus-nonce` (`EpochNonce`, GoBytes "Family") | #3334 (epoch nonce over whole chains) | #3330 | open |
+| `consensus-eras` (`EraHistoryDecode`, tagged reply) | #3336 (tagged era history refused) | #3335 | open |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 

@@ -34,6 +34,9 @@
 (*        coin is a uint64 the library fills, and the library reads a      *)
 (*        bignum that fits into it. Checked in Go on 4ae0d4f9: c24105      *)
 (*        refused, 82c24105<multiasset> accepted with coin 5.              *)
+(*   [G4] fix/ledger-multiasset-bignum-quantity 15156a03: [G2], and        *)
+(*        MaryTransactionOutputValue.UnmarshalCBOR refuses a pair coin     *)
+(*        whose head is not major type 0, as for a bare coin.              *)
 (*                                                                         *)
 (* HOW TO READ THE SYMBOLS: see specs/keepalive/KeepAlive.tla and the      *)
 (* "Reading a formula literally" table in the top-level README.            *)
@@ -44,7 +47,7 @@ CONSTANTS
     Versions,   \* protocol versions to check, e.g. {8, 9, 12}
     Fields,     \* fields to check, a subset of AllFields
     TryValues,  \* values to check, a subset of Values
-    GoRule      \* "main" [G1] or "fix" [G2]
+    GoRule      \* "main" [G1], "fix" [G2] or "fixPair" [G4]
 
 VARIABLE input  \* the one integer this behaviour decodes
 
@@ -105,14 +108,14 @@ InDomain(i) ==
 RefAccepts(i) == i.enc = "head" /\ InDomain(i)
 
 \* In English: "Whether gOuroboros reads a bignum in this field: never for
-\*   a bare coin; always in a pair's coin; for asset quantities on main
-\*   but not on the fix." [G1] [G2] [G3]
+\*   a bare coin; in a pair's coin on main and the first fix but not on
+\*   15156a03; for asset quantities on main only." [G1] [G2] [G3] [G4]
 \* Literally: "GoReadsBignum of i is defined as: if the field of i is
 \*   "coinBare" then FALSE, else if the field of i is "coinInPair" then
-\*   TRUE, else GoRule equals "main"."
+\*   GoRule is "main" or "fix", else GoRule equals "main"."
 GoReadsBignum(i) ==
     IF i.field = "coinBare" THEN FALSE
-    ELSE IF i.field = "coinInPair" THEN TRUE
+    ELSE IF i.field = "coinInPair" THEN GoRule \in {"main", "fix"}
     ELSE GoRule = "main"
 
 \* In English: "gOuroboros accepts a head, or a bignum it reads, whose
