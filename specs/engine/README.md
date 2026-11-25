@@ -500,15 +500,27 @@ the second request is refused while the handler has not run yet, and the
 second request is admitted when its snapshot is taken after the whole round
 trip. The defect is in the test, not in `protocol.go`: both outcomes follow
 from the admission rules. Holding the handler's reply until the test has
-read the refusal removes both.
+read the refusal removes the second.
 
-| Config | Handler | Result |
-| --- | --- | --- |
-| `EngineRoundTripVerdictEarlyBug` | replies at once; error read, count asserted | fails: error read before the handler ran |
-| `EngineRoundTripVerdictAdmittedBug` | replies at once | fails: second request admitted, no error ever |
-| `EngineRoundTripVerdict` | held until the error is read | passes, no deadlock |
-| `EngineRoundTripVerdictRefused` | held until the error is read | passes: always refused |
+The first remains even with the reply held. `stateLoop` publishes the
+Idle->Busy state before it answers `recvLoop`, so `readLoop` can refuse the
+second request and stop the protocol (`SendError`) first;
+`requestStateTransition` then returns `ErrProtocolShuttingDown` and
+`recvLoop` returns without running the handler. A test that waits for the
+handler before reading the refusal can wait forever. What the refusal does
+prove is that the first request's transition was applied and its reply is
+still held: the test reads the refusal first, checks the state is Busy, and
+allows at most one handler call.
+
+| Config | Handler | Test | Result |
+| --- | --- | --- | --- |
+| `EngineRoundTripVerdictEarlyBug` | replies at once | reads error, asserts one call | fails: error read before the handler ran |
+| `EngineRoundTripVerdictAdmittedBug` | replies at once | reads error | fails: second request admitted, no error ever |
+| `EngineRoundTripVerdictStallBug` | held until the error is read | waits for the handler, then the error | fails: recvLoop quit before the handler, test stalls |
+| `EngineRoundTripVerdictFixedEarlyBug` | held until the error is read | reads error, asserts one call | fails: the stop can still beat the handler |
+| `EngineRoundTripVerdict` | held until the error is read | reads error, checks Busy and at most one call | passes, no deadlock |
+| `EngineRoundTripVerdictRefused` | held until the error is read | reads error | passes: always refused |
 
 ```sh
-bin/tlc -config specs/engine/EngineRoundTripVerdictEarlyBug.cfg specs/engine/EngineRoundTripVerdict.tla
+bin/tlc -config specs/engine/EngineRoundTripVerdictStallBug.cfg specs/engine/EngineRoundTripVerdict.tla
 ```

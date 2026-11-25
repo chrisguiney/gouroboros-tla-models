@@ -32,51 +32,83 @@
 (* coalesced second request is judged against the state after the reply,   *)
 (* as DRIFT.md N1 records.                                                 *)
 (*                                                                         *)
+(* A refusal calls SendError, which stops the protocol. stateLoop         *)
+(* publishes the Idle->Busy state before it answers recvLoop's request on  *)
+(* that request's errorChan, so readLoop can refuse message 2 and stop the *)
+(* protocol before recvLoop has the answer. requestStateTransition then    *)
+(* selects between the answer and stopChan, and may return                 *)
+(* ErrProtocolShuttingDown; recvLoop returns without running the handler.  *)
+(*                                                                         *)
 (* Gated = FALSE: the handler replies as soon as it has run, and the test *)
-(*   reads the handler count when the error arrives (the test as written). *)
+(*   reads the handler count when the error arrives (the original test).   *)
 (* Gated = TRUE: the handler waits for the test to release it after the    *)
-(*   error, and the test waits for the handler to have run before it       *)
-(*   reads the error.                                                      *)
+(*   error.                                                                *)
+(* WaitHandler = TRUE: the test waits for the handler to have run before   *)
+(*   it reads the error. WaitHandler = FALSE: the test reads the error     *)
+(*   first, then checks the state and that the handler ran at most once.   *)
 (***************************************************************************)
 EXTENDS Naturals
 
-CONSTANT Gated      \* TRUE: handshake between test and handler
+CONSTANT Gated,      \* TRUE: the handler holds its reply until released
+         WaitHandler \* TRUE: the test waits for the handler before the error
 
 VARIABLES
     st,        \* the protocol state: "Idle" or "Busy"
     gen,       \* its generation
     reserved,  \* peerAgencyReserved
     queued,    \* TRUE while the first message waits for recvLoop
-    recv,      \* recvLoop: "wait", "transitioned", "handled", "replied"
+    recv,      \* recvLoop: "wait", "applied", "transitioned", "handled",
+               \* "replied", "quit"
     handled,   \* how many times the handler has run
     rd,        \* readLoop on message 2: "start", "snapped", "refused", "admitted"
     snapSt,    \* snapshot state
     snapGen,   \* snapshot generation
     obs,       \* the test: "none", "sawError", "done"
     seen,      \* handled count when the test read the error
-    released   \* TRUE once the test has released a gated handler
+    released,  \* TRUE once the test has released a gated handler
+    stopped,   \* TRUE once SendError has stopped the protocol
+    seenSt     \* the state when the test read the error
 
 vars == <<st, gen, reserved, queued, recv, handled, rd, snapSt, snapGen, obs,
-          seen, released>>
+          seen, released, stopped, seenSt>>
 
 \* In English: "The first message has been admitted and queued; the state has
 \* not moved yet; nothing has been decided about the second."
 Init == /\ st = "Idle" /\ gen = 0 /\ reserved = TRUE /\ queued = TRUE
         /\ recv = "wait" /\ handled = 0 /\ rd = "start"
         /\ snapSt = "Idle" /\ snapGen = 0 /\ obs = "none" /\ seen = 0
-        /\ released = FALSE
+        /\ released = FALSE /\ stopped = FALSE /\ seenSt = "Idle"
 
-\* In English: "recvLoop takes the queued message and applies Idle -> Busy."
-Transition == /\ queued /\ recv = "wait"
+\* In English: "recvLoop takes the queued message and stateLoop publishes
+\* Idle -> Busy; recvLoop has not yet received stateLoop's answer."
+Transition == /\ queued /\ recv = "wait" /\ ~stopped
               /\ st' = "Busy" /\ gen' = gen + 1 /\ reserved' = FALSE
-              /\ queued' = FALSE /\ recv' = "transitioned"
-              /\ UNCHANGED <<handled, rd, snapSt, snapGen, obs, seen, released>>
+              /\ queued' = FALSE /\ recv' = "applied"
+              /\ UNCHANGED <<handled, rd, snapSt, snapGen, obs, seen, released,
+                             stopped, seenSt>>
+
+\* In English: "requestStateTransition receives stateLoop's answer. Once the
+\* protocol is stopped, its select may take the answer or stopChan."
+Learn == /\ recv = "applied"
+         /\ recv' = "transitioned"
+         /\ UNCHANGED <<st, gen, reserved, queued, handled, rd, snapSt, snapGen,
+                        obs, seen, released, stopped, seenSt>>
+
+\* In English: "recvLoop sees the stop first and returns: from its idle
+\* select, from requestStateTransition (ErrProtocolShuttingDown), or from
+\* a released handler's reply transition."
+Quit == /\ stopped
+        /\ \/ recv \in {"wait", "applied"}
+           \/ recv = "handled" /\ (~Gated \/ released)
+        /\ recv' = "quit"
+        /\ UNCHANGED <<st, gen, reserved, queued, handled, rd, snapSt, snapGen,
+                       obs, seen, released, stopped, seenSt>>
 
 \* In English: "recvLoop runs the handler, which counts itself."
 Handle == /\ recv = "transitioned"
           /\ handled' = handled + 1 /\ recv' = "handled"
           /\ UNCHANGED <<st, gen, reserved, queued, rd, snapSt, snapGen, obs,
-                         seen, released>>
+                         seen, released, stopped, seenSt>>
 
 \* In English: "The handler's reply applies Busy -> Idle; a gated handler
 \* waits for the test's release first."
@@ -84,47 +116,48 @@ Reply == /\ recv = "handled" /\ (~Gated \/ released)
          /\ st' = "Idle" /\ gen' = gen + 1 /\ reserved' = FALSE
          /\ recv' = "replied"
          /\ UNCHANGED <<queued, handled, rd, snapSt, snapGen, obs, seen,
-                        released>>
+                        released, stopped, seenSt>>
 
 \* In English: "readLoop snapshots the state when message 2 starts."
 Snapshot == /\ rd = "start"
             /\ rd' = "snapped" /\ snapSt' = st /\ snapGen' = gen
             /\ UNCHANGED <<st, gen, reserved, queued, recv, handled, obs, seen,
-                           released>>
+                           released, stopped, seenSt>>
 
-\* In English: "readLoop decides admission of message 2 against the state now."
+\* In English: "readLoop decides admission of message 2 against the state now;
+\* a refusal goes through SendError, which stops the protocol."
 Decide ==
     /\ rd = "snapped"
     /\ IF st = "Busy"
-          THEN /\ rd' = "refused" /\ UNCHANGED reserved
+          THEN /\ rd' = "refused" /\ UNCHANGED reserved /\ stopped' = TRUE
           ELSE IF gen # snapGen /\ ~(gen = snapGen + 1 /\ snapSt = "Idle")
-          THEN /\ rd' = "refused" /\ UNCHANGED reserved
+          THEN /\ rd' = "refused" /\ UNCHANGED reserved /\ stopped' = TRUE
           ELSE IF ~reserved
-          THEN /\ rd' = "admitted" /\ reserved' = TRUE
-          ELSE /\ rd' = rd /\ UNCHANGED reserved   \* wait and ask again
+          THEN /\ rd' = "admitted" /\ reserved' = TRUE /\ UNCHANGED stopped
+          ELSE /\ rd' = rd /\ UNCHANGED <<reserved, stopped>> \* ask again
     /\ UNCHANGED <<st, gen, queued, recv, handled, snapSt, snapGen, obs, seen,
-                   released>>
+                   released, seenSt>>
 
-\* In English: "The test reads the error; a gated test first waits for the
-\* handler, an ungated one reads the count at once."
-Observe == /\ rd = "refused" /\ obs = "none" /\ (~Gated \/ handled >= 1)
-           /\ obs' = "sawError" /\ seen' = handled
+\* In English: "The test reads the error, first waiting for the handler if
+\* WaitHandler, and records the handler count and the state."
+Observe == /\ rd = "refused" /\ obs = "none" /\ (~WaitHandler \/ handled >= 1)
+           /\ obs' = "sawError" /\ seen' = handled /\ seenSt' = st
            /\ UNCHANGED <<st, gen, reserved, queued, recv, handled, rd, snapSt,
-                          snapGen, released>>
+                          snapGen, released, stopped>>
 
 \* In English: "The test releases a gated handler and finishes."
 Release == /\ obs = "sawError"
            /\ obs' = "done" /\ released' = TRUE
            /\ UNCHANGED <<st, gen, reserved, queued, recv, handled, rd, snapSt,
-                          snapGen, seen>>
+                          snapGen, seen, stopped, seenSt>>
 
 \* In English: "Everything has finished, or message 2 was admitted and the
 \* test would time out; stay put so TLC reports only real deadlocks."
-Finished == /\ ( (obs = "done" /\ recv = "replied")
+Finished == /\ ( (obs = "done" /\ recv \in {"replied", "quit"})
                  \/ rd = "admitted" )
             /\ UNCHANGED vars
 
-Next == Transition \/ Handle \/ Reply \/ Snapshot \/ Decide \/ Observe
+Next == Transition \/ Learn \/ Quit \/ Handle \/ Reply \/ Snapshot \/ Decide \/ Observe
         \/ Release \/ Finished
 
 Spec == Init /\ [][Next]_vars
@@ -133,4 +166,11 @@ Spec == Init /\ [][Next]_vars
 HandlerRanBeforeError == obs # "none" => seen = 1
 \* The test's first assertion: message 2 is always refused, never admitted.
 AlwaysRefused == rd # "admitted"
+\* A test waiting for the handler can wait forever: recvLoop quit before it.
+NoStall == ~(WaitHandler /\ obs = "none" /\ rd = "refused" /\ recv = "quit"
+             /\ handled = 0)
+\* What the error proves: the first request's transition was applied and its
+\* reply is still held, and message 2 never reached the handler.
+RefusedInBusy == obs # "none" => seenSt = "Busy"
+AtMostOneHandled == handled <= 1
 =============================================================================
