@@ -31,7 +31,7 @@ Run every config with `scripts/run-model.sh specs/cbor-codec`.
 | `PlutusConstrFields.tla` | tag family x alternative number x fields item -> accept | `FieldsAsDecodeListOf` | L26 | `fix/cbor-constructor-fields-list` `a37a8a90` (#3283) |
 | `ValueSetMembers.tla` | position x tag 258 content x member kinds x whole-tree overrun -> accept | `SetMembersAsRfc8949`, `TreeBudgetHolds` | L27 | `fix/cbor-value-set-members` `a69cd1ad` (#3284) |
 | `MultiAssetQuantity.tla` | protocol version x field x value x head or bignum -> accept | `QuantityAsDecodeWord64` | L28 | `fix/ledger-multiasset-bignum-quantity` `4ae0d4f9` (#3279) |
-| `ConstructorEncoding.tla` | tag family x Go fields value x item kinds -> byte shape (hence hash) | `BytesAsPlutusEncodeData` | L31 | `fix/cbor-constructor-indefinite-fields` `ad7a4f25` (#3290) |
+| `ConstructorEncoding.tla` | tag family x Go fields value x item kinds -> byte shape (hence hash) | `BytesAsPlutusEncodeData` | L31 | `fix/cbor-constructor-indefinite-fields` `c03e5b5a` (#3290) |
 
 ## Configs
 
@@ -54,11 +54,14 @@ Run every config with `scripts/run-model.sh specs/cbor-codec`.
 | `MultiAssetQuantityCoinInPairFixBug` | fix, coin of a `[coin, multiasset]` pair | fails (residual) | `82c24105<multiasset>` |
 | `ConstructorEncodingMainBug` | main | fails | nil fields: `d879f6`, plutus `d87980` |
 | `ConstructorEncodingMainSliceBug` | main, `[]any{1}` | fails | `d8798101`, plutus `d8799f01ff` |
-| `ConstructorEncoding` | fix, the shapes it targets | passes (30 states) | |
+| `ConstructorEncoding` | fix [G6], every container and item kind | passes | |
 | `ConstructorEncodingGoArrayFixBug` | fix, Go array | fails (residual) | `d879820102` |
 | `ConstructorEncodingNestedSliceFixBug` | fix, nested `[]any` | fails (residual, known) | `d8799f8101ff` |
 | `ConstructorEncodingLongBytesFixBug` | fix, 65-byte field | fails (residual) | definite `5841...` |
 | `ConstructorEncodingEmptyIndefFixBug` | fix, empty `IndefLengthList` | fails (residual) | `d8799fff` |
+| `ConstructorEncodingNamedBytesMapFixBug` | [G4], 65-byte `PlutusV1Script` | fails | definite `5841...` |
+| `ConstructorEncodingBigIntValueMapFixBug` | [G4], `big.Int` value, 65-byte magnitude | fails | `c25841...` |
+| `ConstructorEncodingScalarFieldsMergedBug` | [G4] merged with main, fields `5` | fails | `d87905`, which `ConstructorDecoder` refuses |
 
 Every counterexample above was also checked in Go against the named
 commit and its parent.
