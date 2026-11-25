@@ -61,6 +61,12 @@
 (*        byte slice or array without its own MarshalCBOR, and every       *)
 (*        big.Int value, is chunked; a fields value that is not a list is  *)
 (*        refused.                                                         *)
+(*   [G7] c03e5b5a on that branch: plutusByteKind copies the bytes with    *)
+(*        reflect.Copy, which needs identical element types, so a slice or *)
+(*        array of a named uint8 type ([]NamedByte) panics at any length.  *)
+(*        The library writes such a value as a byte string.                *)
+(*   [G8] the fix: the bytes are read element by element, so a named      *)
+(*        element type is a byte string like any other.                    *)
 (* Checked in Go on ad7a4f25: [2]uint64{1,2} gives d879820102;             *)
 (* []any{[]any{1}} gives d8799f8101ff; a 65-byte field gives a definite    *)
 (* 5841 string; IndefLengthList{} gives d8799fff. On the parent nil gives *)
@@ -74,7 +80,7 @@ CONSTANTS
     Containers, \* Go values tried as fields, a subset of AllContainers
     ItemKinds,  \* item kinds tried inside them, a subset of AllItems
     GoRule      \* "main" [G1], "fix" [G2], "plutus" [G3], "plutusMap" [G4]
-                \* or "plutusKinds" [G6]
+                \* "plutusKinds" [G6][G7] or "plutusElemKinds" [G8]
 
 VARIABLE input  \* the one constructor this behaviour encodes
 
@@ -89,14 +95,17 @@ AllContainers == {"nil", "emptySlice", "slice", "goArray", "indefList",
 \* In English: "Kinds of item inside the fields: an integer, a byte
 \*   string of at most 64 bytes, a longer one, a nested Data list given as
 \*   a []any, one given as an IndefLengthList, the map kinds below, a byte
-\*   string over 64 bytes given as a named byte slice (PlutusV1Script), and
-\*   a big.Int value whose magnitude is over 64 bytes."
+\*   string over 64 bytes given as a named byte slice (PlutusV1Script),
+\*   a big.Int value whose magnitude is over 64 bytes, and a short and a
+\*   long byte string given as a slice of a named uint8 type."
 \* Literally: "AllItems is defined as the set containing "int",
 \*   "shortBytes", "longBytes", "nestedSlice", "nestedIndef", the map
-\*   kinds, "namedLongBytes" and "bigIntValueLong"."
+\*   kinds, "namedLongBytes", "bigIntValueLong", "namedElemShortBytes"
+\*   and "namedElemLongBytes"."
 AllItems == {"int", "shortBytes", "longBytes", "nestedSlice", "nestedIndef",
              "mapShort", "mapLongBytes", "mapNestedSlice", "indefMapShort",
-             "namedLongBytes", "bigIntValueLong"}
+             "namedLongBytes", "bigIntValueLong", "namedElemShortBytes",
+             "namedElemLongBytes"}
 
 \* In English: "The map item kinds: a Go map with short members, one with
 \*   a byte string over 64 bytes as a key or value, one with a []any list
@@ -131,7 +140,9 @@ RefHead(i) ==
 \*   if k is "shortBytes" then "bytes", else if k is "longBytes" then
 \*   "chunkedBytes", else "indefList"."
 RefItem(k) ==
-    IF k = "namedLongBytes" THEN "chunkedBytes"           \* [R2]
+    IF k \in {"namedLongBytes", "namedElemLongBytes"}
+    THEN "chunkedBytes"                                    \* [R2]
+    ELSE IF k = "namedElemShortBytes" THEN "bytes"
     ELSE IF k = "bigIntValueLong" THEN "chunkedBignum"    \* [R5]
     ELSE IF k \in {"mapShort", "indefMapShort"} THEN "defMap"
     ELSE IF k = "mapLongBytes" THEN "defMapChunkedBytes"
@@ -148,7 +159,8 @@ RefItem(k) ==
 \*   "definiteBytes", else if k is "nestedSlice" then "defList", else
 \*   "indefList"."
 GoItem(k) ==
-    IF k = "namedLongBytes" THEN "definiteBytes"
+    IF k \in {"namedLongBytes", "namedElemLongBytes"} THEN "definiteBytes"
+    ELSE IF k = "namedElemShortBytes" THEN "bytes"
     ELSE IF k = "bigIntValueLong" THEN "definiteBignum"
     ELSE IF k = "mapShort" THEN "defMap"
     ELSE IF k = "mapLongBytes" THEN "defMapDefiniteBytes"
@@ -213,7 +225,8 @@ GoKindsHead(i) ==
 \*   else if k is "shortBytes" then "bytes", else if k is "longBytes" then
 \*   "chunkedBytes", else "indefList"."
 GoPlutusItem(k) ==
-    IF k \in MapItems \cup {"namedLongBytes", "bigIntValueLong"}
+    IF k \in MapItems \cup {"namedLongBytes", "bigIntValueLong",
+                         "namedElemShortBytes", "namedElemLongBytes"}
     THEN GoItem(k)
     ELSE IF k = "int" THEN "int"
     ELSE IF k = "shortBytes" THEN "bytes"
@@ -238,9 +251,21 @@ GoPlutusMapItem(k) ==
 \*   then "chunkedBytes", else if k is "bigIntValueLong" then
 \*   "chunkedBignum", else GoPlutusMapItem of k."
 GoKindsItem(k) ==
-    IF k = "namedLongBytes" THEN "chunkedBytes"
+    IF k \in {"namedElemShortBytes", "namedElemLongBytes"} THEN "panic"
+    ELSE IF k = "namedLongBytes" THEN "chunkedBytes"
     ELSE IF k = "bigIntValueLong" THEN "chunkedBignum"
     ELSE GoPlutusMapItem(k)
+
+\* In English: "How the fix writes each kind of item: as GoKindsItem, but
+\*   a slice of a named uint8 type is a byte string, chunked when long."
+\*   [G8]
+\* Literally: "GoElemKindsItem of k is defined as: if k is
+\*   "namedElemShortBytes" then "bytes", else if k is
+\*   "namedElemLongBytes" then "chunkedBytes", else GoKindsItem of k."
+GoElemKindsItem(k) ==
+    IF k = "namedElemShortBytes" THEN "bytes"
+    ELSE IF k = "namedElemLongBytes" THEN "chunkedBytes"
+    ELSE GoKindsItem(k)
 
 \* In English: "The shape of plutus's bytes for this constructor."
 \* Literally: "RefBytes of i is defined as the record whose head is
@@ -257,12 +282,15 @@ RefBytes(i) == [head |-> RefHead(i), items |-> {RefItem(k) : k \in i.items}]
 GoBytes(i) ==
     [head |-> CASE GoRule = "main"        -> GoMainHead(i)
                 [] GoRule = "fix"         -> GoFixHead(i)
-                [] GoRule = "plutusKinds" -> GoKindsHead(i)
+                [] GoRule \in {"plutusKinds", "plutusElemKinds"} ->
+                        GoKindsHead(i)
                 [] OTHER                  -> GoPlutusHead(i),
      items |-> CASE GoRule = "plutus"    -> {GoPlutusItem(k) : k \in i.items}
                  [] GoRule = "plutusMap" -> {GoPlutusMapItem(k) : k \in i.items}
                  [] GoRule = "plutusKinds" ->
                         {GoKindsItem(k) : k \in i.items}
+                 [] GoRule = "plutusElemKinds" ->
+                        {GoElemKindsItem(k) : k \in i.items}
                  [] OTHER                -> {GoItem(k) : k \in i.items}]
 
 \* In English: "Pick any one input."
