@@ -89,3 +89,10 @@ differ from the reference:
    L31 already records.
 4. **L27: an unrecognised tag around a composite-key map** is still
    refused, inside a set or alone. No Cardano structure carries one.
+
+`MultiAssetQuantity` now also varies the encoding over a non-minimal tag
+head (`d8 02`, `d8 03`) and a bignum behind a duplicate asset name. At
+15156a03 the quantity check ran only when a literal `c2` or `c3` byte
+occurred and read quantities through a Go map, so both forms passed
+(`MultiAssetQuantityFixPairTagFormsBug`). The fix reads every quantity pair
+by pair from the wire (`MultiAssetQuantityWalk`, `GoRule = "fixWalk"`).

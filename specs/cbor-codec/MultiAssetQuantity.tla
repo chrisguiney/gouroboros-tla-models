@@ -37,6 +37,14 @@
 (*   [G4] fix/ledger-multiasset-bignum-quantity 15156a03: [G2], and        *)
 (*        MaryTransactionOutputValue.UnmarshalCBOR refuses a pair coin     *)
 (*        whose head is not major type 0, as for a bare coin.              *)
+(*        Its quantity check runs only when a literal c2 or c3 byte occurs *)
+(*        and reads the quantities through a Go map, so a tag 2 with a     *)
+(*        non-minimal tag head (d8 02, allowed by cbor/tags.go) and a      *)
+(*        bignum on an asset name that a later duplicate replaces (before  *)
+(*        version 9, where duplicates are kept last-wins) pass it.         *)
+(*   [G5] the fix of [G4]'s gap: every quantity of every policy is read    *)
+(*        pair by pair from the wire, duplicates included, and any head    *)
+(*        that is not major type 0 or 1 is refused.                        *)
 (*                                                                         *)
 (* HOW TO READ THE SYMBOLS: see specs/keepalive/KeepAlive.tla and the      *)
 (* "Reading a formula literally" table in the top-level README.            *)
@@ -47,7 +55,8 @@ CONSTANTS
     Versions,   \* protocol versions to check, e.g. {8, 9, 12}
     Fields,     \* fields to check, a subset of AllFields
     TryValues,  \* values to check, a subset of Values
-    GoRule      \* "main" [G1], "fix" [G2] or "fixPair" [G4]
+    Encodings,  \* encodings to check, a subset of AllEncodings
+    GoRule      \* "main" [G1], "fix" [G2], "fixPair" [G4] or "fixWalk" [G5]
 
 VARIABLE input  \* the one integer this behaviour decodes
 
@@ -76,19 +85,31 @@ Word64 == {"zero", "five", "w64max", "i64maxPlus1"}
 \*   "minusOne" and "i64min"."
 Int64 == {"zero", "five", "minusOne", "i64min"}
 
-\* In English: "A head (major type 0 or 1) holds every value but 2^64."
-\* Literally: "Encodable of v and e is defined as: e equals "bignum", or v
-\*   is not "beyond64"."
-Encodable(v, e) == e = "bignum" \/ v # "beyond64"
+\* In English: "The ways an integer is written: a major type 0/1 head; a
+\*   tag 2/3 bignum with a one-byte tag head (c2, c3); the same with a
+\*   non-minimal two-byte tag head (d8 02, d8 03); and a bignum on an asset
+\*   name that a later entry with the same name repeats with a head."
+\* Literally: "AllEncodings is defined as the set containing "head",
+\*   "bignum", "bignumLongTag" and "bignumBehindDup"."
+AllEncodings == {"head", "bignum", "bignumLongTag", "bignumBehindDup"}
+
+\* In English: "A head (major type 0 or 1) holds every value but 2^64; a
+\*   duplicate asset name exists only in an asset map."
+\* Literally: "Encodable of v, e and f is defined as: (e is not "head", or v
+\*   is not "beyond64"), and (e is not "bignumBehindDup", or f is an asset
+\*   field)."
+Encodable(v, e, f) ==
+    /\ e # "head" \/ v # "beyond64"
+    /\ e # "bignumBehindDup" \/ f \in {"outputAsset", "mintAsset"}
 
 \* In English: "Every version, field, value and encoding that can be
 \*   written."
 \* Literally: "Inputs is defined as the set of records r whose pv is a
 \*   member of Versions, whose field is a member of Fields, whose value is
-\*   a member of TryValues and whose enc is "head" or "bignum", such that
-\*   Encodable of the value of r and the enc of r."
+\*   a member of TryValues and whose enc is a member of Encodings, such that
+\*   Encodable of the value, the enc and the field of r."
 Inputs == {r \in [pv : Versions, field : Fields, value : TryValues,
-                  enc : {"head", "bignum"}] : Encodable(r.value, r.enc)}
+                  enc : Encodings] : Encodable(r.value, r.enc, r.field)}
 
 \* In English: "The value is in the field's domain: Word64 for outputs and
 \*   coins, Int64 for mint; from version 9 an asset quantity is not zero."
@@ -102,27 +123,39 @@ InDomain(i) ==
     /\ i.pv < 9 \/ i.field \in {"coinBare", "coinInPair"} \/ i.value # "zero"
 
 \* In English: "The reference reads only heads, and only values in the
-\*   field's domain." [R1] [R3] [S1]
+\*   field's domain; it decodes every entry of an asset map, so a bignum
+\*   behind a duplicate name fails too." [R1] [R2] [R3] [S1]
 \* Literally: "RefAccepts of i is defined as: the enc of i equals "head",
 \*   and InDomain of i."
 RefAccepts(i) == i.enc = "head" /\ InDomain(i)
 
 \* In English: "Whether gOuroboros reads a bignum in this field: never for
 \*   a bare coin; in a pair's coin on main and the first fix but not on
-\*   15156a03; for asset quantities on main only." [G1] [G2] [G3] [G4]
+\*   15156a03; for asset quantities on main, and with a long tag head on
+\*   every rule but fixWalk." [G1] [G2] [G3] [G4] [G5]
 \* Literally: "GoReadsBignum of i is defined as: if the field of i is
 \*   "coinBare" then FALSE, else if the field of i is "coinInPair" then
-\*   GoRule is "main" or "fix", else GoRule equals "main"."
+\*   GoRule is "main" or "fix", else if the enc of i is "bignumLongTag"
+\*   then GoRule is not "fixWalk", else GoRule equals "main"."
 GoReadsBignum(i) ==
     IF i.field = "coinBare" THEN FALSE
     ELSE IF i.field = "coinInPair" THEN GoRule \in {"main", "fix"}
+    ELSE IF i.enc = "bignumLongTag" THEN GoRule # "fixWalk"
     ELSE GoRule = "main"
 
 \* In English: "gOuroboros accepts a head, or a bignum it reads, whose
-\*   value is in the field's domain." [G1] [G2] [G3]
-\* Literally: "GoAccepts of i is defined as: (the enc of i equals "head",
-\*   or GoReadsBignum of i), and InDomain of i."
-GoAccepts(i) == (i.enc = "head" \/ GoReadsBignum(i)) /\ InDomain(i)
+\*   value is in the field's domain. A bignum behind a duplicate name is
+\*   never read: the asset map keeps the later head (in domain), so before
+\*   version 9 every rule but fixWalk accepts it; from 9 the duplicate is
+\*   refused." [G1] [G2] [G3] [G4] [G5]
+\* Literally: "GoAccepts of i is defined as: if the enc of i is
+\*   "bignumBehindDup", then the pv of i is less than 9 and GoRule is not
+\*   "fixWalk"; else (the enc of i equals "head", or GoReadsBignum of i),
+\*   and InDomain of i."
+GoAccepts(i) ==
+    IF i.enc = "bignumBehindDup"
+        THEN i.pv < 9 /\ GoRule # "fixWalk"
+        ELSE (i.enc = "head" \/ GoReadsBignum(i)) /\ InDomain(i)
 
 \* In English: "Pick any one input."
 \* Literally: "Init is defined as: input is a member of Inputs."
