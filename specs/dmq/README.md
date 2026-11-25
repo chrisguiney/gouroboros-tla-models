@@ -476,7 +476,10 @@ accepts two concurrent submissions), `DupRaceFatalBug` (a submission that lost
 a race to the same message is refused), `RecheckWhenOffBug` (with the limit
 off, Delay 0, commit still compares a prepared time with a later acceptance
 and refuses the negative gap; `LimitOff.cfg` is the fixed run, and adds the
-question `OffNeverRefused`). Probes: `ProbeKeepValidBug` (a reply
+question `OffNeverRefused`), `CounterOnDuplicateBug` (a held message
+re-verified against the opcert counter is refused once its pool's counter
+has moved past it, which `Rotate` models; the reference drops a held
+message before validating it). Probes: `ProbeKeepValidBug` (a reply
 both accepts a message and disconnects, as in the reference),
 `ProbeTooFrequentBug` (a message with no other failure is refused as too
 frequent).
