@@ -1,6 +1,6 @@
 # Ledger encodings
 
-Four small tables, one per encoding decision gOuroboros made differently
+Five small tables, one per encoding decision gOuroboros made differently
 from cardano-ledger before a fix. Each module picks one cell of its table
 in the initial state and never moves (`Next` leaves every variable
 unchanged), so TLC checks every cell. A constant `Rule` selects gOuroboros
@@ -23,6 +23,7 @@ header (`[S1]`...).
 | | `MajorWidthAsReference` | the major is refused at decoding above `ProtVerHigh era + 1` |
 | `CostModelLanguages.tla` | `LegacyCostModelsAsReference` | before version 9, `decodeCostModelLegacy` accepts PlutusV1 and PlutusV2 with their exact parameter counts (`Plutus/CostModels.hs` 307-338) |
 | `PreConwaySetTag.tla` | `SetTagAsReference` | `decodeSet` refuses a tag before version 9 and permits tag 258 from 9 (`Binary/Decoding/Decoder.hs` 930-953); witness sets use `decodeList` below 9 (`Shelley/TxWits.hs` 261-273, `Alonzo/TxWits.hs` 347-357, 569-580, 660-700, 721-730) |
+| `TxSizeFraming.tla` | `SizeAsReference`, `FramingIndependent` | `sizeShelleyTxF` is the length of `toCBORForSizeComputation`: a one-byte array header, the body, the witness set, the auxiliary data (null as one byte), whatever framing the transaction arrived in (`Shelley/Tx.hs` 155-177; Allegra `Tx.hs` 74, Mary `Tx.hs` 71) |
 | `TxOutValueData.tla` | `TransValueAsReference` | `transValue` always has the ada entry, zero included (`Plutus/TxInfo.hs` 186-187, `Alonzo/Plutus/TxInfo.hs` 417-418, `Babbage/TxInfo.hs` 158) |
 | `MaryMinCoin.tla` | `MinCoinAsReference` | `MinCoinTxOut` is `scaledMinDeposit` of the output (`Mary/TxOut.hs` 47-76, `Mary/Value.hs` 238-258, 747-762) |
 | | `VerdictAsReference` | the too-small verdict is `pointwise (<)` against that minimum (`Allegra/Rules/Utxo.hs` 270-284) |
@@ -49,6 +50,9 @@ far below `W16`, as in the real numbers.
 | `PreConwaySetTagOtherTagBug.cfg` | L30 | fixed | **fails** `SetTagAsReference` (found by the model) | Shelley witness set, a field with a tag other than 258 and no tag 258 head elsewhere: decoded; the reference refuses every tag |
 | `PreConwaySetTagBuiltOwnersBug.cfg` | L30 | anyTag | **fails** `BuiltOwnersRoundTrip` | a built Shelley pool registration: owners written under tag 258, then refused by the decoder |
 | `TxOutValueDataMainBug.cfg` | L15 | main | **fails** `TransValueAsReference` | a Shelley output of coin 0 in a PlutusV3 TxInfo: no ada entry. `TestTxOutPlutusDataKeepsZeroAda` "shelley" |
+| `TxSizeFramingMainBug.cfg` | L34 | main | **fails** `SizeAsReference` | a Shelley, Allegra or Mary transaction whose outer array is `98 03` or `9f ... ff`: one byte more than the reference's size |
+| `TxSizeFramingMainIndependenceBug.cfg` | L34 | main | **fails** `FramingIndependent` | the same transaction re-framed measures a different size |
+| `TxSizeFraming.cfg` | L34 | fixed | passes | three eras, three framings, null or present auxiliary data |
 | `TxOutValueData.cfg` | L15 | fixed | passes | four output eras, PlutusV1 to V3, coin 0 or 1, with and without assets |
 | `MaryMinCoinMainBug.cfg` | L33 | main | **fails** `MinCoinAsReference` | mv 27, one policy, one asset with an empty name: minimum 38, main returns 27 |
 | `MaryMinCoinMainVerdict.cfg` | L33 | main | passes `VerdictAsReference` | the verdict already agrees, so the fix must not change it |
@@ -99,4 +103,4 @@ scripts/run-model.sh specs/ledger-codec
 cd specs/ledger-codec && ../../bin/tlc -config ProtVerWidthMainBug.cfg ProtVerWidth.tla
 ```
 
-All 13 configs run in a few seconds.
+All 21 configs run in a few seconds.
