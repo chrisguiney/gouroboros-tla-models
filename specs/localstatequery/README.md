@@ -190,6 +190,73 @@ unread and the client waits until its acquire times out. The model now
 leaves it unread too, so the failure shows up as a deadlock, which is what
 the code does.
 
+## Slice 3: query encodings (`LocalStateQueryCodec.tla`)
+
+### What the code does
+
+A table, not a protocol: each cell is a Shelley-based era, a block query
+and the filter a caller passes (nil, empty or non-empty). The model does
+no byte arithmetic; a set argument is a plain array, an array behind tag
+258, or CBOR null. Three rules of gOuroboros are switchable between `main`
+and the fix, one per DRIFT entry:
+
+- `EraSetRule` (N48): main writes the delegations filter of
+  `GetFilteredDelegationsAndRewardAccounts` tagged in every era and the two
+  UTxO filters as the caller's slice, so nil is null;
+  `fix/localstatequery-era-set-encoding` (`eraFilterSet`) tags the three
+  from Conway and sends nil as the empty set.
+- `AccountStateRule` (N49): main sends `GetAccountState` only from Conway;
+  `fix/localstatequery-account-state-all-eras` sends it in every Shelley
+  era.
+- `FuturePParamsRule` (N50): main's server has no query type 33;
+  `fix/localstatequery-decode-future-pparams` decodes it.
+
+The reference [Q1]-[Q5], [L1]-[L3]: the three filters use the era's own
+encoding at the era's lowest protocol version, so a set is tagged from
+Conway (version 9) and the node refuses the tag before it; null is never a
+set. `GetNonMyopicMemberRewards`, `GetStakePoolParams` and
+`GetStakeDelegDeposits` use cardano-binary and are tagged in every era.
+`GetGovState` and `GetAccountState` are answered in every Shelley era;
+`GetConstitution`, `GetRatifyState`, `GetFuturePParams` and the Conway set
+queries only from Conway (`requireCG`).
+
+### The questions
+
+| Invariant | Question | Reference rule |
+| --- | --- | --- |
+| `ClientSetsDecode` | does a node decode every set the client sends? | `decodeSet` [L3] |
+| `ClientSetsAsReference` | is every set the shape the reference writes? | `toEraCBOR` [L1], `encodeSet` [L2], goldens |
+| `ClientOffersAnswered` | does the client send every query a node answers in that era? | [Q4] |
+| `ClientSendsAnswered` | does it send only those? | [Q3] |
+| `ServerDecodesAnswered` | does the server decode every query a node decodes? | [Q5] |
+| `ServerRefusesAsReference` | probe: does it decode only those, era by era? | [Q3] |
+
+Three `ASSUME`s tie the table to the Go tests: on main, 23 of
+`TestEraFilterSetEncoding`'s 35 cells have the wrong shape, five eras of
+`TestGetAccountStateEveryShelleyEra` are refused (Shelley to Babbage), and
+`TestDecodeGetFuturePParamsQuery`'s two eras (Conway, Dijkstra) fail to
+decode.
+
+### The answers
+
+| Config | Rules | Result | Counterexample |
+| --- | --- | --- | --- |
+| `LocalStateQueryCodec.cfg` | all three fixes | passes (294 cells) | |
+| `LocalStateQueryCodecEraSetDecodeBug.cfg` | N48 on main | `ClientSetsDecode` fails | Shelley, `GetUTxOByAddress(nil)`: null, the Go cell `GetUTxOByAddress nil/Shelley` |
+| `LocalStateQueryCodecEraSetBytesBug.cfg` | N48 on main | `ClientSetsAsReference` fails | the same cell; the bytes check also catches the untagged UTxO filters from Conway, which a node still decodes |
+| `LocalStateQueryCodecAccountStateBug.cfg` | N49 on main | `ClientOffersAnswered` fails | Shelley, `GetAccountState` |
+| `LocalStateQueryCodecFuturePParamsBug.cfg` | N50 on main | `ServerDecodesAnswered` fails | Conway, query 33 |
+| `LocalStateQueryCodecGovStateBeforeConwayBug.cfg` | known difference | `ClientOffersAnswered` fails | Shelley, `GetGovState`: the client sends it only from Conway because `GovStateResult` decodes the Conway state (recorded, not fixed) |
+| `LocalStateQueryCodecProbeServerEraBug.cfg` | probe | `ServerRefusesAsReference` fails | Shelley, `GetConstitution` |
+
+With the fixes, the fixed rule's "era at least Conway" agrees with the
+reference's "lowest version at least 9" in every era, and the six sibling
+set queries already had the reference's shape. The probe shows the server
+decodes a Conway-only query in any era and hands it, with the era, to the
+query callback, where the reference refuses it at decode. That holds for
+the new query 33 as for `GetConstitution` and `GetRatifyState` before it;
+answering it is the callback's job, not a defect of the fix.
+
 ## Go tests and fixes
 
 All on gOuroboros `61046085`. Every test was run with `-race`.
@@ -301,11 +368,20 @@ and gOuroboros `origin/main` at `61046085`. `P` below is
 | R5 | `P/Client.hs` lines 36-89, 149-205 | The reference client: one continuation per state; no implicit acquire; `SendMsgDone` from `StIdle`. |
 | R6 | `cardano-diffusion/api/lib/Cardano/Network/NodeToClient/Version.hs` lines 48-50 | v16 "added ImmutableTip". At this commit only v23 is supported, and `cardano-diffusion/.../LocalStateQuery/Codec.hs` lines 42-43 always uses `LocalStateQuery_V2`. |
 | G1 | gOuroboros `protocol/localstatequery/` | `localstatequery.go` (`StateMap`), `client.go` (`acquire`, `release`, `runQueryMaxItems`, the handlers, `Start`), `server.go` (`handleDone`); `protocol/protocol.go` (`stop`, `enqueueMessage`, the receive checks). |
+| Q1-Q5 | ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Ledger/Query.hs` lines 739, 742, 750, 760, 765, 773 (encode); 842-848, 855, 859, 864, 871-872, 882, 885-886 (decode, `requireCG`); 498, 503, 507 (supported on every version); goldens `golden/cardano/QueryVersion3/CardanoNodeToClientVersion19/Query_<Era>_<Query>` | Which set encoding each query argument uses, and which queries are refused before Conway. |
+| L1 | cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/Core/Era.hs` 232-242; `libs/cardano-ledger-core/internal/Cardano/Ledger/Internal/Definition/Era.hs` 95-140 | `toEraCBOR`/`fromEraCBOR` use the era's lowest version: Shelley 2 ... Conway 9, Dijkstra 12. |
+| L2 | same, `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Encoding/Encoder.hs` 479-490 | `encodeSet`: tag 258 from version 9. |
+| L3 | same, `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Decoding/Decoder.hs` 933-952 | `decodeSet`: tag refused from 2 to 8, permitted but not enforced from 9. |
+| G3 | gOuroboros `62fa36d1` `protocol/localstatequery/client.go` 594, 674, 892; branch `fix/localstatequery-era-set-encoding` (`eraFilterSet`) | The three filters. |
+| G4 | same, `client.go` 941-945; branch `fix/localstatequery-account-state-all-eras` | The `GetAccountState` era guard. |
+| G5 | same, `queries.go` 81, 244; branch `fix/localstatequery-decode-future-pparams` | No query type 33 on main; `ShelleyFuturePParamsQuery` on the branch. |
 | G2 | gOuroboros `35982911` (`fix/localstatequery-implicit-acquire`), `client.go` | `endCall`, `runQueryMaxItems`; `GetEpochNo` makes two queries. |
 
 ## Not modelled
 
-The encoding and results of individual queries, the cached era
+The encoding and results of individual queries other than the set
+arguments, era guards and query type 33 in `LocalStateQueryCodec.tla`; Byron
+(where the fixed `GetAccountState` guard refuses); the cached era
 (`currentEra`), the server's callbacks, timeouts (a timeout is a protocol
 error, like the violations here), and the message size limit
 (`MaxReadBufferSize`).
@@ -325,6 +401,10 @@ cd specs/localstatequery
 # expected to fail:
 for c in ReleaseIdle ImmutableOld Stale PerQueryRelease NoMutex KeepFlag; do
   ../../bin/tlc -workers 4 -config LocalStateQueryClient${c}Bug.cfg LocalStateQueryClient.tla || true
+done
+../../bin/tlc -config LocalStateQueryCodec.cfg LocalStateQueryCodec.tla
+for c in EraSetDecode EraSetBytes AccountState FuturePParams GovStateBeforeConway ProbeServerEra; do
+  ../../bin/tlc -config LocalStateQueryCodec${c}Bug.cfg LocalStateQueryCodec.tla || true   # expected to fail
 done
 ```
 

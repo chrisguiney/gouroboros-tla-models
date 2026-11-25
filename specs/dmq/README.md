@@ -462,6 +462,43 @@ both accepts a message and disconnects, as in the reference),
 `ProbeTooFrequentBug` (a message with no other failure is refused as too
 frequent).
 
+## Part 7: the bytes a message id covers (`MessagePayloadBytes.tla`)
+
+### What the code does
+
+A message is `[messageId, messagePayload, kesSignature, opCert, coldKey]`.
+dmq-node keeps the payload's bytes as received, cut between two decoder
+offsets (`Codec.hs` 160-181), hashes them for the id (`Validate.hs` 60-64)
+and verifies the KES signature over them (207-212). Its decoder reads the
+KES period with `decodeWord`, which accepts a wider integer head than
+needed (`Codec.hs` 204-210). gOuroboros main re-encodes the decoded
+payload, always minimally, and checks the id and signature over that
+(N57). `fix/dmq-payload-preserved-bytes` keeps the decoded bytes
+(`DecodeStoreCbor`), checks over them and relays them unchanged; a
+legacy-shape payload, which holds the id itself, keeps none.
+
+The model is a table over the payload's shape (minimal, wide, legacy) and
+whether a caller edited the decoded fields. Bytes are a pair
+`<<content, shape>>`; two hashes are equal exactly when the pairs are.
+
+### The questions
+
+| Invariant | Question |
+| --- | --- |
+| `ReceiptAsReference` | for a payload the reference decodes, does gOuroboros accept exactly when the reference does? |
+| `RelayKeepsId` | is a message gOuroboros accepted and relays accepted by a reference peer downstream? |
+| `OwnLegacyAccepted` | does gOuroboros still accept its own legacy-shape message? |
+| `IdNamesContent` | does the id gOuroboros computes name the payload's current fields? (probe of the documented `SetCbor(nil)` contract) |
+
+### The answer
+
+| Config | Rule | Result | Counterexample |
+| --- | --- | --- | --- |
+| `MessagePayloadBytes.cfg` | fix | passes | |
+| `MessagePayloadBytesReencodeBug.cfg` | main | `ReceiptAsReference` fails | a wide payload: the id check fails, as `TestVerifyMessageHashesPayloadBytesAsReceived` fails on main with "message ID mismatch" |
+| `MessagePayloadBytesRelayReencodeBug.cfg` | mutation: bytes kept for the check, re-encoded on relay | `RelayKeepsId` fails | a wide payload; the Go test's last assertion (the message encodes back to its wire bytes) kills it |
+| `MessagePayloadBytesProbeEditedBug.cfg` | fix, caller edits | `IdNamesContent` fails | an edited payload keeps the old bytes' id; `DmqMessagePayload`'s doc tells the caller to call `SetCbor(nil)` |
+
 ## Go tests and fixes
 
 All on gOuroboros `61046085`, local branches only.
@@ -517,7 +554,7 @@ Branches from gOuroboros `62fa36d1` (the first five) or `ebc63eab` (the rest).
 | `fix/dmq-message-body-size` | `9804e9d9`, `52c1b032` | `TestVerifyMessageBodySizeAsReference`; a 0-byte body is accepted on `main`. The second commit refuses the body when decoding, before expiry (`TestDmqMessageDecodeRefusesBodySize`, expired messages in both shapes; on the first commit a 0-byte body decodes) |
 | `fix/dmq-commit-recheck-every-counter` | `aa2673b6` | `TestPrepareMessagesCommitRechecksEveryCounter`; the stale commit returns nil on `main` |
 | `test/dmq-validity-reference` | `2a86f5ad` | `TestVerifyMessageCounterAndPoolAsReference` (48 cells); 3 mutations killed |
-| `fix/dmq-payload-preserved-bytes` | `d21d3969` | `TestVerifyMessageHashesPayloadBytesAsReceived`: a payload with a non-minimal KES period, signed and hashed as received, fails on `main` with an ID mismatch; the decoded payload now keeps its bytes (`DecodeStoreCbor`) and re-encodes to them |
+| `fix/dmq-payload-preserved-bytes` | `d21d3969` | `TestVerifyMessageHashesPayloadBytesAsReceived`: a payload with a non-minimal KES period, signed and hashed as received, fails on `main` with an ID mismatch; the decoded payload now keeps its bytes (`DecodeStoreCbor`) and re-encodes to them (model `MessagePayloadBytesReencodeBug.cfg`) |
 | `fix/dmq-drop-chain-counter-check` | `aa7c8605` | `TestVerifyMessageIgnoresChainCounter`: on `main` "issue number is stale: chain=5, message=1". `PoolOpCertIssueNumber` becomes unused (deprecated) |
 | `fix/dmq-sig-rate-limit` | `d4c8c2f1` | `TestVerifyMessageRateLimitAsReference` (7 cases; 4 fail on `main`). Mutations killed: no duplicate exemption, no commit re-check, a refused duplicate race, an inclusive bound |
 | `fix/messagesubmission-reference-receipt` | `a12edd17` | `TestServerReceivesRepliesAsReference` (7 cells; 5 fail on `main`) and `TestServerReplyKeepsValidMessagesBesideAFatalOne`, which replaces a test of the all-or-nothing behaviour. Mutations killed: main's check order, an expired message fatal, a dropped authentication error fatal, stopping at the first failure |
@@ -590,8 +627,8 @@ gOuroboros `61046085`.
 ## Not modelled
 
 The per-connection replay caches beyond what `MessageIngress.tla` keeps as
-the set of accepted ids; the opcert cold signature, message id and payload
-bytes (pure checks, covered by Go tests); the
+the set of accepted ids; the opcert cold signature (a pure check, covered
+by Go tests); the payload bytes beyond `MessagePayloadBytes.tla`'s shapes; the
 pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
 time limits as durations (the 20 s V2 limit appears only as "an unanswered
 blocking request is a deadlock"); wire tags and list encodings, which the Go
@@ -614,6 +651,7 @@ cd specs/dmq
 ../../bin/tlc -config MessageValidity.cfg MessageValidity.tla
 ../../bin/tlc -config MessageValidityBatch.cfg MessageValidity.tla
 ../../bin/tlc -config MessageIngress.cfg MessageIngress.tla
+../../bin/tlc -config MessagePayloadBytes.cfg MessagePayloadBytes.tla
 # expected to fail
 ../../bin/tlc -config MessageSubmissionRepeatBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionServerRepeatBug.cfg MessageSubmission.tla
@@ -629,6 +667,8 @@ cd specs/dmq
 ../../bin/tlc -config MessageValidityKesAtCurrentBug.cfg MessageValidity.tla
 ../../bin/tlc -config MessageValidityBatchFinalOnlyRecheckBug.cfg MessageValidity.tla
 ../../bin/tlc -config MessageIngressAllOrNothingBug.cfg MessageIngress.tla
+../../bin/tlc -config MessagePayloadBytesReencodeBug.cfg MessagePayloadBytes.tla
+../../bin/tlc -config MessagePayloadBytesRelayReencodeBug.cfg MessagePayloadBytes.tla
 ```
 
 To run a probe, copy a passing config and replace its `INVARIANT` lines with
