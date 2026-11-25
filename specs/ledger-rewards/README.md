@@ -41,6 +41,7 @@ model cites the implementation.
 | `RewardPotsNoReserveReturnBug.cfg` | `ValuePreserved` violated | deltaR2 not returned |
 | `RewardPotsBalanceBug.cfg` | `UpdateBalanced` violated | the same, seen in the update itself |
 | `RewardPotsIgnorePledgeBug.cfg` | `PledgeUnmetNoReward` violated | the pledge check skipped |
+| `RewardPotsOwnerListBug.cfg` | `PledgeUnmetNoReward` violated | the pledge check sums a repeated owner twice, as `ValidatePoolPledge` did; the reference's owners are a set (`StakePool.hs` `sppOwners`, `SnapShots.hs` 230-235) |
 | `RewardPotsUnregDroppedBug.cfg` | `ValuePreserved` violated | an unregistered reward neither credited nor sent to the treasury |
 | `RewardPotsProbeUnregisteredBug.cfg` | probe violated | a reward is owed to a deregistered member at the boundary |
 | `RewardPotsProbeReserveReturnBug.cfg` | probe violated | part of R returns to the reserves |
@@ -58,6 +59,7 @@ model cites the implementation.
 | Relative stake | against total stake (circulation) | against circulation; apparent performance against active stake | active stake only | `RewardSnapshot.TotalStake` (falls back to active stake) |
 | Unregistered member | filtered before Babbage; to the treasury at application | prefilter before version 7; to the treasury at application | share added to the operator | prefilter before 7; to the treasury from 7 |
 | Undistributed rewards | back to the reserves (deltaR2) | same | none (whole pot paid) | back to the reserves |
+| Repeated owner in the pledge check | owners are a set | `sppOwners :: Set`, stake summed once per owner | `ValidatePoolPledge` summed each list entry | once per distinct owner (`fix/ledger-rewards-reference`) |
 | Owners as members | no member reward | `notPoolOwner` | owners paid as members too | reference |
 
 gOuroboros reads registration once (`RewardSnapshot.StakeRegistrations`), so
