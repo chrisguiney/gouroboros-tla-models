@@ -93,6 +93,7 @@ closes. A PR can draw on more than one model.
 | `dmq` (`MessageValidity`) | #3317 (counter, stake and cold signature tests) | #3305 | open |
 | `ledger-leios` (`LeiosVoting`) | #3318 (reference-formed certificates; depends on #3304) | #3306 | open |
 | localstatequery goldens (gaps 9, 10) | #3319 (query and result goldens), #3320 (BuildHeader goldens) | #3307, #3308 | open |
+| `blockfetch` (`OversizedRefusal`) | #3316 (`fix/blockfetch-oversized-refusal` `11eee787`; Oversized cells accept the muxer's ingress-overflow refusal; test-only) | #3315 | open |
 | coverage gaps 2, 7, 8 | #3321 (fee, size, min coin goldens), #3322 (update keys per era) | #3309, #3310 | open |
 | `ledger-governance` | #3323 (rules-only conformance replay, network-id and return-address tables) | #3311 | open |
 | `ledger-conway-dijkstra` (`SubCerts`, `SubGov`, `SubGuards`) | #3324 (sub-transaction cells) | #3312 | open |
