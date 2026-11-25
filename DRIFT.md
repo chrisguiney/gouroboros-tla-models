@@ -772,6 +772,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Validate.hs` 115-122; `dmq-node/src/DMQ/Policy.hs` 60-61
 - **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `TTLValidator.ValidateMessageTTLAt`; branch `fix/dmq-ttl-reference-bounds` `1f492baf`, test `TestValidateMessageTTLAtAsReference`
 - **Verdict.** does not conform → conforms
+- **Model.** `dmq` `MempoolExpiry.tla`: `MempoolExpiryMainBug.cfg` (main `IsValidAt`) fails `HeldAsReference`; `MempoolExpiry.cfg` (the fix) passes. Truncation alone, with a strict bound, is an equivalent mutant for whole-second expiries.
 - **Status.** Fixed on a local branch, no PR. The second commit (`5d48a376`, `TestIsValidAtAsReferenceMempool`) gives `DmqMessage.IsValidAt`, which prunes the local notification queue, the mempool's rule: dmq-node's mempool worker drops a message once `expiresAt <= now` at full precision (`NodeKernel.hs` 313-330). Admission accepts a message arriving exactly at its expiry and the mempool drops it at that instant; both follow the reference
 
 ### N54

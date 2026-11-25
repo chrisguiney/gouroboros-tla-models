@@ -378,6 +378,7 @@ behaviour:
 | `MessageValidityKesAtCurrentBug.cfg` | verifies the KES signature at the evolution of the node's **current** period | at the **claimed** period minus the opcert start (`Validate.hs` 207-212); the current slot is not used |
 | `MessageValidityLaxUpperBug.cfg` | accepts `expiresAt = now + maxTTL` | refuses it: `expiresAt < now + 1800` (122) |
 | `MessageValidityTruncateNowBug.cfg` | truncates now to whole seconds, so half a second past expiry is accepted | `posixNow <= expiresAt` at full precision (118) |
+| `MempoolExpiryMainBug.cfg` (`MempoolExpiry.tla`) | `IsValidAt` keeps a held message while the truncated now is at most `expiresAt`, so it stays up to a second past its expiry | the mempool drops it once `expiresAt <= now` at full precision (`NodeKernel.hs` 313-330); `MempoolExpiry.cfg` passes, `MempoolExpiryInclusiveBug.cfg` fails on the inclusive bound alone |
 | `MessageValidityNoBodySizeBug.cfg` | no body-size check | 90 to 2000 bytes (`Codec.hs` 193-202; CIP-0137 line 155) |
 | `MessageValidityBatchFinalOnlyRecheckBug.cfg` | commit re-checks only the batch's **last** counter per pool, so a batch `[p:1, p:2]` commits after `p:2` was recorded meanwhile, accepting the stale `p:1` | each message against the counters at validation (183-197) |
 
