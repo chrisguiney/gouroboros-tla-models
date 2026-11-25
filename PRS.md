@@ -55,8 +55,9 @@ closes. A PR can draw on more than one model.
 | `ledger-ppup-mir` | #3216 (empty update, phase-2-invalid update and MIR quorum, table tests) | #3212, #3213, #3214, #3215 | open |
 | `ledger-conway-dijkstra` | #3218 (table tests) | #3217 | open |
 | `ledger-conway-dijkstra` (`SubCerts`) | local branch `test/dijkstra-subtx-certs-model` (`b1d3d9db`, `727e0cd0`, `f8b8a8a9`; certificate, deposit, owner-witness, retirement, multi-certificate, legacy, balance-interval cells), not yet published | | local |
-| `ledger-conway-dijkstra` (`SubGov`) | local branch `test/dijkstra-subtx-certs-model` (`727e0cd0`; governance and DRep/committee cells); local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`, DRIFT L23), not yet published | | local |
-| `ledger-conway-dijkstra` (`SubGuards`, `SubGov` family 3) | local branch `test/dijkstra-subtx-certs-model` (`824672bf`; guard, guard-context and proposal-check cells); local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`, DRIFT L24), not yet published | | local |
+| `ledger-conway-dijkstra` (`SubGov`) | local branch `test/dijkstra-subtx-certs-model` (`727e0cd0`; governance and DRep/committee cells); `fix/dijkstra-committee-proposed-member` published as #3245 | | local |
+| `ledger-conway-dijkstra` (`SubGuards`, `SubGov` family 3) | local branch `test/dijkstra-subtx-certs-model` (`824672bf`; guard, guard-context and proposal-check cells); `fix/dijkstra-ppu-well-formed` published as #3246 | | local |
+| `ledger-conway-dijkstra` (`SubGov`, `SubGuards`) | #3245 (`0a8bde9f`, DRIFT L23: earlier-level UpdateCommittee proposals count as members), #3246 (`9f7e7d38`, DRIFT L24: eMax 0 and pledge leverage below 1 refused) | #3243, #3244 | open |
 | `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | open |
 | `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | open |
 | `dmq` (`LocalMessageSubmissionOwnAnswer`) | #3231 (`SubmitMessage` returns its own answer; breaking; merge 1 of 12) | #3225 | open |
