@@ -30,7 +30,7 @@ closes. A PR can draw on more than one model.
 | `localtx` | #3196 (get-measures, opt-in await on await-acquire) | #3184, #3185 | merged |
 | `localtx`, `dmq`, `leios-peras` | #3197 (six servers restart after done) | #3186 | merged |
 | `localstatequery` | #3113 (acquire, release, restart, implicit acquire, state map tests) | #3098, #3102, #3103, #3104, #3105, #3106 | merged |
-| `dmq` | #3130 (interoperate with dmq-node, repeat requests, state map tests) | #3121, #3122, #3123 | open |
+| `dmq` | #3130 (interoperate with dmq-node, repeat requests, state map tests; review: requests pipelined behind a non-blocking id request or a message request, `MessageSubmissionV{1,2}PipelinedBodiesBug.cfg`; V1 Server repeats, `MessageSubmissionV1InRepeats.cfg`) | #3121, #3122, #3123 | open |
 | `dmq` | #3142 (empty blocking replies, lost wakeup) | #3137, #3138, #3139 | merged |
 | `leios-peras` | #3160 (quit, cancel, pipelined vote requests, state map tests) | #3150, #3151, #3152, #3153 | merged |
 | `leios-peras` | #3165 (await, server idle, timeouts) | #3162, #3163, #3164 | merged |

@@ -82,7 +82,13 @@
 (*        SendMsgRequestSigIdsPipelined before the bodies arrive;          *)
 (*        DMQ/NodeToNode.hs 335-357 runs the V1 inbound as                 *)
 (*        txSubmissionServerPeerPipelined. A pipelined request for ids is  *)
-(*        non-blocking (ids are still outstanding).                        *)
+(*        non-blocking (ids are still outstanding). After collecting one   *)
+(*        reply with others still owed, pipelinedDispatch (238-256) may    *)
+(*        send SendMsgRequestSigsPipelined again: a request for bodies     *)
+(*        arrives while a non-blocking request for ids, or another request *)
+(*        for bodies, is unanswered. The V1 inbound does the same          *)
+(*        (ouroboros-network TxSubmission/Inbound/V1.hs serverReqTxs,      *)
+(*        serverReqTxIds, serverIdle).                                     *)
 (*   [R3] IntersectMBO/ouroboros-network 4646039f (ouroboros-network       *)
 (*        2.0.0.0, the version dmq-node builds against),                   *)
 (*        ouroboros-network/lib/Ouroboros/Network/TxSubmission/Outbound.hs *)
@@ -159,7 +165,12 @@ CONSTANTS
     \* (PipelinedMessageTypes) and handles it once it has replied. FALSE:
     \* 4f710823, whose state map refuses a message arriving without the
     \* peer's agency, which closes the connection [S1].
-    OutAdmitsPipelined
+    OutAdmitsPipelined,
+    \* TRUE: the fix: the outbound's StMessageIdsNonBlocking and StMessages
+    \* also admit a pipelined request for bodies [R8] and handle it once
+    \* they have replied. FALSE: b6b0cfd1, which admits only a request for
+    \* ids, in StMessages.
+    OutAdmitsPipelinedBodies
 
 \* In English: "Id 0 is an id the outbound never announced; real ids are
 \* 1..MaxIds, handed out in order."
@@ -212,18 +223,37 @@ VARIABLES
     refused,   \* "none", or why the outbound refused a request [S1]
     servedTwice, \* TRUE once the outbound served one id's body twice
     runs,      \* how many runs have started on the connection
-    pipe       \* a request for ids pipelined behind an unanswered body
+    pipe,      \* a request for ids pipelined behind an unanswered body
                \* request and held by the outbound, or NoReq
+    pipeB      \* a request for bodies pipelined behind an unanswered
+               \* request and held by the outbound, or NoBodies
 
-\* Literally: "vars is defined as the tuple of all eleven variables."
+\* Literally: "vars is defined as the tuple of all twelve variables."
 vars == <<st, req, inQ, outQ, inAsked, outServed, nextId, refused,
-          servedTwice, runs, pipe>>
+          servedTwice, runs, pipe, pipeB>>
 
 \* In English: "The empty request: not blocking, acknowledging nothing, asking
 \* for nothing."
 \* Literally: "NoReq is defined as the record whose field blocking is FALSE,
 \*   whose field ack is 0, and whose field n is 0."
 NoReq == [blocking |-> FALSE, ack |-> 0, n |-> 0]
+
+\* In English: "No request for bodies is held."
+\* Literally: "NoBodies is defined as the record whose field held is FALSE
+\*   and whose field ids is the empty set."
+NoBodies == [held |-> FALSE, ids |-> {}]
+
+\* In English: "The outbound's verdict on a request for the bodies of ids,
+\* given its window q and the ids it has served: every id must be in the
+\* window [S3] and, with OutRefusesRepeat, none served already [R2]."
+\* Literally: "BodiesVerdict of ids, q and served is defined as: if ids is
+\*   not a subset of Range of q, then "unannounced id"; else if
+\*   OutRefusesRepeat is true and the intersection of ids and served is not
+\*   empty, then "repeated id"; else "ok"."
+BodiesVerdict(ids, q, served) ==
+    IF ~(ids \subseteq Range(q)) THEN "unannounced id"
+    ELSE IF OutRefusesRepeat /\ ids \cap served /= {} THEN "repeated id"
+    ELSE "ok"
 
 \* In English: "V1 starts in StInit, V2 in StIdle [C1][C2]; both windows
 \* are empty."
@@ -232,7 +262,7 @@ NoReq == [blocking |-> FALSE, ack |-> 0, n |-> 0]
 \*   outQ equals the empty sequence, and inAsked equals the empty set and
 \*   outServed equals the empty set, and nextId equals 1, and refused equals
 \*   "none", and servedTwice equals FALSE, and runs equals 1, and pipe
-\*   equals NoReq."
+\*   equals NoReq, and pipeB equals NoBodies."
 Init ==
     /\ st = IF Version = 1 THEN "Init" ELSE "Idle"
     /\ req = NoReq
@@ -243,6 +273,7 @@ Init ==
     /\ servedTwice = FALSE
     /\ runs = 1
     /\ pipe = NoReq
+    /\ pipeB = NoBodies
 
 \* In English: "Some end of the connection runs the inbound side, the one
 \* that asks. In V1 it always does; in V2 only when the two ends agree that
@@ -263,7 +294,7 @@ SendInit ==
     /\ Version = 1 /\ st = "Init"
     /\ st' = "Idle"
     /\ UNCHANGED <<runs, req, inQ, outQ, inAsked, outServed, nextId, refused,
-                   servedTwice, pipe>>
+                   servedTwice, pipe, pipeB>>
 
 -----------------------------------------------------------------------------
 (* Ids.                                                                    *)
@@ -297,8 +328,8 @@ RequestIds ==
                    /\ req' = [blocking |-> blocking, ack |-> ack, n |-> n]
                    /\ UNCHANGED refused
               ELSE /\ refused' = "ids request"
-                   /\ UNCHANGED <<st, req, pipe>>
-    /\ UNCHANGED <<runs, inQ, outQ, inAsked, outServed, nextId, servedTwice, pipe>>
+                   /\ UNCHANGED <<st, req, pipe, pipeB>>
+    /\ UNCHANGED <<runs, inQ, outQ, inAsked, outServed, nextId, servedTwice, pipe, pipeB>>
 
 \* In English: "The outbound answers with k fresh ids from its queue: no
 \* more than asked for, at least one if blocking [S2]. Both sides drop the
@@ -315,8 +346,16 @@ RequestIds ==
 \*   fresh; and outServed in the next state equals outServed without the
 \*   members of dropped; and inAsked in the next state equals inAsked without
 \*   the members of dropped; and nextId in the next state equals nextId plus k;
-\*   and st in the next state equals "Idle" and req in the next state equals
-\*   NoReq, and refused and servedTwice are unchanged."
+\*   and, letting served be outServed without the members of dropped: if
+\*   pipeB is not held, st in the next state equals "Idle" and outServed in
+\*   the next state equals served; else, if BodiesVerdict of pipeB's ids,
+\*   the new window and served is "ok", st in the next state equals
+\*   "Messages" and outServed in the next state is served with pipeB's ids
+\*   added; otherwise refused in the next state is that verdict; and req in
+\*   the next state equals NoReq and pipeB in the next state equals
+\*   NoBodies."
+\* A request for bodies held behind this reply [R8] is handled once the
+\* reply is sent, against the window the reply leaves.
 ReplyIds ==
     /\ st \in {"IdsBlocking", "IdsNonBlocking"}
     /\ \E k \in 0..req.n :
@@ -326,11 +365,24 @@ ReplyIds ==
                dropped == Range(Front(outQ, req.ack))
            IN /\ outQ' = Rest(outQ, req.ack) \o fresh
               /\ inQ' = Rest(inQ, req.ack) \o fresh
-              /\ outServed' = outServed \ dropped
               /\ inAsked' = inAsked \ dropped
               /\ nextId' = nextId + k
-    /\ st' = "Idle" /\ req' = NoReq
-    /\ UNCHANGED <<runs, refused, servedTwice, pipe>>
+              /\ LET served == outServed \ dropped
+                     v == BodiesVerdict(pipeB.ids,
+                                        Rest(outQ, req.ack) \o fresh, served)
+                 IN IF ~pipeB.held
+                       THEN /\ st' = "Idle" /\ outServed' = served
+                            /\ UNCHANGED <<refused, servedTwice>>
+                    ELSE IF v = "ok"
+                       THEN /\ st' = "Messages"
+                            /\ outServed' = served \cup pipeB.ids
+                            /\ servedTwice' =
+                                  (servedTwice \/ pipeB.ids \cap served /= {})
+                            /\ UNCHANGED refused
+                    ELSE /\ st' = "Idle" /\ outServed' = served
+                         /\ refused' = v /\ UNCHANGED servedTwice
+    /\ req' = NoReq /\ pipeB' = NoBodies
+    /\ UNCHANGED <<runs, pipe>>
 
 \* In English: "In V2, when the outbound can say so, it answers a blocking
 \* request with no ids: both sides drop the ack oldest ids (all of them,
@@ -355,7 +407,7 @@ ReplyNoIds ==
           /\ outServed' = outServed \ dropped
           /\ inAsked' = inAsked \ dropped
     /\ st' = "Idle" /\ req' = NoReq
-    /\ UNCHANGED <<runs, nextId, refused, servedTwice, pipe>>
+    /\ UNCHANGED <<runs, nextId, refused, servedTwice, pipe, pipeB>>
 
 -----------------------------------------------------------------------------
 (* Bodies.                                                                 *)
@@ -392,21 +444,22 @@ RequestBodies ==
         /\ inAsked' = inAsked \cup (ids \ {Unannounced})
         /\ IF ~(ids \subseteq Range(outQ))
               THEN /\ refused' = "unannounced id"
-                   /\ UNCHANGED <<st, outServed, servedTwice, pipe>>
+                   /\ UNCHANGED <<st, outServed, servedTwice, pipe, pipeB>>
            ELSE IF OutRefusesRepeat /\ ids \cap outServed /= {}
               THEN /\ refused' = "repeated id"
-                   /\ UNCHANGED <<st, outServed, servedTwice, pipe>>
+                   /\ UNCHANGED <<st, outServed, servedTwice, pipe, pipeB>>
            ELSE /\ st' = "Messages"
                 /\ servedTwice' = (servedTwice \/ ids \cap outServed /= {})
                 /\ outServed' = outServed \cup ids
                 /\ UNCHANGED refused
-    /\ UNCHANGED <<runs, req, inQ, outQ, nextId, pipe>>
+    /\ UNCHANGED <<runs, req, inQ, outQ, nextId, pipe, pipeB>>
 
 \* In English: "The outbound answers with the bodies it still has (it may
-\* omit some) and the inbound is back in StIdle. A request for ids held
-\* behind the reply is then handled as if it had just arrived: the outbound
-\* checks it against its window and moves to StMessageIdsNonBlocking, or
-\* refuses it."
+\* omit some) and the inbound is back in StIdle. A request held behind the
+\* reply is then handled as if it had just arrived: one for bodies is
+\* checked like RequestBodies and the outbound stays in StMessages, owing
+\* its reply; one for ids is checked against the window and the outbound
+\* moves to StMessageIdsNonBlocking. Either may be refused."
 \* Literally: "ReplyBodies is defined as: st equals "Messages", and if pipe
 \*   equals NoReq, then st in the next state equals "Idle" and req and refused
 \*   are unchanged; else if IdsRequestOK of outQ, FALSE, pipe's ack, pipe's n,
@@ -418,13 +471,25 @@ RequestBodies ==
 \*   unchanged."
 ReplyBodies ==
     /\ st = "Messages"
-    /\ IF pipe = NoReq
-          THEN /\ st' = "Idle" /\ UNCHANGED <<req, refused>>
+    /\ IF pipeB.held
+          THEN LET v == BodiesVerdict(pipeB.ids, outQ, outServed)
+               IN IF v = "ok"
+                     THEN /\ servedTwice' =
+                                (servedTwice \/ pipeB.ids \cap outServed /= {})
+                          /\ outServed' = outServed \cup pipeB.ids
+                          /\ UNCHANGED <<st, refused, req>>
+                  ELSE /\ st' = "Idle" /\ refused' = v
+                       /\ UNCHANGED <<outServed, servedTwice, req>>
+       ELSE IF pipe = NoReq
+          THEN /\ st' = "Idle"
+               /\ UNCHANGED <<refused, outServed, servedTwice, req>>
        ELSE IF IdsRequestOK(outQ, FALSE, pipe.ack, pipe.n, TRUE, TRUE)
-          THEN /\ st' = "IdsNonBlocking" /\ req' = pipe /\ UNCHANGED refused
-       ELSE /\ st' = "Idle" /\ refused' = "ids request" /\ UNCHANGED req
-    /\ pipe' = NoReq
-    /\ UNCHANGED <<runs, inQ, outQ, inAsked, outServed, nextId, servedTwice>>
+          THEN /\ st' = "IdsNonBlocking" /\ req' = pipe
+               /\ UNCHANGED <<refused, outServed, servedTwice>>
+       ELSE /\ st' = "Idle" /\ refused' = "ids request"
+            /\ UNCHANGED <<outServed, servedTwice, req>>
+    /\ pipe' = NoReq /\ pipeB' = NoBodies
+    /\ UNCHANGED <<runs, inQ, outQ, inAsked, nextId>>
 
 \* In English: "With PeerPipelines, while the outbound owes the bodies the
 \* inbound sends its next request for ids, non-blocking and checked against
@@ -442,7 +507,7 @@ ReplyBodies ==
 \*   unchanged; and the other variables are unchanged."
 PipelineRequestIds ==
     /\ PeerPipelines /\ InboundRuns
-    /\ st = "Messages" /\ refused = "none" /\ pipe = NoReq
+    /\ st = "Messages" /\ refused = "none" /\ pipe = NoReq /\ ~pipeB.held
     /\ \E ack \in 0..Len(inQ), n \in 0..MaxUnacked :
         /\ IdsRequestOK(inQ, FALSE, ack, n, TRUE, TRUE)
         /\ IF OutAdmitsPipelined
@@ -451,7 +516,38 @@ PipelineRequestIds ==
               ELSE /\ refused' = "pipelined request"
                    /\ UNCHANGED pipe
     /\ UNCHANGED <<st, runs, req, inQ, outQ, inAsked, outServed, nextId,
-                   servedTwice>>
+                   servedTwice, pipeB>>
+
+\* In English: "With PeerPipelines, while the outbound owes a reply to a
+\* non-blocking request for ids or to a request for bodies, the inbound
+\* sends a request for bodies [R8]. It names ids its window keeps after
+\* the open request's acknowledgement and that it has not asked for. With
+\* OutAdmitsPipelinedBodies the outbound holds it until it has replied;
+\* without, it arrives with no agency for the inbound and is refused [S1].
+\* One request is held at a time, so their order needs no queue."
+\* Literally: "PipelineRequestBodies is defined as: PeerPipelines and
+\*   InboundRuns are true, st is "IdsNonBlocking" or "Messages", refused
+\*   is "none", pipe is NoReq and pipeB is not held; letting keep be the
+\*   window after the open request's ack (all of inQ in StMessages): there
+\*   exists a non-empty ids, a subset of Range of keep without inAsked, such
+\*   that inAsked gains ids, and if OutAdmitsPipelinedBodies then pipeB in
+\*   the next state holds ids, else refused in the next state is "pipelined
+\*   request"; the other variables are unchanged."
+PipelineRequestBodies ==
+    /\ PeerPipelines /\ InboundRuns
+    /\ st \in {"IdsNonBlocking", "Messages"}
+    /\ refused = "none" /\ pipe = NoReq /\ ~pipeB.held
+    /\ LET keep == IF st = "IdsNonBlocking" THEN Rest(inQ, req.ack) ELSE inQ
+       IN \E ids \in SUBSET (Range(keep) \ inAsked) :
+            /\ ids /= {}
+            /\ inAsked' = inAsked \cup ids
+            /\ IF OutAdmitsPipelinedBodies
+                  THEN /\ pipeB' = [held |-> TRUE, ids |-> ids]
+                       /\ UNCHANGED refused
+                  ELSE /\ refused' = "pipelined request"
+                       /\ UNCHANGED pipeB
+    /\ UNCHANGED <<st, runs, req, inQ, outQ, outServed, nextId, servedTwice,
+                   pipe>>
 
 -----------------------------------------------------------------------------
 (* Ending. V1: the outbound sends MsgDone instead of answering a blocking  *)
@@ -471,7 +567,7 @@ SendDone ==
        \/ Version = 2 /\ st = "Idle" /\ InboundRuns
     /\ st' = "Done"
     /\ UNCHANGED <<runs, req, inQ, outQ, inAsked, outServed, nextId, refused,
-                   servedTwice, pipe>>
+                   servedTwice, pipe, pipeB>>
 
 \* In English: "In V1, after the outbound's MsgDone, the inbound restarts
 \* in StInit for a new run on the same connection [R6]. The windows and
@@ -494,7 +590,7 @@ Restart ==
     /\ inAsked' = IF ForgetAskedOnRestart THEN {} ELSE inAsked
     /\ nextId' = 1
     /\ runs' = runs + 1
-    /\ UNCHANGED <<refused, servedTwice, pipe>>
+    /\ UNCHANGED <<refused, servedTwice, pipe, pipeB>>
 
 -----------------------------------------------------------------------------
 
@@ -517,10 +613,12 @@ Quiet ==
 \* reply for bodies, done, or, once nothing more happens, nothing."
 \* Literally: "Next is defined as: SendInit, or RequestIds, or ReplyIds, or
 \*   ReplyNoIds, or RequestBodies, or ReplyBodies, or PipelineRequestIds, or
+\*   PipelineRequestBodies, or
 \*   SendDone, or Restart, or Quiet."
 Next ==
     \/ SendInit \/ RequestIds \/ ReplyIds \/ ReplyNoIds
     \/ RequestBodies \/ ReplyBodies \/ PipelineRequestIds
+    \/ PipelineRequestBodies
     \/ SendDone \/ Restart \/ Quiet
 
 \* In English: "Start in Init, and from then on every step is a Next step."
