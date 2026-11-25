@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep engine-lifecycle connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep engine-lifecycle connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-block-overlay models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -164,6 +164,9 @@ consensus-nonce: ## Check the epoch nonce model (evolving, candidate, tick)
 
 ledger-bbody: ## Check the block-body rule model (size, hash, order, totals)
 	@scripts/run-model.sh specs/ledger-bbody
+
+ledger-block-overlay: ## Check the in-block ledger view and VerifyBlock issuer model
+	@scripts/run-model.sh specs/ledger-block-overlay
 
 ledger-conway-dijkstra: ## Check the Conway and Dijkstra ledger model (gates, deposits, sub-transactions)
 	@scripts/run-model.sh specs/ledger-conway-dijkstra
