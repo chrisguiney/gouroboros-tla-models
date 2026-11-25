@@ -67,8 +67,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N10](#n10) | network | Handshake query answered before negotiation | Query reply only when the proposal is acceptable and the agreed data asks for it | main: any decodable proposed version that asks for a query gets one, even with no common version or the wrong network magic; PR: after negotiation | Query sends back the supported versions; negotiation fails on a magic mismatch | conforms (implementation choice) → conforms | Open PR #3127 |
 | [N11](#n11) | network | Handshake simultaneous open | Supported: a `MsgProposeVersions` received in `Confirm` is read as `MsgReplyVersions` | main: not supported (a proposal in `Confirm` is an error); PR: supported | Supported | does not conform → conforms | Open PR #3127 |
 | [N12](#n12) | network | Handshake `MsgQueryReply` without a query | Taken as a query result | Error | Silent | conforms (stricter) | Recorded (model `handshake`) |
-| [N13](#n13) | network | Handshake `MsgAcceptVersion` carries the server's own data | Sends the negotiated (agreed) data | Sends its own version data for the chosen version; each side combines the flags itself | The negotiated data is sent back | does not conform | Fixed on local branch `fix/handshake-accept-negotiated-data` (model `handshake` `AcceptCarriesNegotiatedData`). No wrong outcome: the reference client recomputes the agreement |
-| [N14](#n14) | network | Handshake version keys out of order | Recognised keys must ascend, else a decode failure; unrecognised keys skipped | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Fixed on local branch `fix/handshake-version-key-order` (model `handshake` `UnorderedMapsRejected`, `UnknownKeysTolerated`); checks recognised keys only, as the reference does |
+| [N13](#n13) | network | Handshake `MsgAcceptVersion` carries the server's own data | Sends the negotiated (agreed) data | Sends its own version data for the chosen version; each side combines the flags itself | The negotiated data is sent back | does not conform | Fixed on local branch `fix/handshake-accept-negotiated-data` (model `handshake` `AcceptCarriesNegotiatedData`), merged as #3194. No wrong outcome: the reference client recomputes the agreement |
+| [N14](#n14) | network | Handshake version keys out of order | Recognised keys must ascend, else a decode failure; unrecognised keys skipped | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Fixed on local branch `fix/handshake-version-key-order` (model `handshake` `UnorderedMapsRejected`, `UnknownKeysTolerated`), merged as #3194; checks recognised keys only, as the reference does |
 | [N15](#n15) | network | Block-fetch `Stop` with ranges outstanding | Collects every answer, then sends `MsgClientDone`; a demotion that times out closes the connection | main: gives up after 250 ms without `MsgClientDone` and allows `Start`, so a late reply reaches the new run; PR: abandons only when owed, latches, stops the muxer | `MsgClientDone` only from `StIdle` | does not conform → conforms | Open PR #3114 (chain-sync's identical defect was fixed by merged #3092) |
 | [N16](#n16) | network | Block-fetch `RangeDoneFunc` for a request that was never sent | A request's receiver exists only once the request is sent | main: the shutdown drain calls `RangeDoneFunc` for a request whose `RequestRange` returned an error; PR: not | Silent (library API) | conforms | Open PR #3114. Library defect; Dingo works around it |
 | [N17](#n17) | network | Block-fetch `StBusy` timeout default | 60 s | main: `NewConfig` sets `BatchStartTimeout` 5 s; PR: 60 s | 60 s | conforms (stricter) → conforms | Open PR #3114 (Dingo already sets 60 s) |
@@ -102,9 +102,9 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N45](#n45) | network | Leios limits and timeouts | LeiosNotify reply 1,536 bytes / 16 votes; LeiosFetch `Block` and `BlockTxs` 60 s | LeiosNotify 65,535 bytes / 1,000 votes; LeiosFetch block states untimed (the caller's context bounds them); LeiosVotes count 1-1,000 | Silent on limits; CIP's request count unbounded | conforms (implementation choice) | Recorded (model `leios-peras`) |
 | [N46](#n46) | network | LeiosFetch extra messages (tags 10-14) | Only `Block` and `BlockTxs` (tags 0-4) | Adds votes and block-range requests | CIP-0164 has its own message set | conforms (implementation choice) | gOuroboros extension. A reference peer never sends them; sent to a reference server they fail to decode, so only use them with peers that know them |
 | [N47](#n47) | network | Peras votes (ObjectDiffusion): await, server idle, timeouts | `MsgServerIdle` [6], `MsgAwaitReply` [7], a `MustReply` state; client waits 10 s, then 60 s after await | main: no await messages, no `MustReply`, one 5 s timeout; PR: as the reference, server awaits then replies or idles | CDDL defines tags 6 and 7 | does not conform → conforms | Open PR #3165. The network spec itself only lists `NodeToNodeV_17` as "Experimental, support Peras mini-protocols" (line 2231) |
-| [N48](#n48) | network | Local-state-query era filter sets | `toEraCBOR @era`: plain array before Conway (a tag 258 is refused), tag 258 from Conway | main: `GetFilteredDelegationsAndRewardAccounts` always tagged, so refused before Conway; UTxO address and input filters never tagged; a nil filter sent as CBOR null; branch: as the reference | CDDL silent; the era's ledger encoding | does not conform → conforms | Fixed on local branch `fix/localstatequery-era-set-encoding` (`fb802943`), no PR yet |
-| [N49](#n49) | network | Local-state-query `GetAccountState` and `GetGovState` before Conway | Both decoded and answered in every Shelley-based era | main: the client refuses both before Conway; branch: `GetAccountState` sent from Shelley; `GetGovState` still Conway only (its result type is Conway's) | Silent | does not conform → conforms (`GetAccountState`) | `GetAccountState` fixed on local branch `fix/localstatequery-account-state-all-eras` (`ddae722e`), no PR yet; `GetGovState` recorded |
-| [N50](#n50) | network | Local-state-query `GetFuturePParams` (Shelley query 33) | Decoded and answered from Conway | main: the server fails with "unknown Block query type: 33"; no client call; branch: decoded and handed to the query callback | Silent | does not conform → conforms (server decode) | Fixed on local branch `fix/localstatequery-decode-future-pparams` (`dd131af9`), no PR yet; client call not added |
+| [N48](#n48) | network | Local-state-query era filter sets | `toEraCBOR @era`: plain array before Conway (a tag 258 is refused), tag 258 from Conway | main: `GetFilteredDelegationsAndRewardAccounts` always tagged, so refused before Conway; UTxO address and input filters never tagged; a nil filter sent as CBOR null; branch: as the reference | CDDL silent; the era's ledger encoding | does not conform → conforms | Fixed on local branch `fix/localstatequery-era-set-encoding` (`fb802943`), open PR #3286 |
+| [N49](#n49) | network | Local-state-query `GetAccountState` and `GetGovState` before Conway | Both decoded and answered in every Shelley-based era | main: the client refuses both before Conway; branch: `GetAccountState` sent from Shelley; `GetGovState` still Conway only (its result type is Conway's) | Silent | does not conform → conforms (`GetAccountState`) | `GetAccountState` fixed on local branch `fix/localstatequery-account-state-all-eras` (`ddae722e`), open PR #3287; `GetGovState` recorded |
+| [N50](#n50) | network | Local-state-query `GetFuturePParams` (Shelley query 33) | Decoded and answered from Conway | main: the server fails with "unknown Block query type: 33"; no client call; branch: decoded and handed to the query callback | Silent | does not conform → conforms (server decode) | Fixed on local branch `fix/localstatequery-decode-future-pparams` (`dd131af9`), open PR #3288; client call not added |
 | [N51](#n51) | network | Local-state-query queries gOuroboros does not decode or re-encode exactly | `QueryAnytime` (`GetEraStart`) and Byron's own queries decoded; era history written as an indefinite list; UTxO filters keep their tag | `QueryAnytime` and Byron queries fail to decode; decoded UTxO filters re-encode without the tag; era history has no list encoder (each era summary re-encodes exactly) | Silent | does not conform (decode); conforms (re-encode, both forms decode) | Recorded; pinned by `reference_golden_test.go` on `test/localstatequery-reference` |
 | [N52](#n52) | network | DMQ: KES evolution a message signature is checked at | The claimed KES period minus the opcert start; the current slot is not used | main: the node's current KES period minus the opcert start, and the opcert window must contain the current period; branch: the claimed period, no current-period check | Silent (verify the KES signature with the opcert's key) | does not conform → conforms | Fixed on local branch `fix/dmq-kes-claimed-period` (`7e1a0820`, `db6103a6`), no PR (model `dmq` `MessageValidityKesAtCurrentBug.cfg`, `MessageValidityExtrasBug.cfg`) |
 | [N53](#n53) | network | DMQ: message expiry bounds | Admission: expired if now > expiresAt, too far if expiresAt >= now + 1800 s; mempool drops at expiresAt <= now; sub-second clock | main: now truncated to seconds; expiresAt = now + maxTTL accepted; `IsValidAt` keeps a message a second past expiry; branch: as the reference | Expired messages invalid; too far ahead a violation; no exact bound | does not conform → conforms | Fixed on local branch `fix/dmq-ttl-reference-bounds` (`1f492baf`, `5d48a376`), no PR |
@@ -127,8 +127,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [C12](#c12) | consensus | Rolling nonce from a raw 64-byte VRF output | The VRF output is hashed to a 32-byte nonce first (`mkNonceFromOutputVRF`), then combined | main before `756a9a89`: `CalculateRollingNonce` accepted the 64-byte output and hashed `prev ‖ output` (96 bytes). Now `NonceFromTPraosVRF`/`NonceFromPraosVRF` derive the contribution and a 64-byte operand is rejected | Combine two seeds; the block's seed is the nonce from its header | does not conform → conforms | Fixed by #3053 (merged, `756a9a89`) |
 | [C13](#c13) | consensus | The neutral nonce as an identity | `x ⭒ NeutralNonce = x` and `NeutralNonce ⭒ x = x` | Rolling: `CombineNonces` has `NonceTypeNeutral` as identity on both sides since `756a9a89`. Epoch: main's `CalculateEpochNonce` hashes a zero (or rejects an empty) candidate or lab nonce; branch: `EpochNonceFromNonces` takes `common.Nonce` and composes with `CombineNonces`, and `CalculateEpochNonce` is deprecated | `0_seed` is the neutral element of ⭒ | does not conform (epoch nonce only) → conforms | Rolling part fixed by #3053 (`756a9a89`). Epoch part fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet; model `consensus-nonce` `EpochNonceNewByron` passes, `EpochNonceDirectLabBug` still reproduces the deprecated function. Dingo applies the identity by hand and can move to the new function |
 | [C14](#c14) | consensus | A neutral epoch nonce in the VRF input | Appends nothing for a neutral η0 | main: `MkInputVrf` and `MkSeedTPraos` need 32 bytes, so a neutral η0 is passed as 32 zero bytes; branch: `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce` and `ComputeVRFInputFromNonce` take `common.Nonce` and append nothing for `NonceTypeNeutral`, and the `[]byte` builders are deprecated | `slotToSeed slot ⭒ η0`, with `0_seed` neutral | does not conform → conforms | Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet; model `consensus-nonce` `EpochNonceNewNeutral` passes, `EpochNonceVrfInputBug` still reproduces the deprecated builders. gOuroboros' exported `[]byte` callers (leader election, header validation, `VerifyBlock`) still cannot express a neutral η0. Only a chain with a neutral initial nonce reaches it, in its first epoch |
-| [C15](#c15) | consensus | TPraos overlay schedule (d > 0) | A non-active overlay slot is rejected; an active one belongs to a genesis delegate, checked against its delegation with no stake | main: `ValidateHeaderInput` cannot carry d or the genesis delegations, so a valid genesis-delegate header is rejected (no stake, no pool VRF key) and a pool header in a non-active slot is accepted; branch: required `Overlay`, `ErrNotActiveSlot`, `ErrWrongGenesisColdKey`, `ErrWrongGenesisVRFKey` | OVERLAY rule: Active-OBFT and Decentralized | does not conform → conforms | Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet (model `consensus-eras`, `OverlayGenesisBug`, `OverlayNonActiveBug`). No production caller: Dingo validates with `VerifyBlock` and its own overlay check |
-| [C16](#c16) | consensus | Header envelope: ObsoleteNode, header size, body size | Checked before the protocol rules | main: not in `ValidateHeader`; branch: required `Envelope`, `ErrObsoleteNode`, `ErrHeaderSizeTooLarge`, `ErrBlockSizeTooLarge`; a missing input is the only error (`ErrMissingHeaderInput`) | `chainChecks` | does not conform → conforms | Fixed on the same branch (model `consensus-eras`, `ExtrasBug`, `MissingInputBug`) |
+| [C15](#c15) | consensus | TPraos overlay schedule (d > 0) | A non-active overlay slot is rejected; an active one belongs to a genesis delegate, checked against its delegation with no stake | main: `ValidateHeaderInput` cannot carry d or the genesis delegations, so a valid genesis-delegate header is rejected (no stake, no pool VRF key) and a pool header in a non-active slot is accepted; branch: required `Overlay`, `ErrNotActiveSlot`, `ErrWrongGenesisColdKey`, `ErrWrongGenesisVRFKey` | OVERLAY rule: Active-OBFT and Decentralized | does not conform → conforms | Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), merged as #3201 (model `consensus-eras`, `OverlayGenesisBug`, `OverlayNonActiveBug`). No production caller: Dingo validates with `VerifyBlock` and its own overlay check |
+| [C16](#c16) | consensus | Header envelope: ObsoleteNode, header size, body size | Checked before the protocol rules | main: not in `ValidateHeader`; branch: required `Envelope`, `ErrObsoleteNode`, `ErrHeaderSizeTooLarge`, `ErrBlockSizeTooLarge`; a missing input is the only error (`ErrMissingHeaderInput`) | `chainChecks` | does not conform → conforms | Fixed on the same branch (model `consensus-eras`, `ExtrasBug`, `MissingInputBug`) , merged as #3201|
 | [C17](#c17) | consensus | Byron slot to epoch past Byron | The era history (`Summary`) converts every slot | main: `ByronConfig.SlotToEpoch` divides any slot by the Byron epoch length (mainnet slot 4514400 gives 209, not 208); branch: `EndSlot` and `SlotToEpochChecked` (`ErrSlotAfterByron`) | Conversions use each era's own epoch size | does not conform → conforms | Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet (model `consensus-eras`, `GoByronSoundBug`). Only tests call it |
 | [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129 (head `e7b4261d`, main merged in). Dingo's view already satisfies the contract |
 | [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: a pure function, covered by Go tests |
@@ -142,22 +142,22 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L10](#l10) | ledger | Leios certificate in a later epoch than its announcement | cardano-ledger refuses it (`LeiosCertAnnouncedInPreviousEpoch`); the consensus prototype does not check | Not checked | Not required | conforms | Recorded (model `ledger-leios`) |
 | [L11](#l11) | ledger | Node-to-client CertRB with inlined EB transactions | none | Accepts a certifying block whose endorser-block transactions are inlined, over node-to-client only | CertRB carries no transactions on chain | conforms | Local delivery only; the on-chain body is unchanged |
 | [L13](#l13) | ledger | Conway vote naming an enacted purpose root | Refused, `GovActionsDoNotExist`: votes resolve against the live proposals only | main: accepted when the caller's `GovActionById` returns the root, which the contract allowed and Dingo does; PR: the contract excludes roots | A vote names a proposal in the governance state | does not conform → conforms | Open PR #3155. Dingo's `GovActionById` must stop returning the current root |
-| [L14](#l14) | ledger | Proposed protocol version width in a classic parameter update | Minor is `Word32`; major bounded per era | main: both 16 bits, so a minor above 65,535 is refused; branch: minor 32 bits | Silent on widths | does not conform → conforms | Local branch `fix/ledger-pparam-update-minor-width` |
-| [L15](#l15) | ledger | Zero-coin output in a PlutusV2/V3 TxInfo | `transValue` always writes the ada entry, `{"": {"": 0}}` at zero | main: Shelley, Mary, Alonzo and Babbage `ToPlutusData` drop the ada entry when the coin is 0; branch: kept | Silent | does not conform → conforms | Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. 25 of the 26 PlutusV3 instances in cardano-ledger's Conway `translations.cbor` failed before the fix. A valid transaction cannot reach it today (every output meets the minimum UTxO) |
+| [L14](#l14) | ledger | Proposed protocol version width in a classic parameter update | Minor is `Word32`; major bounded per era | main: both 16 bits, so a minor above 65,535 is refused; branch: minor 32 bits | Silent on widths | does not conform → conforms | Fixed on local branch `fix/ledger-pparam-update-minor-width`, open PR #3278 |
+| [L15](#l15) | ledger | Zero-coin output in a PlutusV2/V3 TxInfo | `transValue` always writes the ada entry, `{"": {"": 0}}` at zero | main: Shelley, Mary, Alonzo and Babbage `ToPlutusData` drop the ada entry when the coin is 0; branch: kept | Silent | does not conform → conforms | Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), open PR #3281. 25 of the 26 PlutusV3 instances in cardano-ledger's Conway `translations.cbor` failed before the fix. A valid transaction cannot reach it today (every output meets the minimum UTxO) |
 | [L16](#l16) | ledger | PlutusV1 TxInfo with a redeemer that points at nothing | Ignored: a V1 TxInfo carries no redeemers | `NewTxInfoV1FromTransaction` resolves every redeemer and returns an error | n/a | conforms (stricter) | Phase-1 rejects such a transaction (extraneous redeemer) before any script runs, so the outcome is the same. The golden test clears the Alonzo generator's arbitrary redeemers for V1 |
-| [L19](#l19) | ledger | Committee certificate after an in-block UpdateCommittee proposal | Accepted: GOVCERT counts the proposals the block's earlier transactions left as potential members | main: `BlockLedgerState` committee lookups ask only the wrapped state, so the certificate is rejected; branch: in-block proposals count | Silent | does not conform → conforms | Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet. Reaches Dingo through `utxoref.StateOverlay` |
-| [L20](#l20) | ledger | `VerifyBlock` issuer in a TPraos overlay slot (d > 0) | Active slot: the scheduled genesis delegate, its VRF key, no stake; non-active slot: rejected | main: every issuer looked up in the pool distribution, so valid delegate blocks are rejected and pool blocks in non-active slots accepted; branch: `VerifyConfig.TPraosOverlay` | OVERLAY rule | does not conform → conforms | Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet. Breaking for callers with stake-pool validation on TPraos blocks. Dingo skips that validation |
+| [L19](#l19) | ledger | Committee certificate after an in-block UpdateCommittee proposal | Accepted: GOVCERT counts the proposals the block's earlier transactions left as potential members | main: `BlockLedgerState` committee lookups ask only the wrapped state, so the certificate is rejected; branch: in-block proposals count | Silent | does not conform → conforms | Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), open PR #3285. Reaches Dingo through `utxoref.StateOverlay` |
+| [L20](#l20) | ledger | `VerifyBlock` issuer in a TPraos overlay slot (d > 0) | Active slot: the scheduled genesis delegate, its VRF key, no stake; non-active slot: rejected | main: every issuer looked up in the pool distribution, so valid delegate blocks are rejected and pool blocks in non-active slots accepted; branch: `VerifyConfig.TPraosOverlay` | OVERLAY rule | does not conform → conforms | Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), open PR #3277. Breaking for callers with stake-pool validation on TPraos blocks. Dingo skips that validation |
 | [L21](#l21) | ledger | Leios voting key past its honoured age | Seated keyless once `epoch >= registeredIn + maxKeyAge`, `maxKeyAge = ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2`; a certificate it signs is refused (`SignerWithoutKey`) | `DijkstraLeiosCertificateState` asks only for keys "from the snapshot's registered pool parameters"; an aged-out key handed over verifies like any other | Voting keys rotate with a time-to-live | does not conform → conforms | Fixed on local branch `fix/leios-voting-key-age` (`93c3df5d`), no PR yet: gOuroboros judges key age itself, through the new required `DijkstraLeiosKeyAgeContext` method and `KeyRegisteredIn` (breaking). No implementer in Dingo or ouroboros-mock |
 | [L22](#l22) | ledger | Leios vote encoding | `[announcing_rb_hash, voter_id (Word16), signature]` | main: `LeiosVote`, carried by LeiosVotes `MsgVote` and the LeiosFetch vote messages, is `[slot, eb_hash, voter_id, signature]`; branch: the CIP shape, `voter_id` 16 bits | `[announcing_rb_hash, voter_id, vote_signature]`; LeiosVotes `MsgLeiosVote` carries it | does not conform → conforms | Fixed on local branch `fix/leios-vote-shape` (`eb4c2421`), no PR yet (breaking; Dingo's `ledger/leios` and `ouroboros` packages use the old fields). The rc-2026w41 prototype vote is the golden vector. A LeiosFetch votes reply is matched by voter only: a vote names its announcing block, not its slot |
-| [L23](#l23) | ledger | Dijkstra committee certificate for a member an earlier level proposed | Accepted: each level's GOVCERT counts the UpdateCommittee proposals the earlier levels left as potential members | main: the governance view consults only the wrapped state, so a top-level (or later sub-transaction) authorization or resignation is rejected | Same rule (Conway GOVCERT isPotentialFutureMember; Dijkstra LEDGER/SUBLEDGER) | does not conform → conforms | Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet |
-| [L24](#l24) | ledger | Dijkstra parameter-update well-formedness: eMax and pledge leverage | Refused: a set eMax of zero, or a pledge leverage cap below 1 (removing the cap is allowed) | main: accepted (only Conway's non-zero fields and a non-negative leverage are checked) | Leverage cap at least 1; eMax not listed (see below) | does not conform → conforms | Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet |
-| [L25](#l25) | cbor | Tags before a tag 30 rational | At most one tag, and only 30 (`allowTag 30`) | main: every leading tag stripped, so tag 31, tag 258 or tag 30 twice decodes as a rational | RFC 8949 tag 30 is one tag around [n, d] | does not conform → conforms | Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), no PR yet |
-| [L26](#l26) | cbor | Plutus Data constructor whose fields are not a list | Refused (`decodeListOf`) | main: `ConstructorDecoder` and `Value` accept 121(1) or 102([3, 1]); only `ParsedFields`/JSON fail later | Plutus Data CDDL: a constructor's fields are `[* plutus_data]` | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), no PR yet |
-| [L27](#l27) | cbor | Generic `Value` decode of a tag 258 set of maps with composite keys | Not applicable (typed decoders); RFC 8949 allows any item as a map key | main: `Value` and `LazyValue.Decode` fail, including on the cardano-ledger Conway and Dijkstra golden transactions (proposal procedures) | RFC 8949 section 3.1 | does not conform → conforms | Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet |
-| [L28](#l28) | ledger | Bignum MultiAsset quantity | Refused: output quantities use `decodeWord64`, mint quantities `decodeIntegerBounded64` | main: a tag 2/3 bignum quantity is accepted in outputs and mint at every version | CDDL `positive_coin`/`nonZeroInt64` are plain integers | does not conform → conforms | Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet |
-| [L29](#l29) | ledger | PlutusV2 cost model in an Alonzo parameter update | Accepted: the pre-Conway cost-model decoder takes PlutusV1 and PlutusV2 (exact parameter counts) in every era | main: Alonzo refuses language 1 (only Babbage accepts it) | Silent on the decoder; the Alonzo spec lists PlutusV1 only | does not conform → conforms | Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet |
-| [L30](#l30) | ledger | Tag 258 on a pre-Conway set-shaped field | Refused before version 9: `decodeSet` (versions 2-8) and the witness decoders' `decodeList` take no tag | main: accepted on pool owners, Alonzo/Babbage collateral, required signers, reference inputs and every Shelley-Babbage witness list | Silent (the CDDL's `set<a>` allows the tag from Conway) | does not conform → conforms | Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), no PR yet |
-| [L31](#l31) | cbor | `ConstructorEncoder` field list encoding | Non-empty fields as an indefinite list, empty as `0x80` (`encodeData` with the Serialise list instance) | main: a definite list; nil fields as null | Plutus Data CDDL allows either | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), no PR yet; changes the bytes and hashes of Data built with it |
+| [L23](#l23) | ledger | Dijkstra committee certificate for a member an earlier level proposed | Accepted: each level's GOVCERT counts the UpdateCommittee proposals the earlier levels left as potential members | main: the governance view consults only the wrapped state, so a top-level (or later sub-transaction) authorization or resignation is rejected | Same rule (Conway GOVCERT isPotentialFutureMember; Dijkstra LEDGER/SUBLEDGER) | does not conform → conforms | Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), open PR #3245 |
+| [L24](#l24) | ledger | Dijkstra parameter-update well-formedness: eMax and pledge leverage | Refused: a set eMax of zero, or a pledge leverage cap below 1 (removing the cap is allowed) | main: accepted (only Conway's non-zero fields and a non-negative leverage are checked) | Leverage cap at least 1; eMax not listed (see below) | does not conform → conforms | Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), open PR #3246 |
+| [L25](#l25) | cbor | Tags before a tag 30 rational | At most one tag, and only 30 (`allowTag 30`) | main: every leading tag stripped, so tag 31, tag 258 or tag 30 twice decodes as a rational | RFC 8949 tag 30 is one tag around [n, d] | does not conform → conforms | Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), open PR #3282 |
+| [L26](#l26) | cbor | Plutus Data constructor whose fields are not a list | Refused (`decodeListOf`) | main: `ConstructorDecoder` and `Value` accept 121(1) or 102([3, 1]); only `ParsedFields`/JSON fail later | Plutus Data CDDL: a constructor's fields are `[* plutus_data]` | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), open PR #3283 |
+| [L27](#l27) | cbor | Generic `Value` decode of a tag 258 set of maps with composite keys | Not applicable (typed decoders); RFC 8949 allows any item as a map key | main: `Value` and `LazyValue.Decode` fail, including on the cardano-ledger Conway and Dijkstra golden transactions (proposal procedures) | RFC 8949 section 3.1 | does not conform → conforms | Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), open PR #3284 |
+| [L28](#l28) | ledger | Bignum MultiAsset quantity | Refused: output quantities use `decodeWord64`, mint quantities `decodeIntegerBounded64` | main: a tag 2/3 bignum quantity is accepted in outputs and mint at every version | CDDL `positive_coin`/`nonZeroInt64` are plain integers | does not conform → conforms | Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), open PR #3279 |
+| [L29](#l29) | ledger | PlutusV2 cost model in an Alonzo parameter update | Accepted: the pre-Conway cost-model decoder takes PlutusV1 and PlutusV2 (exact parameter counts) in every era | main: Alonzo refuses language 1 (only Babbage accepts it) | Silent on the decoder; the Alonzo spec lists PlutusV1 only | does not conform → conforms | Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), open PR #3280 |
+| [L30](#l30) | ledger | Tag 258 on a pre-Conway set-shaped field | Refused before version 9: `decodeSet` (versions 2-8) and the witness decoders' `decodeList` take no tag | main: accepted on pool owners, Alonzo/Babbage collateral, required signers, reference inputs and every Shelley-Babbage witness list | Silent (the CDDL's `set<a>` allows the tag from Conway) | does not conform → conforms | Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), open PR #3289 |
+| [L31](#l31) | cbor | `ConstructorEncoder` field list encoding | Non-empty fields as an indefinite list, empty as `0x80` (`encodeData` with the Serialise list instance) | main: a definite list; nil fields as null | Plutus Data CDDL allows either | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), open PR #3290; changes the bytes and hashes of Data built with it |
 | [L32](#l32) | cbor | Map entry order in Value's Plutus Data JSON | Wire order (`plutusDataToJson` over the entry list) | main: entries sorted by their JSON key; Value holds maps as Go maps, so wire order is gone | Silent | does not conform | Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
@@ -325,7 +325,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Server.hs` 43 (`Yield (MsgAcceptVersion vNumber $ encodeData vNumber agreedData)`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/server.go` 161, 228
 - **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/handshake-accept-negotiated-data`; model `handshake` `HandshakeAcceptOwnDataBug.cfg` reproduces main. No wrong outcome found: the reference client recomputes the agreement, and every combining rule is idempotent and commutative
+- **Status.** Fixed on local branch `fix/handshake-accept-negotiated-data`, merged as #3194; model `handshake` `HandshakeAcceptOwnDataBug.cfg` reproduces main. No wrong outcome found: the reference client recomputes the agreement, and every combining rule is idempotent and commutative
 - **Review follow-up.** PR #3194 at `8ab16c0f`: the server's `FinishedFunc` also gets the agreed data (reference `Server.hs` 42-44); model `handshake` `AgreedDataBothSides`, `HandshakeServerRawPeerDataBug.cfg`
 - **Review follow-up.** PR #3194 at `97039771` and PR #3127 at `8461ae3a`: a version table entry held as a pointer now agrees like a value; before, it came back unchanged as the side's own data. Verdict: conforms on both branches. Model `handshake` `AgreeHeld`, `HandshakePointerUnagreedBug.cfg`, `HandshakeSimOpenPointerUnagreedBug.cfg`
 
@@ -338,7 +338,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Codec.hs` 101-102 ("encodes proposed map in ascending order and it expects to receive them in this order"), 228-241 (`decodeVersions`: an unrecognised key is skipped, a recognised key must exceed the previous recognised key)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/handshake/collection_decode.go` 85 (duplicate check only)
 - **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/handshake-version-key-order`; model `handshake` `HandshakeKeyOrderBug.cfg` reproduces main. The fix follows the reference: only recognised keys must ascend, and an unrecognised key out of order is accepted. A strict every-key check would refuse such a peer (`HandshakeKeyOrderEveryBug.cfg`)
+- **Status.** Fixed on local branch `fix/handshake-version-key-order`, merged as #3194; model `handshake` `HandshakeKeyOrderBug.cfg` reproduces main. The fix follows the reference: only recognised keys must ascend, and an unrecognised key out of order is accepted. A strict every-key check would refuse such a peer (`HandshakeKeyOrderEveryBug.cfg`)
 
 ### N15
 
@@ -716,7 +716,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Ledger/Query.hs` 742-761 (encode, `LC.toEraCBOR @era`), 842-850 (decode, `LC.fromEraCBOR @era`); goldens `golden/cardano/QueryVersion3/CardanoNodeToClientVersion19/Query_<Era>_GetUTxOByAddress`, `_GetFilteredDelegationsAndRewardAccounts`, `_GetUTxOByTxIn`
 - **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/client.go` 594, 674, 892; branch `fix/localstatequery-era-set-encoding` `fb802943` `eraFilterSet`, test `TestEraFilterSetEncoding` (23 of 35 cells fail before the fix)
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch, no PR yet
+- **Status.** Fixed on local branch, open PR #3286
 
 ### N49
 
@@ -727,7 +727,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../Shelley/Ledger/Query.hs` 411-412 (`queryChainAccountState`), 498, 503 (`blockQueryIsSupportedOnVersion`), 872, 882 (decoded without `requireCG`); goldens `Query_<Era>_GetAccountState`, `Query_<Era>_GetGovState` for Shelley to Dijkstra
 - **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/client.go` 941-945, 1341-1345; branch `fix/localstatequery-account-state-all-eras` `ddae722e`, test `TestGetAccountStateEveryShelleyEra` (5 eras fail before the fix)
 - **Verdict.** does not conform → conforms (`GetAccountState`); `GetGovState` a missing feature
-- **Status.** `GetAccountState` fixed on local branch, no PR yet; `GetGovState` recorded
+- **Status.** `GetAccountState` fixed on local branch, open PR #3287; `GetGovState` recorded
 
 ### N50
 
@@ -738,7 +738,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../Shelley/Ledger/Query.hs` 419, 507, 886; goldens `Query_Conway_GetFuturePParams`, `Query_Dijkstra_GetFuturePParams`
 - **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/queries.go` 81, 244; branch `fix/localstatequery-decode-future-pparams` `dd131af9`, test `TestDecodeGetFuturePParamsQuery` (both cells fail before the fix)
 - **Verdict.** does not conform → conforms (server decode)
-- **Status.** Fixed on local branch, no PR yet; a client call is not added
+- **Status.** Fixed on local branch, open PR #3288; a client call is not added
 
 ### N51
 
@@ -996,7 +996,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs` 219-282, 314-344; `libs/cardano-ledger-core/src/Cardano/Ledger/Slot.hs` 117-130
 - **gOuroboros.** gOuroboros `f9ba2d3c` `consensus/validate.go` (`ValidateHeader`, `ValidateHeaderInput`); branch `78f2f391` `consensus/overlay.go` (`classifyOverlaySlot`, `checkRequiredInputs`)
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet. Breaking: every caller must now pass `Overlay` for TPraos headers. No production caller in gOuroboros or Dingo
+- **Status.** Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), merged as #3201. Breaking: every caller must now pass `Overlay` for TPraos headers. No production caller in gOuroboros or Dingo
 
 ### C16
 
@@ -1007,7 +1007,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Protocol/EnvelopeChecks.hs` 77-91; `Protocol/TPraos.hs` 69-80; `Protocol/Praos.hs` 82-106; cardano-ledger `eras/shelley/impl/src/Cardano/Ledger/Chain.hs` 65-82
 - **gOuroboros.** gOuroboros `f9ba2d3c` `consensus/validate.go`; branch `78f2f391` `consensus/overlay.go` (`validateEnvelopeLimits`)
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on the same branch, no PR yet. `VerifyBlock` already checks the sizes from protocol parameters
+- **Status.** Fixed on the same branch, merged as #3201. `VerifyBlock` already checks the sizes from protocol parameters
 
 ### C17
 
@@ -1175,7 +1175,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/BaseTypes.hs` 212 (`pvMinor :: Word32`), 254-264 (`decodeProtVer`); `eras/shelley/impl/src/Cardano/Ledger/Shelley/PParams.hs` 490-505
 - **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/pparam_update_validation.go` 198-212 (`ValidateProtocolParameterUpdateDomains`)
 - **Verdict.** does not conform → conforms (minor); major: conforms (outcome)
-- **Status.** Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet. Allegra shares Shelley's update type, so an era-exact major bound would need its own type
+- **Status.** Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), open PR #3278. Allegra shares Shelley's update type, so an era-exact major bound would need its own type
 
 ### L15
 
@@ -1186,7 +1186,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/Plutus/TxInfo.hs` 186-187, `eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Plutus/TxInfo.hs` 417-418, `eras/babbage/impl/src/Cardano/Ledger/Babbage/TxInfo.hs` 158; golden `eras/conway/impl/golden/translations.cbor`
 - **gOuroboros.** gOuroboros `cc300dc8` `ledger/shelley/shelley.go` 858, `ledger/mary/mary.go` 713, `ledger/alonzo/alonzo.go` 641, `ledger/babbage/babbage.go` 1080
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet; test `TestTxOutPlutusDataKeepsZeroAda` fails on main for all four eras. Pinned by `TestTxInfoMatchesLedgerTranslationGoldens` on `test/script-context-reference` (`3b3be7c0`, stacked on the fix). Unreachable on chain today: the minimum-UTxO rule keeps every output's coin positive
+- **Status.** Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), open PR #3281; test `TestTxOutPlutusDataKeepsZeroAda` fails on main for all four eras. Pinned by `TestTxInfoMatchesLedgerTranslationGoldens` on `test/script-context-reference` (`3b3be7c0`, stacked on the fix). Unreachable on chain today: the minimum-UTxO rule keeps every output's coin positive
 
 ### L16
 
@@ -1208,7 +1208,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/PulsingReward.hs` 89-282, `libs/cardano-ledger-core/src/Cardano/Ledger/State/SnapShots.hs` 141-165, `eras/shelley/impl/src/Cardano/Ledger/Shelley/Rewards.hs` 61-292, `.../LedgerState/IncrementalStake.hs` 95-128, `.../Shelley/Era.hs` 256-257
 - **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/rewards.go` (`CalculateAdaPots`, `CalculateRewards`)
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`9675856a`, cell walk `bdba9c8b`), no PR yet. `TestCalculateAdaPotsReferenceTable` (5 cells) and `TestCalculateRewardsReferenceTable` (2) fail on main. Model `specs/ledger-rewards`. Production impact: Dingo computes rewards in its own `ledger/rewards` package; gOuroboros's calculator is reached through `RewardService`, the ouroboros-mock callback and Dingo's conformance state provider. The fix adds `DesiredPools` (required), `DecentralizationRate` and `RewardSnapshot.TotalStake`; callers that leave `DesiredPools` zero now get an error
+- **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`9675856a`, cell walk `bdba9c8b`), open PR #3275. `TestCalculateAdaPotsReferenceTable` (5 cells) and `TestCalculateRewardsReferenceTable` (2) fail on main. Model `specs/ledger-rewards`. Production impact: Dingo computes rewards in its own `ledger/rewards` package; gOuroboros's calculator is reached through `RewardService`, the ouroboros-mock callback and Dingo's conformance state provider. The fix adds `DesiredPools` (required), `DecentralizationRate` and `RewardSnapshot.TotalStake`; callers that leave `DesiredPools` zero now get an error
 
 ### L18
 
@@ -1219,7 +1219,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/State/StakePool.hs` 494, `.../State/SnapShots.hs` 230-235, `eras/shelley/impl/src/Cardano/Ledger/Shelley/Rewards.hs` 256
 - **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/rewards.go` `ValidatePoolPledge`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`203f3624`, same file as L17), no PR yet. `TestValidatePoolPledgeCountsEachOwnerOnce` fails 2 of 6 cells on the parent commit. Model `specs/ledger-rewards` `RewardPotsOwnerListBug.cfg`. No caller outside gOuroboros tests (workspace search)
+- **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`203f3624`, same file as L17), open PR #3275. `TestValidatePoolPledgeCountsEachOwnerOnce` fails 2 of 6 cells on the parent commit. Model `specs/ledger-rewards` `RewardPotsOwnerListBug.cfg`. No caller outside gOuroboros tests (workspace search)
 
 ### L19
 
@@ -1230,7 +1230,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs` 190-205, `.../Rules/Ledger.hs` 390-416
 - **gOuroboros.** gOuroboros `62fa36d1` `ledger/common/block_state.go` `CommitteeMember`, `blockCommitteeCredentials.CommitteeCredentialMember`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet. `TestBlockLedgerStateTreatsInBlockCommitteeProposalAsPotentialMember` fails on the parent commit. Model `specs/ledger-block-overlay` `GovOverlayGoMainBug.cfg`. Reaches Dingo's mempool and block builder through `utxoref.StateOverlay`
+- **Status.** Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), open PR #3285. `TestBlockLedgerStateTreatsInBlockCommitteeProposalAsPotentialMember` fails on the parent commit. Model `specs/ledger-block-overlay` `GovOverlayGoMainBug.cfg`. Reaches Dingo's mempool and block builder through `utxoref.StateOverlay`
 
 ### L20
 
@@ -1241,7 +1241,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs` 219-282, `libs/cardano-ledger-core/src/Cardano/Ledger/Slot.hs` 117-130; ouroboros-consensus `ec239d57f618` `Ouroboros/Consensus/Ledger/Extended.hs`
 - **gOuroboros.** gOuroboros `62fa36d1` `ledger/verify_block.go` `VerifyBlockState`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet: `VerifyConfig.TPraosOverlay`, required for Shelley-to-Alonzo blocks unless `SkipStakePoolValidation`. 11 of 17 `TestVerifyBlockStateTPraosOverlay` cells fail with main's issuer path. The classification duplicates `consensus.classifyOverlaySlot` (C15); sharing one is a follow-up. Dingo calls `VerifyBlock` with stake-pool validation skipped and checks the overlay itself
+- **Status.** Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), open PR #3277: `VerifyConfig.TPraosOverlay`, required for Shelley-to-Alonzo blocks unless `SkipStakePoolValidation`. 11 of 17 `TestVerifyBlockStateTPraosOverlay` cells fail with main's issuer path. The classification duplicates `consensus.classifyOverlaySlot` (C15); sharing one is a follow-up. Dingo calls `VerifyBlock` with stake-pool validation skipped and checks the overlay itself
 
 ### L21
 
@@ -1274,7 +1274,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs` (`isPotentialFutureMember`), `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/Rules/SubLedger.hs` 259-299, `.../Rules/Ledger.hs` 430-478
 - **gOuroboros.** gOuroboros `ebc63eab` `ledger/dijkstra/rules.go` `dijkstraGovernanceStateView.CommitteeCredentialMember`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet. `TestDijkstraCommitteeCertificateForEarlierLevelProposedMember` fails 2 of 4 cases on the parent commit. Model `specs/ledger-conway-dijkstra` `SubGovGoComMainBug.cfg`; with the fix applied, all 52,416 DRep and committee cells (proposals included) agree with the reference, and 7 fail without it. Only Dijkstra batches with sub-transactions reach it
+- **Status.** Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), open PR #3245. `TestDijkstraCommitteeCertificateForEarlierLevelProposedMember` fails 2 of 4 cases on the parent commit. Model `specs/ledger-conway-dijkstra` `SubGovGoComMainBug.cfg`; with the fix applied, all 52,416 DRep and committee cells (proposals included) agree with the reference, and 7 fail without it. Only Dijkstra batches with sub-transactions reach it
 
 ### L24
 
@@ -1285,7 +1285,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/PParams.hs` 1150-1172
 - **gOuroboros.** gOuroboros `0dbd0f11` `ledger/dijkstra/rules.go` `validateDijkstraProtocolParameterUpdate`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet. `TestDijkstraParameterUpdateWellFormedEMaxAndPledgeLeverage` fails 2 of 6 cases on the parent commit. Two existing tests that asserted acceptance of a leverage of 0 and 1/2 now expect refusal. Model `specs/ledger-conway-dijkstra` `SubGovGoPpuMainBug.cfg`; with the fix all 1,308 proposal-check cells agree, and 96 fail without it. Where the spec and the reference differ on `eMax` and the Leios quorum, gOuroboros follows the reference
+- **Status.** Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), open PR #3246. `TestDijkstraParameterUpdateWellFormedEMaxAndPledgeLeverage` fails 2 of 6 cases on the parent commit. Two existing tests that asserted acceptance of a leverage of 0 and 1/2 now expect refusal. Model `specs/ledger-conway-dijkstra` `SubGovGoPpuMainBug.cfg`; with the fix all 1,308 proposal-check cells agree, and 96 fail without it. Where the spec and the reference differ on `eMax` and the Leios quorum, gOuroboros follows the reference
 
 ### L25
 
@@ -1296,7 +1296,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Decoding/Decoder.hs` 465-484 (`decodeRational`), 1347-1354 (`allowTag`)
 - **gOuroboros.** gOuroboros `2fe26494` `cbor/tags.go` `Rat.UnmarshalCBOR`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), no PR yet. `TestRatAcceptsOnlyOneTag30` fails on the parent for `d81f820102` and `d81ed81e820102`. `TestRatRejectsOversizedArrayBeforeDecoding/nested_tags` asserted the old read-through-every-tag behaviour and now expects the second-tag refusal
+- **Status.** Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), open PR #3282. `TestRatAcceptsOnlyOneTag30` fails on the parent for `d81f820102` and `d81ed81e820102`. `TestRatRejectsOversizedArrayBeforeDecoding/nested_tags` asserted the old read-through-every-tag behaviour and now expects the second-tag refusal
 
 ### L26
 
@@ -1307,7 +1307,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** plutus `bdc12f105a98` `plutus-core/plutus-core/src/PlutusCore/Data.hs` 286-307 (`decodeConstr`)
 - **gOuroboros.** gOuroboros `2fe26494` `cbor/constructor.go` `ConstructorDecoder.UnmarshalCBOR`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), no PR yet. `TestConstructorFieldsMustBeAList` fails 12 checks on the parent (six encodings, each through `ConstructorDecoder` and `Value`)
+- **Status.** Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), open PR #3283. `TestConstructorFieldsMustBeAList` fails 12 checks on the parent (six encodings, each through `ConstructorDecoder` and `Value`)
 
 ### L27
 
@@ -1318,7 +1318,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/golden/tx.cbor` (field 20) decodes with the reference
 - **gOuroboros.** gOuroboros `2fe26494` `cbor/value.go` `Value.unmarshalCBOR` (tag branch)
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet. `TestValueDecodesSetMembersWithCompositeMapKeys` fails on the parent for three encodings and the Conway golden
+- **Status.** Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), open PR #3284. `TestValueDecodesSetMembersWithCompositeMapKeys` fails on the parent for three encodings and the Conway golden
 
 ### L28
 
@@ -1329,7 +1329,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/mary/impl/src/Cardano/Ledger/Mary/Value.hs` 299-308, 369-393
 - **gOuroboros.** gOuroboros `2fe26494` `ledger/common/common.go` `MultiAsset.UnmarshalCBOR`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet. `TestMultiAssetBignumQuantityAsReference` fails on the parent at pv 8, 9 and 12
+- **Status.** Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), open PR #3279. `TestMultiAssetBignumQuantityAsReference` fails on the parent at pv 8, 9 and 12
 
 ### L29
 
@@ -1340,7 +1340,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/Plutus/CostModels.hs` 307-338
 - **gOuroboros.** gOuroboros `2fe26494` `ledger/alonzo/pparams.go` `ValidateProtocolParameterUpdateVersion`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet. `TestAlonzoCostModelUpdateLanguagesAsReference` fails on the parent with "unknown cost model language 1" at pv 5. `classic_ppup_rules_test.go` asserted the old refusal and is updated; conformance vectors pass. Where spec and reference differ, gOuroboros follows the reference
+- **Status.** Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), open PR #3280. `TestAlonzoCostModelUpdateLanguagesAsReference` fails on the parent with "unknown cost model language 1" at pv 5. `classic_ppup_rules_test.go` asserted the old refusal and is updated; conformance vectors pass. Where spec and reference differ, gOuroboros follows the reference
 
 ### L30
 
@@ -1351,7 +1351,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Decoding/Decoder.hs` 935-953; `eras/shelley/impl/src/Cardano/Ledger/Shelley/TxWits.hs` 261-273; `eras/alonzo/impl/src/Cardano/Ledger/Alonzo/TxWits.hs` 347-357, 569-580, 660-700, 721-730
 - **gOuroboros.** gOuroboros `0fa7a0df` `ledger/common/certs.go` `PoolRegistrationCertificate.UnmarshalCBOR`, `ValidatePreConwayCertificateTypes`; Alonzo and Babbage body and witness-set decoders, Shelley witness set
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), no PR yet. `TestPreConwaySetFieldsRefuseTag258` (26 fields across Shelley-Babbage, each with an untagged control) fails all 26 on the parent. Existing tests that asserted tagged owner sets decode pre-Conway, and that tagged duplicate collateral is refused as a duplicate, now expect the tag refusal. Conformance vectors pass. Only tag 258 heads trigger the re-read, so another tag on these fields is still accepted
+- **Status.** Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), open PR #3289. `TestPreConwaySetFieldsRefuseTag258` (26 fields across Shelley-Babbage, each with an untagged control) fails all 26 on the parent. Existing tests that asserted tagged owner sets decode pre-Conway, and that tagged duplicate collateral is refused as a duplicate, now expect the tag refusal. Conformance vectors pass. Only tag 258 heads trigger the re-read, so another tag on these fields is still accepted
 
 ### L31
 
@@ -1362,7 +1362,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** plutus `bdc12f105a98` `plutus-core/plutus-core/src/PlutusCore/Data.hs` 147-160; vectors from `plutus-core/plutus-core/test/CBOR/DataStability.hs`
 - **gOuroboros.** gOuroboros `0fa7a0df` `cbor/constructor.go` `ConstructorEncoder.MarshalCBOR`
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), no PR yet; changes the bytes and hashes of Data built with it. `TestConstructorEncoderAsPlutusDataStability` (two DataStability vectors) and `TestConstructorEncoderFieldListsAsPlutus` fail on the parent. No gOuroboros caller builds datums with it; outside callers are bluefin (`internal/tx`, `internal/miner`), cardano-models (`tuna.go`, `cdns.go`), merkle-patricia-forestry (`proof.go`), shai (`internal/spectrum/models.go`) and vpn-indexer (`internal/txbuilder`), whose built Data and any hashes of it change; their tests that pin bytes need updating. Plain `[]any` List values inside the fields are still definite
+- **Status.** Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), open PR #3290; changes the bytes and hashes of Data built with it. `TestConstructorEncoderAsPlutusDataStability` (two DataStability vectors) and `TestConstructorEncoderFieldListsAsPlutus` fail on the parent. No gOuroboros caller builds datums with it; outside callers are bluefin (`internal/tx`, `internal/miner`), cardano-models (`tuna.go`, `cdns.go`), merkle-patricia-forestry (`proof.go`), shai (`internal/spectrum/models.go`) and vpn-indexer (`internal/txbuilder`), whose built Data and any hashes of it change; their tests that pin bytes need updating. Plain `[]any` List values inside the fields are still definite
 
 ### L32
 
@@ -1467,6 +1467,7 @@ Not drift, since gOuroboros matches the reference, but worth knowing. Details an
 
 - Keep-alive server restart after `MsgDone` (merged #3080), and the shutdown race in every restarting server (merged #3087).
 - Chain-sync `Stop` without `MsgDone` (merged #3092, now on `main`).
+- Handshake accept data and key order, N13 and N14 (merged #3194); TPraos overlay schedule and header envelope, C15 and C16 (merged #3201). Their verdicts above still describe the pinned `main`.
 
 ## Does not conform: needs a decision
 
@@ -1474,8 +1475,6 @@ Entries where gOuroboros on `main` breaks a stated rule, with what would close e
 
 No pull request yet (decide whether and how to fix):
 
-- **N13** Handshake `MsgAcceptVersion` carries the server's own data. Fixed on local branch `fix/handshake-accept-negotiated-data`.
-- **N14** Handshake version keys out of order. Fixed on local branch `fix/handshake-version-key-order`.
 - **N18** Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client). Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives.
 - **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed in PR #3195 (head `e5c47f5f`).
 - **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Opt-in fix in PR #3196 (head `26f0e50a`), which depends on PR #3154 for the client side.
@@ -1485,28 +1484,13 @@ No pull request yet (decide whether and how to fix):
 - **C8** Genesis window count from `SimpleChainFragment`. The float rounding is fixed on local branch `fix/genesis-window-estimate-rounding` (`74699bf6`, no PR); the estimate itself remains. Callers with real headers should implement `ChainFragment` with a count.
 - **C13** The neutral nonce as an identity in the epoch nonce (the rolling part is fixed by #3053). Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet: `EpochNonceFromNonces`, `CalculateEpochNonce` deprecated.
 - **C14** A neutral epoch nonce in the VRF input. Fixed additively on the same branch, no PR yet: `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce`, `ComputeVRFInputFromNonce`, the `[]byte` builders deprecated. Only a chain with a neutral initial nonce reaches it, in its first epoch.
-- **C15** TPraos overlay schedule. Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet; breaking for callers, which must now pass `Overlay`.
-- **C16** Header envelope checks. Fixed on the same branch; callers must pass `Envelope`.
 - **C17** Byron slot to epoch past Byron. Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet.
 - **L5** Byron transaction with no inputs or no outputs. Fixed on a local branch, no PR yet.
 - **L6** Byron `maxTxSize`. Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`).
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
-- **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
-- **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. Unreachable on chain today.
-- **L24** Dijkstra parameter-update well-formedness (eMax, pledge leverage). Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet.
-- **L25** Tags before a tag 30 rational. Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), no PR yet.
-- **L26** Plutus Data constructor whose fields are not a list. Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), no PR yet.
-- **L27** Generic `Value` decode of a tag 258 set of maps with composite keys. Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet.
-- **L28** Bignum MultiAsset quantity. Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet.
-- **L29** PlutusV2 cost model in an Alonzo parameter update. Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet.
 
-- **L30** Tag 258 on a pre-Conway set-shaped field. Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), no PR yet.
-- **L31** `ConstructorEncoder` field list encoding. Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), no PR yet; changes the bytes and hashes of Data built with it.
 - **L32** Map entry order in Value's Plutus Data JSON. Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus.
 - `IndefLengthByteString` does not check that its chunks are definite byte strings (RFC 8949 F.1); recorded, not changed.
-- **L23** Dijkstra committee certificate for a member an earlier level proposed. Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet.
-- **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
-- **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.
 
 - **N52** DMQ KES signature checked at the current period. Fixed on local branch `fix/dmq-kes-claimed-period` (`7e1a0820`, `db6103a6`), no PR yet.
 - **N53** DMQ expiry bounds and `IsValidAt`. Fixed on local branch `fix/dmq-ttl-reference-bounds` (`1f492baf`, `5d48a376`), no PR yet.
@@ -1517,6 +1501,19 @@ No pull request yet (decide whether and how to fix):
 - **N58** DMQ node-to-node receipt. Fixed on local branch `fix/messagesubmission-reference-receipt` (`a12edd17`), no PR yet; touches the same function as PR #3130 (they merge with two test-call updates).
 Fixed by an open pull request (decide by reviewing and merging it):
 
+- **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), open PR #3278.
+- **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), open PR #3281. Unreachable on chain today.
+- **L24** Dijkstra parameter-update well-formedness (eMax, pledge leverage). Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), open PR #3246.
+- **L25** Tags before a tag 30 rational. Fixed on local branch `fix/cbor-rat-single-tag` (`fe4f8206`), open PR #3282.
+- **L26** Plutus Data constructor whose fields are not a list. Fixed on local branch `fix/cbor-constructor-fields-list` (`a37a8a90`), open PR #3283.
+- **L27** Generic `Value` decode of a tag 258 set of maps with composite keys. Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), open PR #3284.
+- **L28** Bignum MultiAsset quantity. Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), open PR #3279.
+- **L29** PlutusV2 cost model in an Alonzo parameter update. Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), open PR #3280.
+- **L30** Tag 258 on a pre-Conway set-shaped field. Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), open PR #3289.
+- **L31** `ConstructorEncoder` field list encoding. Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), open PR #3290; changes the bytes and hashes of Data built with it.
+- **L23** Dijkstra committee certificate for a member an earlier level proposed. Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), open PR #3245.
+- **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), open PR #3285.
+- **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), open PR #3277; breaking for callers that validate TPraos issuers.
 - **N7** Chain-sync node-to-node message size limit. Open PR #3112.
 - **N11** Handshake simultaneous open. Open PR #3127.
 - **N15** Block-fetch `Stop` with ranges outstanding. Open PR #3114 (chain-sync's identical defect was fixed by merged #3092).
