@@ -136,10 +136,14 @@ The reference states only that every outstanding request is answered with
 | `LeiosNotifyPipelinedQuitAssumptionBug.cfg`: assert the source is asked exactly once | 45 | **fails** `SourceAskedOnce` (asked zero times) |
 | `LeiosNotifyPipelinedQuitHandshake.cfg`: the client sends the rest once the source was asked | 20 | passes `SourceAskedOnce` |
 | `LeiosNotifyPipelinedQuitNoCheckBug.cfg`: mutation, the handler skips the quit check | 38 | **fails** `SourceAskedAtMostOnce` |
+| `LeiosNotifyPipelinedQuitHandshakeNoCheckBug.cfg`: the same mutation, the client sends the rest once the source was asked | 17 | **fails** `SourceAskedAtMostOnce` |
 
 The server is correct: it answers every request. The failing assertion is the
 test's, not the protocol's: asking the source exactly once holds only when the
-client waits for the first request to reach the source.
+client waits for the first request to reach the source. That waiting client
+also catches a handler that skips the quit check: each later request is taken
+only after the one before it is answered, which is after the quit signal
+fired, so the mutation asks the source again.
 
 ## LeiosFetch (`LeiosFetch.tla`)
 
