@@ -115,10 +115,12 @@ VARIABLES
     lastT,     \* time the pool's last message was accepted, or Never
     history,   \* the times of every acceptance, in order
     pending,   \* worker -> prepared local submission, or Idle
-    out        \* the last decision, for the invariants
+    out,       \* the last decision, for the invariants
+    ctrAhead   \* TRUE once the pool's opcert counter has moved past the
+               \* counter of the messages already held
 
-\* Literally: "vars is defined as the tuple of all seven variables."
-vars == <<now, fails, accepted, lastT, history, pending, out>>
+\* Literally: "vars is defined as the tuple of all eight variables."
+vars == <<now, fails, accepted, lastT, history, pending, out, ctrAhead>>
 
 \* In English: "The first failure of message id, in order ord, given the
 \* last-accepted time t, or "ok"." Too frequent applies only when the rate
@@ -208,13 +210,14 @@ Init ==
     /\ history = <<>>
     /\ pending = [w \in Workers |-> Idle]
     /\ out = [kind |-> "none"]
+    /\ ctrAhead = FALSE
 
 \* Literally: "Tick is defined as: now is less than MaxTicks, now in the
 \*   next state is now plus 1, and everything else is unchanged."
 Tick ==
     /\ now < MaxTicks
     /\ now' = now + 1
-    /\ UNCHANGED <<fails, accepted, lastT, history, pending, out>>
+    /\ UNCHANGED <<fails, accepted, lastT, history, pending, out, ctrAhead>>
 
 \* In English: "A peer's reply b arrives; gOuroboros handles it, and the
 \* reference's result is kept beside it for comparison."
@@ -231,11 +234,13 @@ Reply(b) ==
        /\ history' = g.hist
        /\ out' = [kind |-> "reply", go |-> g, ref |-> r,
                   fresh |-> g.acc \ accepted]
-       /\ UNCHANGED <<now, fails, pending>>
+       /\ UNCHANGED <<now, fails, pending, ctrAhead>>
 
-\* In English: "gOuroboros re-verifies a message it already holds (relay
-\* or replay). It is exempt from the rate limit as a duplicate, unless
-\* "RateOnDuplicate"."
+\* In English: "gOuroboros re-verifies a message it already holds (relay,
+\* replay, or the same message in another peer's reply). It is exempt from
+\* the rate limit as a duplicate, unless "RateOnDuplicate", and from the
+\* opcert counter check, unless "CounterOnDuplicate", which refuses it once
+\* the pool's counter has moved past it."
 \* Literally: "Reverify of id is defined as: id is a member of accepted,
 \*   and out in the next state is the record of kind "reverify" and ok,
 \*   where ok is whether FirstFail of id, GoOrder, lastT and (Mutation equals
@@ -243,9 +248,22 @@ Reply(b) ==
 Reverify(id) ==
     /\ id \in accepted
     /\ out' = [kind |-> "reverify",
-               ok |-> FirstFail(id, GoOrder, lastT,
-                                Mutation = "RateOnDuplicate") = "ok"]
-    /\ UNCHANGED <<now, fails, accepted, lastT, history, pending>>
+               ok |-> /\ FirstFail(id, GoOrder, lastT,
+                                   Mutation = "RateOnDuplicate") = "ok"
+                      /\ ~(Mutation = "CounterOnDuplicate" /\ ctrAhead)]
+    /\ UNCHANGED <<now, fails, accepted, lastT, history, pending, ctrAhead>>
+
+\* In English: "The pool has a message with a higher opcert counter
+\* accepted, so the messages already held now carry a counter below the
+\* pool's latest. The reference never validates a held message again
+\* (Mempool/Simple.hs drops it as a duplicate first [R5]), so the counter
+\* check [R1] never reaches it."
+\* Literally: "Rotate is defined as: ctrAhead is false, ctrAhead in the
+\*   next state is true, and everything else is unchanged."
+Rotate ==
+    /\ ~ctrAhead
+    /\ ctrAhead' = TRUE
+    /\ UNCHANGED <<now, fails, accepted, lastT, history, pending, out>>
 
 \* In English: "A local submission of id is prepared on worker w against
 \* the current state, without changing it."
@@ -259,7 +277,7 @@ Prepare(w, id) ==
           [kind |-> "prepared", id |-> id, at |-> now,
            dup |-> id \in accepted,
            ok |-> id \in accepted \/ FirstFail(id, GoOrder, lastT, TRUE) = "ok"]]
-    /\ UNCHANGED <<now, fails, accepted, lastT, history, out>>
+    /\ UNCHANGED <<now, fails, accepted, lastT, history, out, ctrAhead>>
 
 \* In English: "Worker w commits: a message held by now (another
 \* connection won the race) succeeds without recording anything ("DupRaceFatal":
@@ -293,17 +311,18 @@ Commit(w) ==
           /\ pending' = [pending EXCEPT ![w] = Idle]
           /\ out' = [kind |-> "commit", dup |-> held,
                      valid |-> q.ok, ok |-> ok]
-    /\ UNCHANGED <<now, fails>>
+    /\ UNCHANGED <<now, fails, ctrAhead>>
 
 \* Literally: "Next is defined as: Tick, or a Reply of some b in Replies, or
 \*   a Reverify of some id in Ids, or a Prepare of some w and id, or a Commit
-\*   of some w."
+\*   of some w, or Rotate."
 Next ==
     \/ Tick
     \/ \E b \in Replies : Reply(b)
     \/ \E id \in Ids : Reverify(id)
     \/ \E w \in Workers, id \in Ids : Prepare(w, id)
     \/ \E w \in Workers : Commit(w)
+    \/ Rotate
 
 \* Literally: "Spec is defined as: Init and always (Next or vars unchanged)."
 Spec == Init /\ [][Next]_vars
