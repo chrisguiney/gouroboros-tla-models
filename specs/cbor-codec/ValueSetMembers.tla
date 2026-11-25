@@ -26,6 +26,18 @@
 (*   [G2] fix/cbor-value-set-members 3a442a45 (PR #3284): the members are  *)
 (*        walked with Value like any list, so composite keys decode; any   *)
 (*        other unrecognised tag still falls back to the library.          *)
+(*   [G3] fix/cbor-value-set-members 2ee1c0ab (origin/main merged): main  *)
+(*        added a budget that bounds the array elements and map pairs of  *)
+(*        a whole Value tree (cbor/value.go valueBudget), and charges the  *)
+(*        content of every tag it hands to the library. The merged set     *)
+(*        branch walked the members on a fresh budget, so sets that fit    *)
+(*        one by one and overrun together were accepted.                   *)
+(*   [G4] fix/cbor-value-set-members a69cd1ad: set members spend the      *)
+(*        tree's budget.                                                   *)
+(*   [M1] TestValueModeLimitsApplyToWholeTree (cbor/value_limits_test.go, *)
+(*        origin/main): the mode's limits cover the whole tree. This is a  *)
+(*        gOuroboros resource rule; the reference has no such limit, so    *)
+(*        the reference comparison is made only on inputs within it.       *)
 (* Checked in Go on both commits: d9010281a1820102f5 and                   *)
 (* a1d9010281a1820102f505 refused on main and decoded on the fix;          *)
 (* d9010201 refused on both; d9010281d903e8a1820102f5 (a tag-1000 member  *)
@@ -38,7 +50,8 @@ EXTENDS FiniteSets
 
 CONSTANTS
     MemberKinds,  \* member kinds to try, a subset of AllKinds
-    GoRule        \* "main" [G1] or "fix" [G2]
+    GoRule        \* "main" [G1], "fix" [G2], "mergedFresh" [G3] or
+                  \* "mergedShared" [G4]
 
 VARIABLE input    \* the one set this behaviour decodes
 
@@ -63,12 +76,15 @@ Contents == {"defList", "indefList", "uint", "map"}
 
 \* In English: "Every position, content shape and set of member kinds (the
 \*   empty set is an empty list, or no members when the content is not a
-\*   list)."
+\*   list), and whether the set's members, added to the rest of the tree,
+\*   overrun the decode mode's whole-tree limits while the set alone fits."
 \* Literally: "Inputs is defined as the set of records whose where is a
 \*   member of the set containing "top" and "mapKey", whose content is a
-\*   member of Contents, and whose members is a subset of MemberKinds."
+\*   member of Contents, whose members is a subset of MemberKinds, and
+\*   whose treeOver is TRUE or FALSE."
+\* BOOLEAN is the set {TRUE, FALSE}.
 Inputs == [where : {"top", "mapKey"}, content : Contents,
-           members : SUBSET MemberKinds]
+           members : SUBSET MemberKinds, treeOver : BOOLEAN]
 
 \* In English: "The content is a list (definite or indefinite)."
 \* Literally: "IsList of i is defined as: the content of i is a member of
@@ -92,10 +108,22 @@ GoMain(i) == IsList(i) /\ i.members \cap Composite = {}
 \*   "otherTagComposite" is not a member of the members of i."
 GoFix(i) == IsList(i) /\ "otherTagComposite" \notin i.members
 
-\* In English: "The gOuroboros verdict, by the rule this config names."
+\* In English: "main charges a tag's content to the tree budget before the
+\*   library decodes it, and so does the fix once it shares the budget; the
+\*   fix as first merged walks set members on a fresh budget." [G1] [G3]
+\*   [G4]
+\* Literally: "ChargesTree is defined as: GoRule is not "mergedFresh"."
+ChargesTree == GoRule /= "mergedFresh"
+
+\* In English: "The gOuroboros verdict, by the rule this config names: the
+\*   member rule, and refusal of an input that overruns the tree when the
+\*   rule charges set members to it." [G1] [G2] [G3] [G4]
 \* Literally: "GoAccepts of i is defined as: if GoRule equals "main" then
-\*   GoMain of i, else GoFix of i."
-GoAccepts(i) == IF GoRule = "main" THEN GoMain(i) ELSE GoFix(i)
+\*   GoMain of i, else GoFix of i; and if ChargesTree then the treeOver of
+\*   i is FALSE."
+GoAccepts(i) ==
+    /\ IF GoRule = "main" THEN GoMain(i) ELSE GoFix(i)
+    /\ ChargesTree => ~i.treeOver   \* overrunning sets are refused
 
 \* In English: "Pick any one input."
 \* Literally: "Init is defined as: input is a member of Inputs."
@@ -110,9 +138,15 @@ Next == UNCHANGED input
 \*   stays the same."
 Spec == Init /\ [][Next]_input
 
-\* In English: "Value decodes exactly the sets the reference decodes,
-\*   composite map keys included."
-\* Literally: "SetMembersAsRfc8949 is defined as: GoAccepts of input equals
-\*   RefAccepts of input."
-SetMembersAsRfc8949 == GoAccepts(input) = RefAccepts(input)
+\* In English: "Within the tree's limits, Value decodes exactly the sets the
+\*   reference decodes, composite map keys included." [M1]
+\* Literally: "SetMembersAsRfc8949 is defined as: if the treeOver of input
+\*   is FALSE, then GoAccepts of input equals RefAccepts of input."
+SetMembersAsRfc8949 == ~input.treeOver => GoAccepts(input) = RefAccepts(input)
+
+\* In English: "A tree whose set members overrun the whole-tree limits is
+\*   refused." [M1]
+\* Literally: "TreeBudgetHolds is defined as: if the treeOver of input is
+\*   TRUE, then GoAccepts of input is FALSE."
+TreeBudgetHolds == input.treeOver => ~GoAccepts(input)
 =============================================================================

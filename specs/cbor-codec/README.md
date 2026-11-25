@@ -29,7 +29,7 @@ Run every config with `scripts/run-model.sh specs/cbor-codec`.
 | --- | --- | --- | --- | --- |
 | `CborRational.tla` | protocol version x tags before a rational -> accept | `TagsAsReferenceRational` | L25 | `fix/cbor-rat-single-tag` `fe4f8206` (#3282) |
 | `PlutusConstrFields.tla` | tag family x alternative number x fields item -> accept | `FieldsAsDecodeListOf` | L26 | `fix/cbor-constructor-fields-list` `a37a8a90` (#3283) |
-| `ValueSetMembers.tla` | position x tag 258 content x member kinds -> accept | `SetMembersAsRfc8949` | L27 | `fix/cbor-value-set-members` `3a442a45` (#3284) |
+| `ValueSetMembers.tla` | position x tag 258 content x member kinds x whole-tree overrun -> accept | `SetMembersAsRfc8949`, `TreeBudgetHolds` | L27 | `fix/cbor-value-set-members` `a69cd1ad` (#3284) |
 | `MultiAssetQuantity.tla` | protocol version x field x value x head or bignum -> accept | `QuantityAsDecodeWord64` | L28 | `fix/ledger-multiasset-bignum-quantity` `4ae0d4f9` (#3279) |
 | `ConstructorEncoding.tla` | tag family x Go fields value x item kinds -> byte shape (hence hash) | `BytesAsPlutusEncodeData` | L31 | `fix/cbor-constructor-indefinite-fields` `ad7a4f25` (#3290) |
 
@@ -45,7 +45,8 @@ Run every config with `scripts/run-model.sh specs/cbor-codec`.
 | `PlutusConstrFieldsMainBug` | main | fails | 121 with a uint: `d87901` |
 | `PlutusConstrFields` | fix | passes (42 states) | |
 | `ValueSetMembersMainBug` | main | fails | a set of one array-keyed map: `d9010281a1820102f5` |
-| `ValueSetMembers` | fix | passes (128 states) | |
+| `ValueSetMembers` | fix sharing the tree budget | passes | |
+| `ValueSetMembersMergedFreshBug` | fix merged with main, fresh budget per set | fails (`TreeBudgetHolds`) | two 10-member sets under a 16-element tree limit |
 | `ValueSetMembersOtherTagFixBug` | fix, unknown-tag member | fails (residual) | `d9010281d903e8a1820102f5` |
 | `MultiAssetQuantityMainBug` | main, value five | fails | output asset bignum 5 at pv 8: `c24105` |
 | `MultiAssetQuantityMainAnyBug` | main, every value | fails | output asset bignum 0 at pv 8 |
