@@ -11,6 +11,7 @@ to local clients:
 | Local message notification (node-to-client) | 15 | `protocol/localmessagenotification` | `LocalMessageNotification.tla` |
 | All three, after `MsgDone` | | the three `server.go` files | `DmqRestart.tla` |
 | Message validity (all three) | | `protocol/common/authentication.go` | `MessageValidity.tla` |
+| Receiving messages (node-to-node) | 11 | `protocol/messagesubmission/server.go`, `authentication.go` | `MessageIngress.tla` |
 
 Read [Model `chainsync`](../chainsync/README.md) first; the "does each answer reach
 the call that asked" and "does Stop abandon a request" questions come from
@@ -386,20 +387,79 @@ expiry bound), and a message signed at the current period but claiming an
 earlier one is accepted, which dmq-node refuses as `InvalidKESSignature` and
 disconnects the peer that sent it.
 
-With the fixes (`Mutation = "none"`) `MessageValidity.cfg` (88,695 states)
+`MessageValidityExtrasBug.cfg` is main's two checks dmq-node does not make:
+the counter must not be below the one in the node's chain state
+(`PoolOpCertIssueNumber`; dmq-node compares only with counters seen in
+messages), and the opcert's window must contain the node's own current KES
+period (dmq-node never looks at the slot). Both refuse messages dmq-node
+accepts and relays, and CIP-0137 requires neither (its required steps,
+README lines 397-402, name no such check; the note at 405-411 offers the
+chain as one possible counter source). The fixes drop both.
+
+With the fixes (`Mutation = "none"`) `MessageValidity.cfg` (89,295 states)
 and `MessageValidityBatch.cfg` (86,457 states) pass every question.
 `MessageValidityNoCounterCheckBug`, `BatchNoCommitRecheckBug`,
 `BatchCommitOverwritesBug` and `BatchRecordOnRejectBug` are mutations showing
 each question can fail. Probes: `ProbeCrossPeriodBug` (after the fix a
 message signed in an earlier period is accepted after the period moves on),
-`ProbeStricterBug` (gOuroboros's extra checks do refuse a message the
-reference accepts), `BatchProbeAcceptBug` (batches commit).
+`BatchProbeAcceptBug` (batches commit).
 
-gOuroboros's stricter checks, kept and recorded as decisions (`GoExtras`):
-the counter must not be below the one in the node's chain state
-(`PoolOpCertIssueNumber`; dmq-node compares only with counters seen in
-messages), and the opcert's window must contain the node's own current KES
-period (dmq-node does not look at the current slot).
+## Part 6: what a node does with received messages (`MessageIngress.tla`)
+
+### What the code does
+
+The node-to-node inbound side (gOuroboros's `messagesubmission.Server`)
+receives a reply to its body request and validates the messages in it. In
+dmq-node the reply goes to the mempool writer (ouroboros-network
+`Mempool/Simple.hs` 183-245): it reads the clock once, drops messages already
+in the mempool as duplicates without validating them, validates the rest one
+at a time with `validateSig`, adds the valid ones, and only then handles the
+invalid ones (`app/Main.hs` 199-221): `SigExpired`, `PoolNotEligible`,
+`UnrecognizedPool`, `NotInitialized` and `SigDuplicate` are traced; any other
+error is thrown and closes the connection. `validateSig` also refuses, as
+`SigTooFrequent`, a message less than `vcMinSigDelay` (60 s) after the last
+one it accepted from the same pool, checked right after expiry; the time is
+recorded only when a message is accepted.
+
+gOuroboros also re-verifies messages it already accepted (relaying with
+`AddMessage`, a local notification replay) and runs local submissions from
+several connections at once through `PrepareMessages` and its commit.
+
+The model keeps the clock, the set of accepted ids (dmq-node's mempool), the
+pool's last-accepted time and the history of acceptances. Each message
+carries a fixed set of failures; its outcome is the first failure in the
+check order, with "too frequent" computed from the state. A reply's outcome
+under gOuroboros and under the reference are computed from the same state
+and compared.
+
+### The questions
+
+- `OutcomeAsReference`: a reply ends as the reference's would: the same
+  messages accepted, the same last-accepted time, and a disconnect exactly
+  when the reference disconnects.
+- `ReverifyAccepted`: re-verifying an accepted message never fails.
+- `DelayHeld`: no two acceptances are closer than the delay.
+- `DuplicateNotFatal`: a local submission that lost a race to the same
+  message is not refused.
+
+### The answer
+
+`main` fails three ways:
+
+| Config | What `main` does | The reference |
+| --- | --- | --- |
+| `MessageIngressAllOrNothingBug.cfg` | any failing message, even an expired one or one from a pool without stake, refuses the whole reply and closes the connection | judges each message; drops expired and unregistered ones quietly; keeps the valid ones even when another is fatal |
+| `MessageIngressMainOrderBug.cfg` | checks the pool before the KES window and the signatures before the counter, so a message failing both is dropped where the reference disconnects | `Validate.hs` order: expiry, rate, id, window, pool, counter, signatures |
+| `MessageIngressNoRateLimitBug.cfg` | no rate limit | `SigTooFrequent`, fatal for node-to-node |
+
+With the fixes `MessageIngress.cfg` (129,772 states) passes every question.
+Mutations: `RateOnDuplicateBug` (the limit applied to an accepted message, so
+relaying it fails), `NoRateRecheckBug` (commit without re-checking the limit
+accepts two concurrent submissions), `DupRaceFatalBug` (a submission that lost
+a race to the same message is refused). Probes: `ProbeKeepValidBug` (a reply
+both accepts a message and disconnects, as in the reference),
+`ProbeTooFrequentBug` (a message with no other failure is refused as too
+frequent).
 
 ## Go tests and fixes
 
@@ -445,19 +505,31 @@ acknowledged. dmq-node enforces it only in V2; the fix applies it to V1 as
 well, because the tx-submission specification forbids the repeat in both
 (V1's reference outbound tolerates it).
 
-### Message validity (gOuroboros `62fa36d1`)
+### Message validity and receipt
 
-| Branch | Commit | What it shows |
+Branches from gOuroboros `62fa36d1` (the first five) or `ebc63eab` (the rest).
+
+| Branch | Commits | What it shows |
 | --- | --- | --- |
-| `fix/dmq-kes-claimed-period` | `7e1a0820` | `TestVerifyMessageKESPeriodAsReference` (11 cells: claimed period, real evolution, current period). On `main` 3 fail: cross-period both ways, and a signature at the current period claiming an earlier one is accepted. `TestVerifyMessageUsesAuthoritativeCurrentSlot` pinned the old behaviour and now pins the opcert window at the current slot |
-| `fix/dmq-ttl-reference-bounds` | `1f492baf` | `TestValidateMessageTTLAtAsReference` (8 cells); on `main` "expired half a second ago" and "exactly the bound" fail. A notification-client fixture used an expiry exactly 1800 s ahead and now uses 1799 |
-| `fix/dmq-commit-recheck-every-counter` | `aa2673b6` | `TestPrepareMessagesCommitRechecksEveryCounter`: on `main` the commit of `[p:1, p:2]` after `p:2` was recorded returns nil |
-| `fix/dmq-message-body-size` | `9804e9d9` | `TestVerifyMessageBodySizeAsReference` (0, 89, 90, 2000, 2001 bytes); with only the new sentinel on `main` the 0-byte body is accepted. Fixtures that authenticate messages now carry 90-byte bodies |
-| `test/dmq-validity-reference` | `3ff81454` | `TestVerifyMessageCounterAndPoolAsReference` (48 cells: prior counter x counter x stake x cold signature x entry point) and `TestVerifyMessageChainCounterIsStricter`. Mutations killed: counter check removed (1 cell), counter recorded before the signature check (6), stake check removed (24) |
+| `fix/dmq-kes-claimed-period` | `7e1a0820`, `db6103a6` | `TestVerifyMessageKESPeriodAsReference` (11 cells). On `main` 3 fail (cross-period both ways; a signature at the current period claiming an earlier one is accepted). The second commit drops the opcert window at the current slot: its two cells failed before it. `CurrentSlot`, `SlotsPerKESPeriod` and `VerifyMessageWithSlot`'s slot become unused (deprecated) |
+| `fix/dmq-ttl-reference-bounds` | `1f492baf`, `5d48a376` | `TestValidateMessageTTLAtAsReference` (8 cells; 2 fail on `main`); `TestIsValidAtAsReferenceMempool` (4 cells; "at expiresAt" fails on `main`): `IsValidAt` now drops a message once `expiresAt <= now`, as the mempool does |
+| `fix/dmq-message-body-size` | `9804e9d9` | `TestVerifyMessageBodySizeAsReference`; a 0-byte body is accepted on `main` |
+| `fix/dmq-commit-recheck-every-counter` | `aa2673b6` | `TestPrepareMessagesCommitRechecksEveryCounter`; the stale commit returns nil on `main` |
+| `test/dmq-validity-reference` | `2a86f5ad` | `TestVerifyMessageCounterAndPoolAsReference` (48 cells); 3 mutations killed |
+| `fix/dmq-payload-preserved-bytes` | `d21d3969` | `TestVerifyMessageHashesPayloadBytesAsReceived`: a payload with a non-minimal KES period, signed and hashed as received, fails on `main` with an ID mismatch; the decoded payload now keeps its bytes (`DecodeStoreCbor`) and re-encodes to them |
+| `fix/dmq-drop-chain-counter-check` | `aa7c8605` | `TestVerifyMessageIgnoresChainCounter`: on `main` "issue number is stale: chain=5, message=1". `PoolOpCertIssueNumber` becomes unused (deprecated) |
+| `fix/dmq-sig-rate-limit` | `d4c8c2f1` | `TestVerifyMessageRateLimitAsReference` (7 cases; 4 fail on `main`). Mutations killed: no duplicate exemption, no commit re-check, a refused duplicate race, an inclusive bound |
+| `fix/messagesubmission-reference-receipt` | `a12edd17` | `TestServerReceivesRepliesAsReference` (7 cells; 5 fail on `main`) and `TestServerReplyKeepsValidMessagesBesideAFatalOne`, which replaces a test of the all-or-nothing behaviour. Mutations killed: main's check order, an expired message fatal, a dropped authentication error fatal, stopping at the first failure |
 
-The five branches merge cleanly together and onto PR #3130's head
-(`50ef28f8`); the four DMQ packages pass with `-race` there. PR #3130 does
-not touch `protocol/common`.
+All nine merge onto current `main` (`scratch/dmq-validation-combined`,
+`47e66ef2`, local only) with two hand resolutions in `authentication.go` (the
+window and chain-counter drops both remove adjacent config checks; the rate
+limit and the receipt branch both rework `PrepareMessages`) and one
+cross-branch test fix: `TestPrepareMessagesCommitRechecksEveryCounter` needs
+`MinSigDelay: -1` once the rate limit is in. Merged further with PR #3130's
+head (`4f710823`), its new `NewMsgReplyMessages(version, ...)` signature needs
+the two receipt tests updated; then the four DMQ packages and `protocol` pass
+with `-race`.
 
 ## Spec, reference, and gOuroboros
 
@@ -516,12 +588,12 @@ gOuroboros `61046085`.
 
 ## Not modelled
 
-The replay caches; dmq-node's per-pool rate limit (`SigTooFrequent`: one
-message per pool per 60 s, `Validate.hs` 124-145, which gOuroboros does not
-have); the opcert cold signature and message id (pure checks, covered by Go
-tests); message-id hashing over re-encoded rather than received payload bytes
-(dmq-node hashes and verifies the bytes as received, so a non-canonical
-encoding it accepts is refused by gOuroboros); the
+The per-connection replay caches beyond what `MessageIngress.tla` keeps as
+the set of accepted ids; the opcert cold signature, message id and payload
+bytes (pure checks, covered by Go tests); the body size against expiry for a
+message that fails both (dmq-node refuses the body when it decodes, before
+expiry; gOuroboros checks expiry first, so such a message is dropped rather
+than fatal); the
 pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
 time limits as durations (the 20 s V2 limit appears only as "an unanswered
 blocking request is a deadlock"); wire tags and list encodings, which the Go
@@ -543,6 +615,7 @@ cd specs/dmq
 ../../bin/tlc -config LocalMessageNotificationRogue.cfg LocalMessageNotification.tla
 ../../bin/tlc -config MessageValidity.cfg MessageValidity.tla
 ../../bin/tlc -config MessageValidityBatch.cfg MessageValidity.tla
+../../bin/tlc -config MessageIngress.cfg MessageIngress.tla
 # expected to fail
 ../../bin/tlc -config MessageSubmissionRepeatBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionServerRepeatBug.cfg MessageSubmission.tla
@@ -557,6 +630,7 @@ cd specs/dmq
 ../../bin/tlc -config LocalMessageNotificationUnbufferedBug.cfg LocalMessageNotification.tla
 ../../bin/tlc -config MessageValidityKesAtCurrentBug.cfg MessageValidity.tla
 ../../bin/tlc -config MessageValidityBatchFinalOnlyRecheckBug.cfg MessageValidity.tla
+../../bin/tlc -config MessageIngressAllOrNothingBug.cfg MessageIngress.tla
 ```
 
 To run a probe, copy a passing config and replace its `INVARIANT` lines with
