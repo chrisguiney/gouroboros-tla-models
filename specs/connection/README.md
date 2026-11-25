@@ -414,6 +414,9 @@ later; `Fixed` and `FixedPlain` carry `sockClose` without the invariant.
 | --- | --- | --- |
 | `ConnectionTeardownCloseCtx.cfg` (now with `sockClose`) | 8,044 | passes all eight, with `CloseClosesConn` |
 | `ConnectionTeardownMuxerStop.cfg` (now with `sockClose`) | 29,350 | passes all nine |
+| `ConnectionTeardownMetricsCloseBug.cfg` (a Metrics callback calls the connection's `Close` with the muxer's `CallbackContext`) | | deadlock: `Close` waits for `connClosedChan`, which shutdown closes only after joining the muxer goroutine running the callback |
+| `ConnectionTeardownMetricsClose.cfg` (fix `metricsClose`: that `Close` requests shutdown and returns without waiting) | 36,119 | passes all nine |
+| `ConnectionTeardownMetricsClosePlainBug.cfg` (the same `Close` without the muxer's marker) | | deadlock: the marker is required |
 | `ConnectionTeardownFixed.cfg`, `FixedPlain.cfg` (now with `sockClose`) | 12,843 | pass |
 | `ConnectionTeardownCloseOpenConnBug.cfg` (`CloseCtx` without `sockClose`) | | `CloseClosesConn` violated |
 
