@@ -95,11 +95,14 @@ Invariants:
 | `EpochNonceNewByron.cfg` (`common.Nonce` functions, Byron start, raw output, extra entropy) | 9,251 | passes |
 | `EpochNonceNewNeutral.cfg` (`common.Nonce` functions, neutral initial nonce, VRF input included) | 8,930 | passes |
 | `EpochNonceNewPraos.cfg` (`common.Nonce` functions, Praos, neutral initial nonce) | 7,430 | passes |
+| `EpochNonceBytesFamily.cfg` (main from `756a9a89`: `CalculateRollingNonce` treats 32 zero bytes as an ordinary nonce and refuses a 64-byte output; `BytesZeroIsOrdinary`, `BytesRefusesRaw`) | 8,930 | passes |
 | `EpochNonceNewLabBug.cfg` | mutation: `EpochNonceFromNonces` hashes a neutral ηh in | `EpochNonceAgrees` |
 | `EpochNonceNewVrfInputBug.cfg` | mutation: the nonce VRF input appends a neutral η0 as zeros | `VrfInputAgrees` |
 | `EpochNonceDirectLabBug.cfg` | `CalculateEpochNonce`: zero ηh is hashed in | `EpochNonceAgrees` |
 | `EpochNonceRawOperandBug.cfg` | main before `756a9a89`: 64-byte output concatenated raw | `StateAgrees` |
 | `EpochNonceNeutralInitBug.cfg` | main before `756a9a89`: neutral ηv hashes the block nonce again | `StateAgrees` |
+| `EpochNonceBytesZeroNeutralBug.cfg` | before `756a9a89`: 32 zero bytes taken as NeutralNonce | `BytesZeroIsOrdinary` |
+| `EpochNonceBytesRawOperandBug.cfg` | before `756a9a89`: a 64-byte output accepted and concatenated raw | `BytesRefusesRaw` |
 | `EpochNonceVrfInputBug.cfg` | `MkInputVrf`/`MkSeedTPraos`: neutral η0 appended as zero bytes | `VrfInputAgrees` |
 | `EpochNonceFreezeLEBug.cfg` | mutation: `<=` | `StateAgrees` |
 | `EpochNonceNoFreezeBug.cfg` | mutation: never freeze | `StateAgrees` |
@@ -180,3 +183,5 @@ condition, the lab nonce and the rollback (items 3-5) stay the caller's.
 Not covered: the leader-VRF threshold, KES and opcerts (model `consensus`), the
 Byron-era chain, extra entropy changing within an epoch, and Peras' previous
 epoch nonce.
+
+`GoBytes` selects the `CalculateRollingNonce` the []byte path calls: "Family" (main from `756a9a89`) for every configuration except the four that describe the function before it and its proposed fixes (`EpochNonceRawOperandBug`, `EpochNonceNeutralInitBug`, `EpochNonceDirectFixed`, `EpochNonceNeutralInitFixed`), which use "Legacy".
