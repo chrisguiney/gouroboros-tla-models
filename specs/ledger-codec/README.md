@@ -24,6 +24,8 @@ header (`[S1]`...).
 | `CostModelLanguages.tla` | `LegacyCostModelsAsReference` | before version 9, `decodeCostModelLegacy` accepts PlutusV1 and PlutusV2 with their exact parameter counts (`Plutus/CostModels.hs` 307-338) |
 | `PreConwaySetTag.tla` | `SetTagAsReference` | `decodeSet` refuses a tag before version 9 and permits tag 258 from 9 (`Binary/Decoding/Decoder.hs` 930-953); witness sets use `decodeList` below 9 (`Shelley/TxWits.hs` 261-273, `Alonzo/TxWits.hs` 347-357, 569-580, 660-700, 721-730) |
 | `TxOutValueData.tla` | `TransValueAsReference` | `transValue` always has the ada entry, zero included (`Plutus/TxInfo.hs` 186-187, `Alonzo/Plutus/TxInfo.hs` 417-418, `Babbage/TxInfo.hs` 158) |
+| `MaryMinCoin.tla` | `MinCoinAsReference` | `MinCoinTxOut` is `scaledMinDeposit` of the output (`Mary/TxOut.hs` 47-76, `Mary/Value.hs` 238-258, 747-762) |
+| | `VerdictAsReference` | the too-small verdict is `pointwise (<)` against that minimum (`Allegra/Rules/Utxo.hs` 270-284) |
 
 `ProtVerWidth` scales the widths so TLC's integers suffice: `W16` = 12
 stands for 65,535 and `W32` = 20 for 4,294,967,295; every era's major
@@ -48,6 +50,10 @@ far below `W16`, as in the real numbers.
 | `PreConwaySetTagBuiltOwnersBug.cfg` | L30 | anyTag | **fails** `BuiltOwnersRoundTrip` | a built Shelley pool registration: owners written under tag 258, then refused by the decoder |
 | `TxOutValueDataMainBug.cfg` | L15 | main | **fails** `TransValueAsReference` | a Shelley output of coin 0 in a PlutusV3 TxInfo: no ada entry. `TestTxOutPlutusDataKeepsZeroAda` "shelley" |
 | `TxOutValueData.cfg` | L15 | fixed | passes | four output eras, PlutusV1 to V3, coin 0 or 1, with and without assets |
+| `MaryMinCoinMainBug.cfg` | L33 | main | **fails** `MinCoinAsReference` | mv 27, one policy, one asset with an empty name: minimum 38, main returns 27 |
+| `MaryMinCoinMainVerdict.cfg` | L33 | main | passes `VerdictAsReference` | the verdict already agrees, so the fix must not change it |
+| `MaryMinCoin.cfg` | L33 | fixed | passes | mv 27 and 1,000,000, seven value shapes, coin around the parameter, zero-quantity output |
+| `MaryMinCoinZeroCountedBug.cfg` | L33 | zeroCounted | **fails** `VerdictAsReference` | a zero-quantity output with coin equal to mv: sizing the zero entry raises the minimum and rejects it; the reference holds no zero quantity |
 
 ## Found by the model
 

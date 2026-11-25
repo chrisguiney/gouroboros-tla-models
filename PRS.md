@@ -82,6 +82,7 @@ closes. A PR can draw on more than one model.
 | `ledger-codec` (`ProtVerWidth`; coverage gaps 2, 7, 8) | #3278 (32-bit protocol minor in updates) | #3259 | open |
 | `cbor-codec` (L25-L28, L31), `ledger-codec` (`CostModelLanguages`, `PreConwaySetTag`); coverage gaps `cbor`, `ledger/common` | #3279 (bignum multiasset quantities), #3280 (Alonzo PlutusV2 cost model), #3282 (one tag 30), #3283 (constructor fields a list), #3284 (tag 258 set members in Value; members spend the tree budget, `ValueSetMembersMergedFreshBug`), #3289 (pre-Conway tag 258 refused; built pre-Conway owner sets untagged, `PreConwaySetTagBuiltOwnersBug`), #3290 (ConstructorEncoder indefinite fields; items by kind, non-list fields refused; datum bytes change) | #3260, #3261, #3263, #3265, #3266, #3270, #3271 | open |
 | `ledger-codec` (`TxOutValueData`; script context gap 1) | #3281 (zero ada kept in output Plutus data; TxInfo translation goldens) | #3262 | open |
+| `ledger-codec` (`MaryMinCoin`) | local branch `fix/mary-min-coin-output` (per-output Mary minimum coin, breaking), not yet published | #3338 | local |
 | `localstatequery` (`LocalStateQueryCodec`; goldens, gaps 9, 10) | #3286 (era filter set encoding), #3287 (GetAccountState in every Shelley era), #3288 (GetFuturePParams decoded) | #3267, #3268, #3269 | open |
 | `dmq` (`MessageValidityBatch`, N55) | #3298 (every counter re-checked at commit; merge 1 of 6) | #3291 | open |
 | `dmq` (`MessageValidity`, `MessageIngress`, N54) | #3299 (body 90 to 2000 bytes, refused at decode; merge 2 of 6) | #3292 | open |
