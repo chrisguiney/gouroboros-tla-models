@@ -170,6 +170,10 @@ client to do. gOuroboros against itself never hits it, because its own client
 does not pipeline (`LeiosVotesToday.cfg`). `ProbeNeverHeld` confirms the fixed
 server holds requests only for a pipelining client.
 
+The package README's state machine listed only `Vote` out of Busy; PR #3160
+`c14a2569` adds the held pipelined `VotesRequestNext`. Documentation only:
+the model already has the edge, so nothing here changes.
+
 `OwnVotes` holds: a loop stopped by its callback drains the votes it is owed
 before `RequestNext` can run. No existing test pinned this. Removing the drain
 in Go passed the whole package, so a new test does
