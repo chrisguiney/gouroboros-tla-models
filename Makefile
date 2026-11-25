@@ -34,12 +34,14 @@ keepalive-bugs: ## Show the keep-alive counterexamples, including the gOuroboros
 	$(KEEPALIVE) -config KeepAliveRogueBug.cfg KeepAlive.tla || true
 	$(KEEPALIVE) -config KeepAliveNoTimeoutBug.cfg KeepAlive.tla || true
 
-keepalive-lifecycle: ## Check the gOuroboros server restart against Stop and connection close
+keepalive-lifecycle: ## Check the gOuroboros server restart against Stop, connection close and readers
 	$(KEEPALIVE) -config KeepAliveLifecycle.cfg KeepAliveLifecycle.tla
 	$(KEEPALIVE) -config KeepAliveLifecycleClose.cfg KeepAliveLifecycle.tla
 	$(KEEPALIVE) -config KeepAliveLifecycleStopBug.cfg KeepAliveLifecycle.tla || true
 	$(KEEPALIVE) -config KeepAliveLifecycleSlotBug.cfg KeepAliveLifecycle.tla || true
 	$(KEEPALIVE) -config KeepAliveLifecycleCloseBug.cfg KeepAliveLifecycle.tla || true
+	$(KEEPALIVE) -config KeepAliveLifecycleReader.cfg KeepAliveLifecycle.tla
+	$(KEEPALIVE) -config KeepAliveLifecycleReaderUnlockedBug.cfg KeepAliveLifecycle.tla || true
 
 CONNECTION := cd specs/connection && ../../bin/tlc
 

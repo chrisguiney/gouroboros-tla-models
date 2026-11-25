@@ -66,28 +66,24 @@ closes. A PR can draw on more than one model.
 | `connection` (`ConnectionTeardown`, `ConnectionCloseConcurrent`), `engine` (`EngineLifecycle`) | #3239 (teardown during Dial, late forwarder, Close before setup, protocol-loop join; merge 5 of 12; review at `f60a0213`: concurrent `CloseContext` mutual wait and conn left open with no muxer, fixed at `c321f708`, models `ConnectionCloseConcurrent*.cfg`, `ConnectionTeardownCloseOpenConnBug.cfg`) | #3236, #3237, #3238 | open |
 | `connection` (`ConnectionTeardown`, Muxer.Stop join) | ouroboros-mock #370 (Stop and Close with either signature; released before merge 6) | ouroboros-mock #369 | open |
 | `ledger-hash-cache` | #3234 (scoped-memo panic retried; folds `test/ledger-hash-cache-model`; merge 4 of 12) | #3229 | open |
+| `connection` (`ConnectionTeardown`, `MuxerStop*`), `engine` (`EngineLifecycle`, `Ctx` RunLoop join) | #3253 (`fix/protocol-callback-context` `e49dd6a8`; `Stop(ctx) error` everywhere, `Close(ctx)`, `Muxer.Stop(ctx)` + `CallbackContext`, chainsync stop watcher joined; mock v0.21.4; breaking; merge 6 of 12) | #3187 | open |
+| `blockfetch` (`BlockFetchBusyDelivery`) | #3254 (`fix/blockfetch-stop-callbacks-context` `be33b326`; Stop's callbacks unlocked, client goroutines joined; merge 7 of 12) | #3247 | open |
+| none (race detector, B4) | #3264 (`fix/blockfetch-client-protocol-race` `36aa9c31`; fetches read the instance under `protocolMu`; merge 8 of 12) | #3248 | open |
+| `keepalive` (`KeepAliveLifecycle` reader: `KeepAliveLifecycleReader.cfg`, `KeepAliveLifecycleReaderUnlockedBug.cfg`) | #3272 (`fix/server-restart-protocol-race` `242cd282`; twelve restarting servers stop embedding the instance, including messagesubmission, localmessagesubmission, localmessagenotification, localtxsubmission, localtxmonitor and perasvotes; breaking; merge 9 of 12) | #3249 | open |
+| `keepalive` (`KeepAliveLifecycle` reader); CONCURRENCY C9, C12, C20 | #3273 (`fix/leios-server-protocol-race` `250fecf8`; three leios servers; breaking; merge 10 of 12) | #3250 | open |
+| none (A9) | #3274 (`fix/protocol-send-before-start` `ffd6c838`; a message sent before `Start` is queued; merge 11 of 12) | #3251 | open |
+| none (C13, C14, C15) | #3276 (`fix/perasvotes-op-lock-and-await-panic` `39f34f8a`; `Sync` honours callers' contexts, `VoteFunc` re-entry fails, await panics contained; merge 12 of 12) | #3252 | open |
 | `ledger-rewards` | local branch `fix/ledger-rewards-reference` (`9675856a`, `bdba9c8b`, `203f3624`; reward pots and pool split as cardano-ledger; pledge owners as a set), not yet published | | local |
 | `ledger-governance` | local branch `test/conway-gov-reference` (`7c2f2013`; ledger vectors replayed through gOuroboros rules alone, network-id and return-address tables), not yet published | | local |
 
-## Held: merges 6 to 12 of 12 (merge 6 waits for the ouroboros-mock release and closes #3187)
+## Merges 6 to 12 of 12 published (2026-11-24)
 
-Held because the open issue #3187 (Stop returns before started goroutines
-exit) already covers A3, A6 and A8; these branches do not finish it (the
-chainsync pipeline stop watcher is still unjoined, and `Muxer.Stop` stays
-signal-only). Each branch builds on the one before it; all were rebased on
-2026-11-24 and pass build, vet, gofmt, golangci-lint and `-race` on their
-packages and root.
-
-| Merge | Model | gOuroboros branch (head) | Contents |
-| --- | --- | --- | --- |
-| 1 | `connection` (`ConnectionTeardown`), `engine` (`EngineLifecycle`) | `fix/connection-teardown-joins` (`c164be91`) | A1, A2, A3, A8, A4 |
-| 2 | `engine`, `connection`; CONCURRENCY A6, A11, C11, C18, C21 | `fix/protocol-callback-context` (`6eb52624`; folds `test/protocol-lifecycle`) | `Stop(ctx)`/`Close(ctx)` (breaking), callback marker, `RunLoop` join |
-| 3 | `blockfetch` (`BlockFetchBusyDelivery`) | `fix/blockfetch-stop-callbacks-context` (`0386c143`; replaces `fix/blockfetch-stop-callbacks-unlocked`) | B1, B3, self-stop |
-| 4 | none (race detector, B4) | `fix/blockfetch-client-protocol-race` (`96a2d807`) | fetches read the instance under `protocolMu` |
-| 5 | none (race detector, B5, B8-B10) | `fix/server-restart-protocol-race` (`24eaed49`) | six servers stop embedding the instance (breaking) |
-| 6 | none (race detector, C9, C12, C20; C19 overturned) | `fix/leios-server-protocol-race` (`926fa66a`; folds `test/leiosnotify-request-order`) | three leios servers stop embedding the instance (breaking) |
-| 7 | none (A9) | `fix/protocol-send-before-start` (`f8480abc`) | a message sent before `Start` is queued |
-| 8 | none (C13, C14, C15) | `fix/perasvotes-op-lock-and-await-panic` (`feb4da4b`) | `Sync` honours callers' contexts, `VoteFunc` re-entry fails, await panics contained |
+All seven are in the table above (#3253, #3254, #3264, #3272, #3273, #3274,
+#3276), base `main`, each including its predecessors' commits. Before
+publishing, merge 9 was extended to the six servers main had made restartable
+(messagesubmission, localmessagesubmission, localmessagenotification,
+localtxsubmission, localtxmonitor, perasvotes), and `KeepAliveLifecycle`
+gained the reader that models the race it fixes.
 
 ## Not yet attributed
 

@@ -23,6 +23,12 @@ Plain-language definitions, with a Go comparison where one helps.
 : The sequence of states TLC prints when a rule breaks. The shortest path to
   the bug. Our raw material for Go tests.
 
+**Data race** (Go term)
+: Two goroutines access one variable, at least one writing, with nothing
+  ordering the accesses. Go's race detector (`go test -race`) reports it. A
+  model shows one as a read that can happen while a write is in progress; see
+  [model `keepalive`](../specs/keepalive/README.md).
+
 **Deadlock**
 : A state where no action is possible but the system has not finished. TLC
   reports it by default.

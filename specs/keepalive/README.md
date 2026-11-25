@@ -276,6 +276,20 @@ TLC tries every way two goroutines can interleave:
   under the lock and stops it; or connection shutdown (`stopProtocols` in
   `connection.go`), which reads `ProtocolInstance()`, stops it, then stops
   the muxer.
+- **A reader**, optional: an application goroutine calling a server method
+  while the restart runs. It reads the current instance under `protocolMu`
+  (`ProtocolInstance()`), or with no lock, as every method promoted from an
+  embedded `*protocol.Protocol` field did. The restart's write holds
+  `protocolMu` for a step of its own (`Install`, then `Unlock`), so an
+  unlocked read can land inside it.
+
+The restart and `Stop` are the same code in every gOuroboros server that
+restarts after `MsgDone`: block-fetch, chain-sync, keep-alive,
+local-state-query, peer-sharing, tx-submission, leios-fetch, leios-notify,
+leios-votes, message-submission, local-message-submission,
+local-message-notification, local-tx-submission, local-tx-monitor and
+peras-votes (`handleDone` or `handleClientDone`, `initProtocol` and `Stop` in
+each package's `server.go`). This module stands for all fifteen.
 
 ```sh
 make keepalive-lifecycle
@@ -283,11 +297,13 @@ make keepalive-lifecycle
 
 | Config | Checks | Result |
 | --- | --- | --- |
-| `KeepAliveLifecycleStopBug.cfg` | The fix as first written: `Server.Stop()` racing a restart. | **Fails after 5 steps**: the restart stops the old instance; `Stop` reads that same, already stopped, instance and stops it again, which does nothing; the restart installs and starts a new instance. `Stop` returned, and keep-alive is still served. |
+| `KeepAliveLifecycleStopBug.cfg` | The fix as first written: `Server.Stop()` racing a restart. | **Fails after 6 steps**: the restart stops the old instance; `Stop` reads that same, already stopped, instance and stops it again, which does nothing; the restart installs and starts a new instance. `Stop` returned, and keep-alive is still served. |
 | `KeepAliveLifecycleSlotBug.cfg` | The guard as first written. | **Fails after 5 steps**: `StopForRestart` suspends the slot; `Stop` then cancels the restart, and nothing releases the slot. It keeps buffering the client's bytes, charged against the connection's ingress budget, until the connection closes. |
-| `KeepAliveLifecycle.cfg` | With `StopGuard` and `CancelUnregisters`: `Stop` sets a flag under the lock, and a restart that sees it installs nothing and unregisters the slot. | Passes: 33 distinct states. Never two instances running; `Stop` always wins; nothing stays registered. |
+| `KeepAliveLifecycle.cfg` | With `StopGuard` and `CancelUnregisters`: `Stop` sets a flag under the lock, and a restart that sees it installs nothing and unregisters the slot. | Passes: 35 distinct states. Never two instances running; `Stop` always wins; nothing stays registered. |
 | `KeepAliveLifecycleCloseBug.cfg` | Connection shutdown racing a restart, as gOuroboros did before the fix for issue #3085 (`ShutdownStopsServer = FALSE`). | **Fails**: shutdown stops the old instance and the muxer while the restart is between its steps; the restart then starts its new instance on a stopped muxer, which fails to register and raises "could not register protocol with muxer". |
-| `KeepAliveLifecycleClose.cfg` | The same with the fix: connection shutdown calls the server's `Stop`. | Passes: 44 distinct states. No restart starts an instance after shutdown. |
+| `KeepAliveLifecycleClose.cfg` | The same with the fix: connection shutdown calls the server's `Stop`. | Passes: 46 distinct states. No restart starts an instance after shutdown. |
+| `KeepAliveLifecycleReaderUnlockedBug.cfg` | A reader using the embedded field (`Reader = "unlocked"`), as every restarting server allowed before its instance became an unexported field. | **Fails after 4 steps** (`NoRacingRead`): `MsgDone` arrives, the old instance stops, the restart takes `protocolMu` and writes the new instance, and the reader reads the field before the lock is released. The Go race detector reports the same pair of accesses. |
+| `KeepAliveLifecycleReader.cfg` | The reader through `ProtocolInstance()` (`Reader = "locked"`), with the `Stop` guard. | Passes: 70 distinct states. The read never overlaps the write, and every other invariant still holds. |
 
 The first result changed the gOuroboros fix before it was published: the
 guard was added, with a Go test (`TestServerStopWinsOverRestart`) that calls
@@ -317,6 +333,14 @@ Reported as gOuroboros issue #3085 and fixed by pull request #3087 (merged):
 each restarting server has its own guarded `Stop`, and `stopProtocols`
 calls it.
 The constant `ShutdownStopsServer` switches between the two behaviors.
+
+The reader result is a data race, which TLC can only show as overlap: the
+read and the write are concurrent. The race detector asks a stronger question,
+whether the read is ordered after the write at all, so any trace here is one
+it reports. `TestServerMethodsDuringRestart` in each of the fifteen server
+packages is that trace: it holds the restart inside its `Done` handler, reads
+`DoneChan` from another goroutine, and fails under `-race` when the method
+reads the field without the lock.
 
 ## The Go tests this model drove
 
