@@ -445,6 +445,292 @@ GoRunO(lv, p, v) ==
 GoOwn(b) == GoRunO(Order(b), P0, b.valid)
 
 -----------------------------------------------------------------------------
+(* Family 4: pool retirement across levels [E4].                          *)
+
+\* Each level registers the pool, retires it (to a valid epoch), delegates
+\* the registered credential to it, or nothing. A retirement takes effect at
+\* an epoch boundary, so the pool stays registered for the rest of the
+\* batch (Dijkstra Rules/Pool.hs RetirePool: the pool must be in
+\* psStakePools; only psRetiring changes).
+\* In English: every level of family 4.
+\* Literally: "RCerts is defined as the set containing "none", "regP", "retP"
+\*   and "delegS"."
+RCerts == {"none", "regP", "retP", "delegS"}
+
+\* In English: every batch of family 4.
+\* Literally: "RBatches is defined as the set of records whose valid is a
+\*   member of BOOLEAN, top a member of RCerts, and subs a member of UpTo2 of
+\*   RCerts."
+RBatches == [valid : BOOLEAN, top : RCerts, subs : UpTo2(RCerts)]
+
+\* In English: one level of family 4: a retirement or a delegation needs
+\* the pool registered; a registration registers it. The mutation lets a
+\* retirement unregister the pool at once.
+\* Literally: "RStep of s, c and spec is defined as: in the case c equals
+\*   "regP", s with pool replaced by TRUE; in the case c equals "retP", s with
+\*   ok replaced by (s's ok and s's pool) and pool replaced by (s's pool and
+\*   (spec or Mutation does not equal "GoRetRemovesPool")); in the case c
+\*   equals "delegS", s with ok replaced by (s's ok and s's pool); in every
+\*   other case, s."
+RStep(s, c, spec) ==
+    CASE c = "regP"   -> [s EXCEPT !.pool = TRUE]
+      [] c = "retP"   -> [s EXCEPT !.ok = s.ok /\ s.pool,
+                                   !.pool = s.pool /\ (spec \/ Mutation # "GoRetRemovesPool")]
+      [] c = "delegS" -> [s EXCEPT !.ok = s.ok /\ s.pool]
+      [] OTHER        -> s
+
+\* In English: run the levels of family 4 in turn.
+RECURSIVE RRun(_, _, _)
+\* Literally: "RRun of lv, s and spec is defined as: if lv equals the empty
+\*   tuple then s, else RRun of the tail of lv, RStep of s, the head of lv and
+\*   spec, and spec."
+RRun(lv, s, spec) == IF lv = <<>> THEN s ELSE RRun(Tail(lv), RStep(s, Head(lv), spec), spec)
+
+\* In English: the reference's decision for family 4 (the credential is
+\* registered throughout).
+\* Literally: "SpecRet of b is defined as: if b's valid then RRun of Order of
+\*   b, S0 and TRUE's ok."
+SpecRet(b) == b.valid => RRun(Order(b), S0, TRUE).ok
+
+\* In English: gOuroboros' decision for family 4; the mutation judges every
+\* level against the original pool state.
+\* Literally: "GoRet of b is defined as: if b's valid then, letting lv be
+\*   Order of b: if Mutation equals "GoRetUnthreaded" then for all k in the
+\*   domain of lv, RStep of S0, lv of k and FALSE's ok, else RRun of lv, S0 and
+\*   FALSE's ok."
+GoRet(b) ==
+    b.valid =>
+        LET lv == Order(b)
+        IN IF Mutation = "GoRetUnthreaded"
+           THEN \A k \in DOMAIN lv : RStep(S0, lv[k], FALSE).ok
+           ELSE RRun(lv, S0, FALSE).ok
+
+-----------------------------------------------------------------------------
+(* Family 5: several certificates in one level [E3][E4].                   *)
+
+\* A level withdraws one coin or not, then runs up to two certificates in
+\* order (SUBCERTS / CERTS fold the list); at most one sub-transaction.
+\* In English: every level of family 5.
+\* Literally: "MLevels is defined as the set of records whose wd is a member
+\*   of the set containing "none" and "one", and certs a member of UpTo2 of
+\*   the set containing "regS", "unregS", "delegS" and "regP"."
+MLevels == [wd : {"none", "one"}, certs : UpTo2({"regS", "unregS", "delegS", "regP"})]
+
+\* In English: every batch of family 5.
+\* Literally: "MBatches is defined as the set of records whose valid is a
+\*   member of BOOLEAN, top a member of MLevels, and subs a member of UpTo1 of
+\*   MLevels."
+MBatches == [valid : BOOLEAN, top : MLevels, subs : UpTo1(MLevels)]
+
+\* In English: a level's certificates, folded in order from a state.
+RECURSIVE CertsRun(_, _)
+\* Literally: "CertsRun of s and cs is defined as: if cs equals the empty tuple
+\*   then s, else CertsRun of (CertStep of s and the head of cs) and the tail
+\*   of cs."
+CertsRun(s, cs) == IF cs = <<>> THEN s ELSE CertsRun(CertStep(s, Head(cs)), Tail(cs))
+
+\* In English: the reference's level: the withdrawal, then every
+\* certificate in order. The mutations judge each certificate against the
+\* state at the level's start, or carry only the first certificate's effect
+\* to later levels.
+\* Literally: "MLevel of s, l and spec is defined as: letting w be WdStep of s
+\*   and l: if spec or Mutation equals "none", CertsRun of w and l's certs;
+\*   if Mutation equals "GoMultiLevelStart", w with ok replaced by (for all k
+\*   in the domain of l's certs, CertStep of w and l's certs of k's ok) and
+\*   the other fields as CertsRun of w and l's certs left them; if Mutation
+\*   equals "GoMultiFirstOnly", CertsRun of w and l's certs with every field
+\*   but ok taken from CertsRun of w and the first certificate alone; else
+\*   CertsRun of w and l's certs."
+MLevel(s, l, spec) ==
+    LET w == WdStep(s, l)
+        full == CertsRun(w, l.certs)
+    IN CASE spec -> full
+         [] Mutation = "GoMultiLevelStart" ->
+                [full EXCEPT !.ok = \A k \in DOMAIN l.certs : CertStep(w, l.certs[k]).ok]
+         [] Mutation = "GoMultiFirstOnly" /\ l.certs # <<>> ->
+                [CertStep(w, Head(l.certs)) EXCEPT !.ok = full.ok]
+         [] OTHER -> full
+
+\* In English: run the levels of family 5 in turn.
+RECURSIVE MRun(_, _, _)
+\* Literally: "MRun of lv, s and spec is defined as: if lv equals the empty
+\*   tuple then s, else MRun of the tail of lv, MLevel of s, the head of lv and
+\*   spec, and spec."
+MRun(lv, s, spec) == IF lv = <<>> THEN s ELSE MRun(Tail(lv), MLevel(s, Head(lv), spec), spec)
+
+\* In English: the reference's decision for family 5.
+\* Literally: "SpecMulti of b is defined as: if b's valid then, letting lv be
+\*   Order of b: WTotal of lv is less than or equal to bal, and (if WAny of lv
+\*   then reg), and MRun of lv, S0 and TRUE's ok."
+SpecMulti(b) ==
+    b.valid => LET lv == Order(b)
+               IN /\ WTotal(lv) <= bal
+                  /\ WAny(lv) => reg
+                  /\ MRun(lv, S0, TRUE).ok
+
+\* In English: gOuroboros' decision for family 5.
+\* Literally: "GoMulti of b is defined as: if b's valid then, letting lv be
+\*   Order of b: WTotal of lv is less than or equal to bal, and (if WAny of lv
+\*   then reg), and MRun of lv, S0 and FALSE's ok."
+GoMulti(b) ==
+    b.valid => LET lv == Order(b)
+               IN /\ WTotal(lv) <= bal
+                  /\ WAny(lv) => reg
+                  /\ MRun(lv, S0, FALSE).ok
+
+-----------------------------------------------------------------------------
+(* Family 6: legacy-mode withdrawals with certificates [E3].               *)
+
+\* In legacy mode (the top level needs a Plutus V1-V3 script) the batch
+\* bound covers only the sub-transactions' withdrawals, and the top's
+\* withdrawal must exist in the current accounts and drain the balance the
+\* sub-transactions left, before the top's certificates run; the top's
+\* account need not exist originally (Entities.hs 341-412).
+\* In English: the sub-transaction levels of family 6.
+\* Literally: "LSub is defined as the set of records whose wd is a member of
+\*   the set containing "none" and "one", cert a member of the set containing
+\*   "none", "regS" and "unregS", and dd a member of BOOLEAN."
+LSub == [wd : {"none", "one"}, cert : {"none", "regS", "unregS"}, dd : BOOLEAN]
+
+\* In English: the top levels of family 6: no withdrawal, or one of 0, 1 or
+\* 2 coins.
+\* Literally: "LTop is defined as the set of records whose wd is a member of
+\*   the set containing "none", "w0", "w1" and "w2", cert a member of the set
+\*   containing "none", "regS" and "unregS", and dd a member of BOOLEAN."
+LTop == [wd : {"none", "w0", "w1", "w2"}, cert : {"none", "regS", "unregS"}, dd : BOOLEAN]
+
+\* In English: every batch of family 6.
+\* Literally: "LBatches is defined as the set of records whose valid is a
+\*   member of BOOLEAN, top a member of LTop, and subs a member of UpTo1 of
+\*   LSub."
+LBatches == [valid : BOOLEAN, top : LTop, subs : UpTo1(LSub)]
+
+\* In English: the coins a top-level withdrawal of family 6 names.
+\* Literally: "LAmt of w is defined as: in the case w equals "w1", 1; in the
+\*   case "w2", 2; in every other case, 0."
+LAmt(w) == CASE w = "w1" -> 1 [] w = "w2" -> 2 [] OTHER -> 0
+
+\* In English: the legacy top level: the withdrawal drains the balance the
+\* sub-transactions left (the mutation: the original balance less their
+\* withdrawals, missing their direct deposits and registrations), then the
+\* certificate, then the direct deposit. ob is that mutated amount.
+\* Literally: "LTopStep of s, l, spec and ob is defined as: letting d be (if
+\*   not spec and Mutation equals "GoLegDrainOriginal" then ob, else s's
+\*   bal): if l's wd equals "none" then DdStep of (CertStep of s and l's cert)
+\*   and l, else DdStep of (CertStep of (s with ok replaced by (s's ok and
+\*   s's reg and LAmt of l's wd equals d) and bal by 0) and l's cert) and l."
+LTopStep(s, l, spec, ob) ==
+    LET d == IF ~spec /\ Mutation = "GoLegDrainOriginal" THEN ob ELSE s.bal
+    IN IF l.wd = "none" THEN DdStep(CertStep(s, l.cert), l)
+       ELSE DdStep(CertStep([s EXCEPT !.ok = s.ok /\ s.reg /\ LAmt(l.wd) = d,
+                                      !.bal = 0], l.cert), l)
+
+\* In English: the reference's decision for family 6; the mutation also
+\* requires the top's withdrawal account to exist originally.
+\* Literally: "LegacyOk of b and spec is defined as: if b's valid then,
+\*   letting s be SpecRun of b's subs and S0: WTotal of b's subs is less than
+\*   or equal to bal, and (if WAny of b's subs then reg), and (if not spec and
+\*   Mutation equals "GoLegTopOriginal" and b's top's wd does not equal
+\*   "none", then reg), and LTopStep of s, b's top, spec and (bal minus
+\*   WTotal of b's subs)'s ok."
+LegacyOk(b, spec) ==
+    b.valid =>
+        LET s == SpecRun(b.subs, S0)
+        IN /\ WTotal(b.subs) <= bal
+           /\ WAny(b.subs) => reg
+           /\ (~spec /\ Mutation = "GoLegTopOriginal" /\ b.top.wd # "none") => reg
+           /\ LTopStep(s, b.top, spec, bal - WTotal(b.subs)).ok
+
+-----------------------------------------------------------------------------
+(* Family 7: account balance intervals (CIP-159) across levels [E3].        *)
+
+\* A level may assert an interval on the account's balance; the top may
+\* also assert a starting interval. A level's interval is checked against
+\* the accounts as the earlier levels left them, at the level's start
+\* (before its withdrawal); the starting interval against the original
+\* accounts; the account must exist in the accounts checked
+\* (SubEntities.hs 264, Entities.hs 287-288, 485-517). Intervals: a lower
+\* bound is inclusive, an upper bound exclusive (Scripts.hs 670-674).
+\* In English: the intervals a level can assert.
+\* Literally: "Ivs is defined as the set containing "none", "exact0",
+\*   "exact1", "lower1" and "upper1"."
+Ivs == {"none", "exact0", "exact1", "lower1", "upper1"}
+
+\* In English: is balance x inside interval iv?
+\* Literally: "InIv of iv and x is defined as: in the case iv equals
+\*   "exact0", x equals 0; "exact1", x equals 1; "lower1", x is greater than
+\*   or equal to 1; "upper1", x is less than 1; in every other case, TRUE."
+InIv(iv, x) ==
+    CASE iv = "exact0" -> x = 0
+      [] iv = "exact1" -> x = 1
+      [] iv = "lower1" -> x >= 1
+      [] iv = "upper1" -> x < 1
+      [] OTHER -> TRUE
+
+\* In English: the levels of family 7; st is the top's starting interval
+\* (always "none" on a sub-transaction).
+\* Literally: "ILevels is defined as the set of records whose wd is a member
+\*   of the set containing "none" and "one", cert a member of the set
+\*   containing "none", "regS" and "unregS", dd a member of BOOLEAN, iv a
+\*   member of Ivs, and st a member of Ivs."
+ILevels == [wd : {"none", "one"}, cert : {"none", "regS", "unregS"}, dd : BOOLEAN,
+            iv : Ivs, st : Ivs]
+
+\* In English: every batch of family 7.
+\* Literally: "IBatches is defined as the set of every b in the set of
+\*   records whose valid is a member of BOOLEAN, top a member of ILevels and
+\*   subs a member of UpTo1 of ILevels, such that for all k in the domain of
+\*   b's subs, b's subs of k's st equals "none"."
+IBatches == {b \in [valid : BOOLEAN, top : ILevels, subs : UpTo1(ILevels)] :
+                \A k \in DOMAIN b.subs : b.subs[k].st = "none"}
+
+\* In English: one level of family 7: the interval at the level's start,
+\* then the level as in family 1. The mutation checks the interval after
+\* the level's withdrawal.
+\* Literally: "ILevel of s, l and spec is defined as: letting c be (if not
+\*   spec and Mutation equals "GoIvAfterWithdrawal" then WdStep of s and l,
+\*   else s) and t be SpecLevel of s and l: if l's iv equals "none" then t,
+\*   else t with ok replaced by (t's ok and c's reg and InIv of l's iv and c's
+\*   bal)."
+ILevel(s, l, spec) ==
+    LET c == IF ~spec /\ Mutation = "GoIvAfterWithdrawal" THEN WdStep(s, l) ELSE s
+        t == SpecLevel(s, l)
+    IN IF l.iv = "none" THEN t
+       ELSE [t EXCEPT !.ok = t.ok /\ c.reg /\ InIv(l.iv, c.bal)]
+
+\* In English: run the levels of family 7 in turn; the mutation judges
+\* every level's interval against the original state.
+RECURSIVE IRun(_, _, _)
+\* Literally: "IRun of lv, s and spec is defined as: if lv equals the empty
+\*   tuple then s, else IRun of the tail of lv, (if not spec and Mutation
+\*   equals "GoIvOriginal" then SpecLevel of s and the head of lv with ok
+\*   replaced by its ok and the interval of the head of lv checked against
+\*   S0, else ILevel of s, the head of lv and spec), and spec."
+IRun(lv, s, spec) ==
+    IF lv = <<>> THEN s
+    ELSE LET l == Head(lv)
+             nx == IF ~spec /\ Mutation = "GoIvOriginal"
+                  THEN LET t == SpecLevel(s, l)
+                       IN [t EXCEPT !.ok = t.ok /\ (l.iv = "none" \/ (S0.reg /\ InIv(l.iv, S0.bal)))]
+                  ELSE ILevel(s, l, spec)
+         IN IRun(Tail(lv), nx, spec)
+
+\* In English: the decision for family 7 (spec: the reference's), with the
+\* batch bound of family 1 and the top's starting interval against the
+\* original account.
+\* Literally: "IntervalsOk of b and spec is defined as: if b's valid then,
+\*   letting lv be Order of b: WTotal of lv is less than or equal to bal, and
+\*   (if WAny of lv then reg), and (if b's top's st does not equal "none" then
+\*   reg and InIv of b's top's st and bal), and IRun of lv, S0 and spec's ok."
+IntervalsOk(b, spec) ==
+    b.valid =>
+        LET lv == Order(b)
+        IN /\ WTotal(lv) <= bal
+           /\ WAny(lv) => reg
+           /\ b.top.st # "none" => reg /\ InIv(b.top.st, bal)
+           /\ IRun(lv, S0, spec).ok
+
+-----------------------------------------------------------------------------
 (* The table questions.                                                    *)
 
 \* In English: families 1 and 2 read only whether the pool is registered,
@@ -454,14 +740,25 @@ GoOwn(b) == GoRunO(Order(b), P0, b.valid)
 Plain == pend = "none" /\ pool # "B"
 
 \* In English: in this state, gOuroboros accepts exactly the batches the
-\* reference accepts, in all three families.
+\* reference accepts, in all seven families. Family 4 is asked with the
+\* credential registered, families 6 and 7 with no pool.
 \* Literally: "GoAgrees is defined as: (if Plain, then for all b in EBatches,
-\*   GoEnt of b if and only if SpecEnt of b, and for all b in DBatches, GoDep
-\*   of b if and only if SpecDep of b); and for all b in OBatches, GoOwn of b
-\*   if and only if SpecOwn of b."
+\*   GoEnt of b if and only if SpecEnt of b, for all b in DBatches, GoDep of
+\*   b if and only if SpecDep of b, and for all b in MBatches, GoMulti of b if
+\*   and only if SpecMulti of b); and (if Plain and reg, then for all b in
+\*   RBatches, GoRet of b if and only if SpecRet of b); and (if Plain and pool
+\*   equals "none", then for all b in LBatches, LegacyOk of b and FALSE if
+\*   and only if LegacyOk of b and TRUE, and for all b in IBatches,
+\*   IntervalsOk of b and FALSE if and only if IntervalsOk of b and TRUE); and
+\*   for all b in OBatches, GoOwn of b if and only if SpecOwn of b."
 GoAgrees ==
     /\ Plain => /\ \A b \in EBatches : GoEnt(b) <=> SpecEnt(b)
                 /\ \A b \in DBatches : GoDep(b) <=> SpecDep(b)
+                /\ \A b \in MBatches : GoMulti(b) <=> SpecMulti(b)
+    /\ (Plain /\ reg) => \A b \in RBatches : GoRet(b) <=> SpecRet(b)
+    /\ (Plain /\ pool = "none") =>
+           /\ \A b \in LBatches : LegacyOk(b, FALSE) <=> LegacyOk(b, TRUE)
+           /\ \A b \in IBatches : IntervalsOk(b, FALSE) <=> IntervalsOk(b, TRUE)
     /\ \A b \in OBatches : GoOwn(b) <=> SpecOwn(b)
 
 \* Table probes, each expected to be violated.
@@ -486,6 +783,28 @@ ProbeNoOwnerExemptAfterSub ==
         ~SpecOwn([valid |-> TRUE,
                   subs |-> <<[cert |-> "A", own |-> TRUE]>>,
                   top |-> [cert |-> "A2", own |-> FALSE]])
+
+\* In English: "a legacy top never withdraws from an account a sub-
+\* transaction registered" (false: legacy mode checks the top against the
+\* current accounts only).
+\* Literally: "ProbeNoLegacyTopFromNewAccount is defined as: if not reg and
+\*   pool equals "none", then LegacyOk of the valid batch whose sub-
+\*   transaction registers the credential and whose top withdraws 0, and TRUE,
+\*   is not true."
+ProbeNoLegacyTopFromNewAccount ==
+    (~reg /\ pool = "none") =>
+        ~LegacyOk([valid |-> TRUE,
+                   subs |-> <<[wd |-> "none", cert |-> "regS", dd |-> FALSE]>>,
+                   top |-> [wd |-> "w0", cert |-> "none", dd |-> FALSE]], TRUE)
+\* In English: "no level deregisters and re-registers the credential"
+\* (false).
+\* Literally: "ProbeNoReRegInLevel is defined as: if reg and bal equals 0 and
+\*   Plain, then SpecMulti of the valid batch whose top deregisters then
+\*   registers is not true."
+ProbeNoReRegInLevel ==
+    (reg /\ bal = 0 /\ Plain) =>
+        ~SpecMulti([valid |-> TRUE, subs |-> <<>>,
+                    top |-> [wd |-> "none", certs |-> <<"unregS", "regS">>]])
 
 -----------------------------------------------------------------------------
 (* TableSpec.                                                              *)
