@@ -247,3 +247,13 @@ behaviour, so no model state or config covers it.
 - #3321: fee, size and min-coin golden helpers check component counts before indexing. NilAway fix in a test.
 - #3319: localstatequery era-summary golden checks the item count with `t.Fatalf` before indexing. NilAway fix in a test.
 - #3336, #3334, #3333: failed jobs re-run, no code change. The only failure was the main-side `TestReceiveMatchesModel/server/*/Oversized` timing flake that #3316 fixes.
+- #3325: NilAway flagged the cbor golden tests once the 386 build passed; guard the untrusted stream decoder and the golden indexes. NilAway fix in tests.
+- #3325: failed jobs re-run once more; the only failure was the `Oversized` timing flake.
+- #3334: NilAway flagged `nonceRefHash` returning `Blake2b256.Bytes()`; return the array slice directly. NilAway fix in a test.
+- #3316: `t.Cleanup(server.Stop)` does not build once `Stop` takes a context; a helper stops the server through either signature. Compile fix in a test.
+- #3234: the waiter test now waits until the waiter is parked on the in-progress memo entry before the build panics. Test-timing fix.
+- #3233: a Start-based test pins that a fatal processing error keeps committed results until Stop (the behaviour was already right; the test was missing).
+- #3154: a test pins that `deliverResult` returns after Stop with no receiver (the behaviour was already right; the test was missing).
+- #3333: a test pins the legacy four-element full-vote offer encoding (encoder unchanged).
+- #3111: the `ValidateHeader` doc comment now states the Byron envelope rules the code applies. Doc fix.
+- #3133: `PROTOCOL_LIMITS.md` now says only the client overrides the peer-sharing Busy timeout. Doc fix.

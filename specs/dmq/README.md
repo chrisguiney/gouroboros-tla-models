@@ -689,3 +689,12 @@ cd specs/dmq
 
 To run a probe, copy a passing config and replace its `INVARIANT` lines with
 the probe's name.
+
+`PeerPipelines` and `OutAdmitsPipelined` add the reference's pipelined
+requester: while the outbound owes MsgReplyMessages, the inbound already
+sends its next non-blocking request for ids (dmq-node
+DMQ/SigSubmissionV2/Inbound.hs; V1 runs txSubmissionServerPeerPipelined).
+At 4f710823 the outbound's StMessages refused it, closing the connection
+(`MessageSubmissionV{1,2}PipelinedBug`, `HonestNeverRefused` violated). The
+fix holds the request until the reply is sent and then checks it
+(`MessageSubmissionV{1,2}Pipelined`, pass).
