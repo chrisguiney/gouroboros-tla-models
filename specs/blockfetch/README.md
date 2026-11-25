@@ -449,6 +449,38 @@ documentation change, which cannot affect the model. The one red job at the
 previous head, `TestReceiveMatchesModel/server/inBusy/Oversized` on Go 1.27
 amd64, passed on the other jobs there and `-race -count=5` here.
 
+## Who refuses an oversized message (`OversizedRefusal.tla`)
+
+`TestReceiveMatchesModel`'s Oversized cells for a server in Busy, Streaming
+and Done failed intermittently in CI ("message the reference forbids was
+accepted without an error", after 5 s). Not a library defect: the muxer's
+ingress limit for block-fetch is the largest per-state size limit
+(2,500,000), and the test's message is 2,500,010 bytes. When the demuxer
+reads the whole message before the read loop takes a segment (a lagging
+reader, or a server restarting after `MsgClientDone`), the muxer refuses it
+with `ErrIngressOverflow` on its own error channel and the read loop returns
+silently. The connection still ends; the harness watched only the protocol's
+error channel. Captured on main `0fa7a0df`: 2 of 90 whole-package runs
+(`taskset -c 2-9`, 30 concurrent, `-test.cpu 2`) failed
+`server/inDone/Oversized`, and a diagnostic read of the muxer's error channel
+at the timeout showed "protocol ingress exceeded an ingress limit: 2500010
+bytes queued exceeds 2500000 byte limit".
+
+| Config | Setting | Result |
+| --- | --- | --- |
+| `OversizedRefusalBusy` | reader refuses by type (Busy, Streaming) | `Refused` holds, 25 states |
+| `OversizedRefusalSize` | reader refuses by size (Idle) | `Refused` holds, 16 states |
+| `OversizedRefusalRestart` | reader not yet running (Done, restart) | `Refused` holds, 21 states |
+| `OversizedRefusalReaderOnlyBug` | the harness's assumption, Busy | **fails** `ReaderReports`: four `Demux` steps, the muxer overflows before any `Take` |
+| `OversizedRefusalRestartReaderOnlyBug` | the same, restart | **fails** `ReaderReports` |
+
+Go: #3316 (`fix/blockfetch-oversized-refusal` `11eee787`, issue #3315).
+`requireRefusal` accepts either refusal for Oversized cells;
+`TestOversizedRefusedWhileReaderStalled` stalls the server's read loop
+(blocking `RequestRangeFunc`, `WithRecvQueueSize(1)`, 40 pipelined requests)
+so the muxer refuses: 10/10 fail against the old harness, 90/90 pass after;
+the whole-package stress above then passed 90/90.
+
 ## Timeout defaults as a table (`BlockFetchLimits.tla`)
 
 A table model, written bug-first for #3114 (N17): a state (`StBusy`,

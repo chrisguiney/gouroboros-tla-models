@@ -358,3 +358,19 @@ cd specs/localtx
 for c in LocalTxMonitor*Bug.cfg; do ../../bin/tlc -config $c LocalTxMonitor.tla || true; done
 for c in LocalTxSubmission*Bug.cfg; do ../../bin/tlc -config $c LocalTxSubmission.tla || true; done
 ```
+
+## Merging main into #3133, #3140 and #3154
+
+Main had #3196 (`MsgGetMeasures`, `AwaitMempoolFunc`) and #3197 (servers
+restart after `MsgDone`), the behaviour `LocalTxMonitorFixed.cfg` and the
+`ServerRestarts` setting already describe, so no model change. The merges
+change only the Go side to match: #3140 (`ffc14012`) drops the server-restart
+deviation from its receive table and documents no default submit timeout;
+#3154 (`9f549801`) drops the `MsgGetMeasures` and restart deviations, covers
+`StBusy GetMeasures` in both receive tests, removes
+`TestBusyGetMeasuresCannotBeEntered`, keeps the untimed re-acquire beside
+`WithAwaitMempoolFunc`, and makes `GetMeasures` end on `stopRequested` like
+the other waiting calls (`StopCancelsWait`;
+`TestStopDoesNotWaitForPeer/GetMeasures` failed "Stop waited for the node to
+answer" on the merge before it). #3133 (`43090651`) conflicted only in
+`protocol/peersharing/README.md`.

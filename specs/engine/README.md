@@ -431,3 +431,22 @@ muxer's done channel under `lifecycleMu`.
 scripts/run-model.sh specs/engine   # or one config:
 bin/tlc -config specs/engine/EngineSendBeforeStartLostBug.cfg specs/engine/EngineSendBeforeStart.tla
 ```
+
+`TestRequestRangeContextCancelsBlockedSend` (`protocol/blockfetch`) failed
+10/10 on #3274 and #3276 ("Expected error with context canceled ... but got
+nil", then its `watchRangeDeadline` goroutine failed about 15 later tests in
+goleak). Its setup relied on the main behaviour this slice removes: an
+unstarted protocol's nil queue blocked the request. With the fix the request
+is queued (`queued`), so `RequestRange` returns nil and cancellation has
+nothing to end. No cancellation is lost: the model already lets a sender
+blocked on a full queue end with its context (`SenderCtxEnds`, `ctxErr`), and
+nothing cancels a queued message. No model change. The test now fills the
+unstarted protocol's send queue first, so the request blocks there
+(`bcea5341` on merge 11, merged into merge 12 at `d5865e84`); it passes
+`-race -count=10`, and fails ("RequestRange remained blocked after
+cancellation") when `sendRequestRange` passes `context.Background()` instead
+of its range context.
+
+Task note, merge 6 (#3253, `8e855d8c`): five build-tagged test call sites of
+`Connection.Close()` gained a context argument; a mechanical call-site fix,
+no model change.
