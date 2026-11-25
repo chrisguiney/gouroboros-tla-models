@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-101 entries. On `main`: does not conform 54; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+102 entries. On `main`: does not conform 55; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -150,6 +150,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L21](#l21) | ledger | Leios voting key past its honoured age | Seated keyless once `epoch >= registeredIn + maxKeyAge`, `maxKeyAge = ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2`; a certificate it signs is refused (`SignerWithoutKey`) | `DijkstraLeiosCertificateState` asks only for keys "from the snapshot's registered pool parameters"; an aged-out key handed over verifies like any other | Voting keys rotate with a time-to-live | does not conform → conforms | Fixed on local branch `fix/leios-voting-key-age` (`93c3df5d`), no PR yet: gOuroboros judges key age itself, through the new required `DijkstraLeiosKeyAgeContext` method and `KeyRegisteredIn` (breaking). No implementer in Dingo or ouroboros-mock |
 | [L22](#l22) | ledger | Leios vote encoding | `[announcing_rb_hash, voter_id (Word16), signature]` | main: `LeiosVote`, carried by LeiosVotes `MsgVote` and the LeiosFetch vote messages, is `[slot, eb_hash, voter_id, signature]`; branch: the CIP shape, `voter_id` 16 bits | `[announcing_rb_hash, voter_id, vote_signature]`; LeiosVotes `MsgLeiosVote` carries it | does not conform → conforms | Fixed on local branch `fix/leios-vote-shape` (`eb4c2421`), no PR yet (breaking; Dingo's `ledger/leios` and `ouroboros` packages use the old fields). The rc-2026w41 prototype vote is the golden vector. A LeiosFetch votes reply is matched by voter only: a vote names its announcing block, not its slot |
 | [L23](#l23) | ledger | Dijkstra committee certificate for a member an earlier level proposed | Accepted: each level's GOVCERT counts the UpdateCommittee proposals the earlier levels left as potential members | main: the governance view consults only the wrapped state, so a top-level (or later sub-transaction) authorization or resignation is rejected | Same rule (Conway GOVCERT isPotentialFutureMember; Dijkstra LEDGER/SUBLEDGER) | does not conform → conforms | Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet |
+| [L24](#l24) | ledger | Dijkstra parameter-update well-formedness: eMax and pledge leverage | Refused: a set eMax of zero, or a pledge leverage cap below 1 (removing the cap is allowed) | main: accepted (only Conway's non-zero fields and a non-negative leverage are checked) | Leverage cap at least 1; eMax not listed (see below) | does not conform → conforms | Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1267,6 +1268,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet. `TestDijkstraCommitteeCertificateForEarlierLevelProposedMember` fails 2 of 4 cases on the parent commit. Model `specs/ledger-conway-dijkstra` `SubGovGoComMainBug.cfg`; with the fix applied, all 52,416 DRep and committee cells (proposals included) agree with the reference, and 7 fail without it. Only Dijkstra batches with sub-transactions reach it
 
+### L24
+
+**Dijkstra parameter-update well-formedness: eMax and pledge leverage** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: Dijkstra's `ppuWellFormed`, which GOV and SUBGOV apply to every ParameterChange proposal (`actionWellFormed`), adds to Conway's conditions that a set `eMax` is not zero and that a set pledge leverage cap is at least 1; an update that removes the cap is allowed. gOuroboros main: `validateDijkstraProtocolParameterUpdate` checks Conway's non-zero fields and only that the leverage is a non-negative ratio, so both proposals are accepted at the top level or in a sub-transaction.
+- **Spec.** formal-ledger-specifications `60b68036c8b4` `src/Ledger/Dijkstra/Specification/PParams.lagda.md` 318-326 (`paramsUpdateWellFormed`: `Maybe.All (Maybe.All (1 ≤ l)) maxPledgeLeverage`; it lists no `eMax`, `nOpt` or emptiness condition, which the reference adds, and requires a Leios quorum threshold above 1/2, which the reference does not)
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/PParams.hs` 1150-1172
+- **gOuroboros.** gOuroboros `0dbd0f11` `ledger/dijkstra/rules.go` `validateDijkstraProtocolParameterUpdate`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet. `TestDijkstraParameterUpdateWellFormedEMaxAndPledgeLeverage` fails 2 of 6 cases on the parent commit. Two existing tests that asserted acceptance of a leverage of 0 and 1/2 now expect refusal. Model `specs/ledger-conway-dijkstra` `SubGovGoPpuMainBug.cfg`; with the fix all 1,308 proposal-check cells agree, and 96 fail without it. Where the spec and the reference differ on `eMax` and the Leios quorum, gOuroboros follows the reference
+
 ## Pipeline
 
 ### P1
@@ -1352,6 +1364,7 @@ Not drift, since gOuroboros matches the reference, but worth knowing. Details an
 - Conway bootstrap rules: the return account is not checked in protocol version 9, and committee voters must be in the enacted committee only from version 11. Model `ledger-governance`.
 - Leios quorum: CIP-0164 Step 4 says the stake must "exceed" tau, but its formula and the reference (`verifyLeiosCert`, `recordVote`) use `>=`; gOuroboros uses `>=`. Model `ledger-leios`.
 - Endorser-block encoding: a bare map with `uint32` sizes (the node) instead of the CIP's array around an ordered map. Model `ledger-leios`.
+- Dijkstra parameter-update well-formedness: the reference also refuses a zero `eMax` or `nOpt` and an empty update, and does not require the Leios quorum threshold above 1/2 that the formal spec does (`PParams.lagda.md` 318-326). gOuroboros follows the reference (L24). Model `ledger-conway-dijkstra` `SubGov`.
 - Message submission window rules (a non-blocking request may ask for 0 ids if it acknowledges some) and empty `MsgRequestMessages`. Model `dmq`.
 
 ## Resolved since the models were written
@@ -1384,6 +1397,7 @@ No pull request yet (decide whether and how to fix):
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
 - **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
 - **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. Unreachable on chain today.
+- **L24** Dijkstra parameter-update well-formedness (eMax, pledge leverage). Fixed on local branch `fix/dijkstra-ppu-well-formed` (`9f7e7d38`), no PR yet.
 - **L23** Dijkstra committee certificate for a member an earlier level proposed. Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet.
 - **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
 - **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.

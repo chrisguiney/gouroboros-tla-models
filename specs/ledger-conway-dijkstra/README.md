@@ -149,6 +149,23 @@ families):
 - `CBatches`: DRep register, deregister and update; committee authorize and
   resign for a seated member C1 and for C2, whom an earlier level's
   UpdateCommittee proposal would add; a resigned member can do neither.
+- `PBatches`: a ParameterChange (maxTxSize, nOpt, eMax, coinsPerUTxOByte
+  unset, zero or good; pledge leverage unset, below 1, at least 1, or
+  removed) or an UpdateCommittee whose member's term ends before, at or
+  after the current epoch, at the top or in a sub-transaction.
+
+`SubGuards.tla` (Dijkstra guards):
+
+- `WBatches`: for a key, native or Plutus guard credential g: whether the
+  top lists g, carries g's signature, where g's script is provided (nowhere,
+  top, first sub-transaction), and what each level requires of g (nothing,
+  without a datum, with one). Required guards must be listed at the top;
+  datums must match the script kind against the batch's scripts; a listed
+  script guard needs its script, a listed key guard its signature; all
+  whatever IsValid says.
+- `CBatches`: what each level requires (g or another credential h, with or
+  without a datum); the top-level guard script's context must carry the
+  levels' datums for g, keyed by level, and each required credential once.
 
 ## The questions
 
@@ -173,6 +190,7 @@ families):
 | `SubTxLedger` | `ValuePreserved`, `SpentOnce`, `InvalidKeeps` hold over two batches | 72 |
 | `SubCertsTable` | `GoAgrees` holds: 55,860 entity and 208 deposit batches in each of 6 plain states, 1,168 owner batches in each of 21 | 21 |
 | `SubCertsLedger` | `DepositsMatch`, `ValuePreserved` hold over three batches | 48 |
+| `SubGuardsTable` | `GoAgrees` holds: 312 key and 912 native or Plutus guard batches, 155 context batches | 3 |
 | `SubGovTable` | `GoAgrees` holds: 5,740 governance batches in each of 16 states, 8,736 DRep/committee batches in each of 6 | 48 |
 
 gOuroboros agrees with the reference on every modelled cell. No defect was
@@ -242,6 +260,11 @@ Observations, none of which changes an accepted transaction:
 | `SubCertsGoLegDrainOriginalBug`, `SubCertsGoLegTopOriginalBug` | legacy top drains original less sub withdrawals; top account must exist originally | `GoAgrees` |
 | `SubCertsGoIvAfterWithdrawalBug`, `SubCertsGoIvOriginalBug` | interval after the level's withdrawal; against the original account | `GoAgrees` |
 | `SubGovGoGovUnthreadedBug`, `SubGovGoGovBeforeCertsBug`, `SubGovGoGovAnyPhaseBug` | governance against the original state; before the level's certificates; when invalid | `GoAgrees` |
+| `SubGuardsGoGuardTopOnlyBug`, `SubGuardsGoGuardDatumTopOnlyBug` | only the top's requirements listed; only the top's datums judged | `GoAgrees` |
+| `SubGuardsGoGuardDatumLevelScriptsBug`, `SubGuardsGoGuardKeyDatumOkBug` | datum judged against the level's own scripts; key guard with a datum | `GoAgrees` |
+| `SubGuardsGoCtxTopOnlyBug`, `SubGuardsGoCtxAnyDatumBug`, `SubGuardsGoCtxNoDedupBug` | context: top's datum only; another credential's datum; a credential per requiring level | `GoAgrees` |
+| `SubGovGoPpuMainBug` | gOuroboros main: eMax zero and leverage below 1 accepted (DRIFT L24) | `GoAgrees` |
+| `SubGovGoPropAnyPhaseBug`, `SubGovGoPropTopOnlyBug`, `SubGovGoUcNowOkBug` | proposals checked when invalid; a sub-transaction's not checked; a term ending now allowed | `GoAgrees` |
 | `SubGovGoComMainBug` | gOuroboros main: an earlier level's UpdateCommittee proposal is not a membership (DRIFT L23) | `GoAgrees` |
 | `SubGovGoComUnthreadedBug`, `SubGovGoComResignAgainBug`, `SubGovGoComSameLevelBug` | not threaded; a resigned member resigns again; a level's own proposal counts | `GoAgrees` |
 
@@ -261,7 +284,13 @@ re-registering (`SubCerts`); the top voting on the sub-transaction's
 proposal, the top authorizing a member a sub-transaction proposed
 (`SubGov`).
 
-`SubGov` found one defect: DRIFT L23. The spec and the reference agree in
+Further probes: a sub-transaction requiring a Plutus guard whose script
+only the top provides, a guard's context with two levels' datums
+(`SubGuards`).
+
+`SubGov` found two defects: DRIFT L23 and L24 (the latter where the formal
+spec and the reference also differ; gOuroboros follows the reference).
+`SubGuards` found none. The spec and the reference agree in
 this area too.
 
 `SubCerts` found no difference between the formal specification
@@ -296,6 +325,14 @@ table is under test too.
 | `TestSubTxModelBalanceIntervals` (`IBatches`) | 109,800 |
 | `TestSubTxModelGovernance` (`SubGov` `GBatches`, a subtest per state) | 91,840 |
 | `TestSubTxModelDRepCommitteeCertificates` (`CBatches` without proposals) | 7,008 |
+| `TestSubTxModelGuards` (`SubGuards` `WBatches`) | 2,136 |
+| `TestSubTxModelGuardContext` (`SubGuards` `CBatches`) | 155 |
+| `TestSubTxModelProposalChecks` (`SubGov` `PBatches`, without eMax zero or leverage below 1) | 660 |
+
+Commit `824672bf` adds the last three. With the fix on
+`fix/dijkstra-ppu-well-formed` (`9f7e7d38`) applied, the proposal walk
+including eMax zero and leverage below 1 (1,308 cells) agrees; on main 96
+of those cells fail.
 
 Commits `727e0cd0` and `f8b8a8a9` on the same branch add the last six.
 The DRep/committee test leaves out the cells with an UpdateCommittee
@@ -348,6 +385,10 @@ Mutations, each killed (first failing cell):
 | only a level's first certificate applied to the threaded block state | sub registers then deregisters, top registers, refused |
 | direct deposits not applied by `dijkstraApplyAccountLevel` | sub deposits into an unregistered account, accepted |
 | balance intervals against an unthreaded account | sub registers, top's interval refused |
+| required guards of sub-transactions ignored | sub requires a key guard the top does not list, accepted |
+| sub-transactions' guard datums not judged | sub requires a key guard with a datum, accepted |
+| context keeps a level's entry without a datum | context walk fails |
+| Conway non-zero field check removed from Dijkstra updates | coinsPerUTxOByte zero, accepted |
 
 Moving `ApplyCertificateDepositLevel`'s withdrawals after the certificates
 survives: the per-level Conway rule already sees a level's own withdrawal,
@@ -375,6 +416,9 @@ and the threaded state after the level is the same either way.
 | Sub-transaction proposals and votes | SUBLEDGER-V: SUBENTITIES then SUBGOV; LEDGER-V top GOVS after SUBLEDGERS | `SUBGOV` = Conway GOV with the sub's id and post-SUBENTITIES state | `validateDijkstraGovernanceLevels` overlay | agree |
 | Committee certificate for a proposed member | `allColdCreds govState₁` | committee proposals of the current state | wrapped state only | does not conform (L23) |
 | Account balance intervals | SUBENTITIES/ENTITIES `dom ⊆ dom rewards` at level start; starting vs `rewards₀` | same | threaded overlay | agree |
+| Required top-level guards and datums | marked TODO in the reference | `MissingRequiredGuards` (top, always), `validateGuardDatums` per level against the batch's scripts | `validateDijkstraRequiredTopLevelGuards`, `validateDijkstraGuardDatums` | agree |
+| Guard script context | — | `transGuardingTopTxInfo` | `dijkstraTopTxInfoGuardDatumsV4`, `dijkstraBatchRequiredGuardsV4` | agree |
+| Parameter-update well-formedness | leverage ≥ 1, quorum > 1/2; no eMax/nOpt/empty | `ppuWellFormed` adds eMax, nOpt, empty; no quorum | main: no eMax, leverage ≥ 0 | does not conform (L24) |
 | Owner witnesses | — | `poolOwnersWitnessRequired`, pre-level `PState`, never when invalid | `PoolOwnersWitnessRequired`, threaded | agree |
 | Removed fields | — | update field, MIR, genesis delegation; Dijkstra tags 0, 1 | decode errors | agree |
 
@@ -390,9 +434,9 @@ Model `ledger-utxo`'s checks (assumed to pass), witnesses and script evaluation,
 governance (model `ledger-governance`), certificate state transitions beyond registration
 (model `ledger-shelley`), account balance intervals and guards, the
 per-block reference-script limit (block bodies), protocol versions above
-12, required top-level guards and guard datums (Utxow.hs; a witness and
-script-context matter for model `ledger-witnesses`), and the Dijkstra-only
-proposal checks (parameter-update validation, committee expiry). `SubGov`
+12, the evaluation of guard scripts (only their context is modelled), and
+every other field of a parameter update (Conway's model and unit tests).
+`SubGov`
 uses Info proposals only, so ancestry, treasury withdrawals and
 voter/action-type restrictions are Conway's and not re-checked per level.
 
