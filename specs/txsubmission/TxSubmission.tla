@@ -83,7 +83,9 @@ CONSTANTS
     \* "serverKeepsAcked" (the server forgets to drop acknowledged ids), or
     \* "clampBlocking" (a clamping gOuroboros client clamps a blocking
     \* request that leaves ids unacknowledged instead of refusing it first,
-    \* as the clamp's first draft did).
+    \* as the clamp's first draft did), or "refuseAckedBlocking" (the
+    \* client counts the ids left before the acknowledgement, so it also
+    \* refuses a blocking request that acknowledges the whole window).
     Mutation
 
 \* In English: "The roles that behave honestly: every role except "rogue"."
@@ -199,14 +201,17 @@ RefAcceptsReply(b, n, k) == k <= n /\ (b => k >= 1)
 \* a blocking request for no ids (RequestedNothing [R3]) or one that leaves
 \* ids unacknowledged (RequestBlocking [R3]), so a blocking request it
 \* answers is never clamped to zero ids; the mutation "clampBlocking"
-\* removes the second refusal, which the clamp's first draft lacked."
+\* removes the second refusal, which the clamp's first draft lacked, and
+\* "refuseAckedBlocking" counts the ids left before the acknowledgement,
+\* refusing the legal blocking request that acknowledges the whole window."
 \* Literally: "ClientAcceptsIds of b, a, n and U is defined as: letting window
 \*   be (Mutation equals "noWindowCheck", or V16 is true and ClientClamps is
 \*   true, or the length of U minus a plus n is less than or equal to
 \*   MaxUnacked), blockOK be (if ClientClamps is true, then it is not the case
 \*   that b is true and n equals 0, and if Mutation does not equal
 \*   "clampBlocking", it is not the case that b is true and the length of U
-\*   minus a is greater than 0), and goOK be (a is less than or
+\*   minus (if Mutation equals "refuseAckedBlocking" then 0, else a) is
+\*   greater than 0), and goOK be (a is less than or
 \*   equal to the length of U, and window, and blockOK): in the case Client
 \*   equals "reference", RefAcceptsIds of b, a, n and U; in the case Client
 \*   equals "gouroboros", goOK; in the case Client equals "fixed", goOK and
@@ -218,7 +223,8 @@ ClientAcceptsIds(b, a, n, U) ==
         blockOK == ClientClamps =>
                      /\ ~(b /\ n = 0)                     \* RequestedNothing [R3]
                      /\ Mutation # "clampBlocking"
-                          => ~(b /\ Len(U) - a > 0)        \* RequestBlocking [R3]
+                          => ~(b /\ Len(U) - (IF Mutation = "refuseAckedBlocking"
+                                              THEN 0 ELSE a) > 0)  \* RequestBlocking [R3]
         goOK    == a <= Len(U) /\ window /\ blockOK
     IN CASE Client = "reference"  -> RefAcceptsIds(b, a, n, U)
          [] Client = "gouroboros" -> goOK
