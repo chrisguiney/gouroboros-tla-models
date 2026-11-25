@@ -80,7 +80,7 @@ engine-lifecycle: ## Check Start, Stop and StopForRestart against the engine's g
 	@scripts/run-model.sh specs/engine | grep -E 'EngineLifecycle|engine:'
 
 connection-teardown: ## Check the connection torn down while Dial runs
-	@scripts/run-model.sh specs/connection | grep -E 'ConnectionTeardown|connection:'
+	@scripts/run-model.sh specs/connection | grep -E 'ConnectionTeardown|ConnectionCloseConcurrent|connection:'
 
 CHAINSYNC := cd specs/chainsync && ../../bin/tlc
 

@@ -115,10 +115,13 @@ CONSTANTS
                         \*   (compared by identity).
                         \* "closeEarly": a Close before doneChan exists
                         \*   closes the conn and makes setup give up.
+                        \* "sockClose": shutdown that finds no muxer
+                        \*   (Close between doneChan and the muxer)
+                        \*   closes the conn itself.
 
 ASSUME Fix \subseteq {"fence", "muxerGuard", "join", "closeEarly", "anyMarker",
                       "muxerJoin", "excuseEntries", "muxerStop",
-                      "muxerStopNoMarker"}
+                      "muxerStopNoMarker", "sockClose"}
 ASSUME MetricsStopKinds \subseteq {"own", "plain"}
 ASSUME CloseCtxMayEnd \in BOOLEAN
 ASSUME OwnerLateLoop \in BOOLEAN
@@ -652,19 +655,24 @@ AfterMuxer ==
 \* In English: "If c.muxer is set, muxer.Stop: it closes the muxer's
 \* doneChan, and under muxerStop also waits for the muxer's goroutines,
 \* since shutdown's context carries no marker. Under muxerJoin, shutdown
-\* waits for them itself. Otherwise go straight on."
+\* waits for them itself. Otherwise go straight on; under sockClose,
+\* shutdown that finds no muxer closes the conn itself instead of leaving
+\* it to setup's guard."
 \* Literally: "SdMuxer is defined as: pc of "sd" equals "readMuxer", and
 \*   muxer in the next state equals (if muxer equals "running" then
-\*   "stopped" else muxer), and if "muxerJoin" or "muxerStop" is a member
-\*   of Fix then Goto of "sd" and "muxJoin" and waitBegan is unchanged,
-\*   else AfterMuxer; and the rest is unchanged."
+\*   "stopped" else muxer), and conn in the next state equals (if muxer
+\*   equals "none" and "sockClose" is a member of Fix then "closed" else
+\*   conn), and if "muxerJoin" or "muxerStop" is a member of Fix then
+\*   Goto of "sd" and "muxJoin" and waitBegan is unchanged, else
+\*   AfterMuxer; and the rest is unchanged."
 SdMuxer ==
     /\ pc["sd"] = "readMuxer"
     /\ muxer' = IF muxer = "running" THEN "stopped" ELSE muxer
+    /\ conn' = IF muxer = "none" /\ "sockClose" \in Fix THEN "closed" ELSE conn
     /\ IF "muxerJoin" \in Fix \/ "muxerStop" \in Fix
           THEN Goto("sd", "muxJoin") /\ UNCHANGED waitBegan
           ELSE AfterMuxer
-    /\ UNCHANGED <<doneChan, errorChan, connClosed, conn, wg, lateAdd, wgMu, prot,
+    /\ UNCHANGED <<doneChan, errorChan, connClosed, wg, lateAdd, wgMu, prot,
                    flags, joinv>>
 
 \* In English: "The muxer join: its error channel closes once its cleanup
@@ -955,6 +963,12 @@ NoCallbackAfterClose ==
 CloseTearsDown ==
     pc["user"] \in {"returned", "returnedEarly"} /\ pc["setup"] \in {"returned", "failed"}
         => muxer /= "running" /\ proto /= "running"
+
+\* In English: "After Close returns without an error, the conn is closed,
+\* even when Close came after doneChan existed and before the muxer did."
+\* Literally: "CloseClosesConn is defined as: if pc of "user" equals
+\*   "returned", then conn equals "closed"."
+CloseClosesConn == pc["user"] = "returned" => conn = "closed"
 
 \* In English: "After Close returns without an error, the muxer's
 \* goroutines have exited too, so no Metrics callback runs after it."
