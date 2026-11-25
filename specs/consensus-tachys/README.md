@@ -176,6 +176,11 @@ selector holds its own interval array, built at construction.
 
 ### Follow-up: header validation order
 
-The header validator now runs its checks in the reference order. A failed registered-VRF-key check skips the eligibility check, and the Tachys schedule check is part of eligibility. The Go table test therefore expects the "not the scheduled leader" error only when both the VRF proof and the registered VRF key pass.
+The header validator now runs its checks in the reference order, which is modelled in `consensus-eras` (`HeaderValidation.tla`). A failed registered-VRF-key check skips the eligibility check, and the Tachys schedule check is part of eligibility.
 
-This changes only which error is reported. Which headers are accepted is unchanged, so the model is unaffected: `ValidatorExact` constrains acceptance, not error order. The validation order itself is modelled in `consensus-eras` (`HeaderValidation.tla`).
+The model captures which error is reported, as well as acceptance:
+- `GoReportsUnscheduled` is true when the validator reports "not the scheduled leader": the VRF proof and the registered VRF key both passed, and the issuer is not scheduled.
+- `UnscheduledReportedExact` says exactly that, for every nonce, slot, pool and combination of header checks. It is the expectation the Go table test asserts. It is checked in every passing config, for example 117,376 states in `TachysSchedule.cfg`.
+- `TachysEligibilityOrderBug.cfg` runs eligibility after the VRF proof alone, the order the table test assumed before. It violates `UnscheduledReportedExact`.
+
+Acceptance (`ValidatorExact`) is unchanged.
