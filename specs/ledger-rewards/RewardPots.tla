@@ -35,7 +35,7 @@
 (* small so TLC can check every path. Symbols are read as in              *)
 (* specs/keepalive/KeepAlive.tla.                                          *)
 (***************************************************************************)
-EXTENDS Integers
+EXTENDS Integers, Sequences
 
 CONSTANTS
     PV,         \* the protocol major version of the update (6 or 8)
@@ -45,13 +45,15 @@ CONSTANTS
 
 \* Literally: "Mutations is defined as the set containing "none",
 \*   "PayWholePot", "NoBlocksPaid", "UnregToLeader", "NoReserveReturn",
-\*   "IgnorePledge" and "UnregDropped"."
+\*   "IgnorePledge", "UnregDropped" and "SumOwnerList"."
 \* In English: the behaviours a configuration may switch on. "none" is the
-\* reference. The first four are what CalculateRewards did before it
-\* followed the reference; the last three are invented to prove each
+\* reference. "PayWholePot", "NoBlocksPaid" and "UnregToLeader" are what
+\* CalculateRewards did before it followed the reference; "SumOwnerList" is
+\* what ValidatePoolPledge did; the rest are invented to prove each
 \* invariant can fail.
 Mutations == {"none", "PayWholePot", "NoBlocksPaid", "UnregToLeader",
-              "NoReserveReturn", "IgnorePledge", "UnregDropped"}
+              "NoReserveReturn", "IgnorePledge", "UnregDropped",
+              "SumOwnerList"}
 
 ASSUME Mutation \in Mutations   \* a typo in a cfg is an error, not "none"
 ASSUME PV \in {6, 8}            \* one version on each side of [R5]
@@ -158,6 +160,31 @@ PoolStake == OwnerStake + MemberStake
 \* Literally: "ActiveStake is defined as PoolStake."
 \* In English: the only pool holds all the active stake.
 ActiveStake == PoolStake
+\* Literally: "OwnerLists is defined as the set containing the list "o"
+\*   and the list "o", "o"."
+\* In English: the owners a pool registration may list: the owner once,
+\* or the same owner twice. The reference's owners field is a set
+\* (PoolParams sppOwners, libs/cardano-ledger-core/src/Cardano/Ledger/State/
+\* StakePool.hs), so a repeated owner is one owner.
+OwnerLists == {<<"o">>, <<"o", "o">>}
+
+\* Literally: "OwnerSet of l is defined as the set of l at i, for i in 1 to
+\*   the length of l."
+\* In English: the distinct owners a list names.
+OwnerSet(l) == {l[i] : i \in 1..Len(l)}
+
+\* Literally: "RefOwnerStake of l is defined as: if "o" is a member of
+\*   OwnerSet of l then OwnerStake else 0."
+\* In English: the owners' stake as the reference sums it: once per
+\* distinct owner [R3].
+RefOwnerStake(l) == IF "o" \in OwnerSet(l) THEN OwnerStake ELSE 0
+
+\* Literally: "ListOwnerStake of l is defined as the length of l times
+\*   OwnerStake."
+\* In English: the owners' stake summed once per list entry, as
+\* ValidatePoolPledge did, so a repeated owner counts twice.
+ListOwnerStake(l) == Len(l) * OwnerStake
+
 \* Literally: "Pledges is defined as the set containing 6 and 7."
 \* In English: a pledge the owner's stake meets, and one it does not.
 Pledges == {6, 7}
@@ -306,20 +333,23 @@ Register ==
     /\ utxo' = utxo - Deposit
     /\ UNCHANGED <<reserves, treasury, fees, ownerAcct, memberAcct, ru, epoch>>
 
-\* Literally: "StartUpdate of b and pledge is defined as: ru is not active
+\* Literally: "StartUpdate of b, pledge and owners is defined as: ru is not active
 \*   and epoch is less than MaxEpoch, and in the next state ru is the record
 \*   built below, and the rest is unchanged."
 \* In English: the reward update starts [R1]: the pool made b blocks and
-\* declared the given pledge. The record holds every amount the update
+\* declared the given pledge and owner list. The record holds every amount the update
 \* will move when it is applied, and the inputs the invariants recompute
 \* the reference from.
-StartUpdate(b, pledge) ==
+StartUpdate(b, pledge, owners) ==
     LET circ   == MaxSupply - reserves                \* circulation [R1]
         dR1    == DeltaR1(reserves, b)
         rPot   == fees + dR1
         dT1    == Floor(QMul(Tau, Q(rPot, 1)))
         R      == rPot - dT1
-        met    == pledge <= OwnerStake                 \* pledge check [R3]
+        \* pledge check [R3]: owners' stake summed over the owner set
+        ownStk == IF Mutation = "SumOwnerList" THEN ListOwnerStake(owners)
+                  ELSE RefOwnerStake(owners)
+        met    == pledge <= ownStk
         maxP   == IF met \/ Mutation = "IgnorePledge"
                   THEN MaxPool(R, circ, pledge) ELSE 0
         \* NoBlocksPaid hands a blockless pool the whole pot, as the old
@@ -375,15 +405,16 @@ ApplyUpdate ==
 Finished == epoch = MaxEpoch /\ ~ru.active /\ UNCHANGED vars
 
 \* Literally: "Next is defined as: there exists f in 1..2 such that PayFee
-\*   of f, or Deregister, or Register, or there exist b in 0..2 and a pledge
-\*   in Pledges such that StartUpdate of b and the pledge, or ApplyUpdate,
-\*   or Finished."
+\*   of f, or Deregister, or Register, or there exist b in 0..2, a pledge
+\*   in Pledges and owners in OwnerLists such that StartUpdate of b, the
+\*   pledge and owners, or ApplyUpdate, or Finished."
 \* In English: any of the steps above, in any order.
 Next ==
     \/ \E f \in 1..2 : PayFee(f)
     \/ Deregister
     \/ Register
-    \/ \E b \in 0..2, pledge \in Pledges : StartUpdate(b, pledge)
+    \/ \E b \in 0..2, pledge \in Pledges, owners \in OwnerLists :
+          StartUpdate(b, pledge, owners)
     \/ ApplyUpdate
     \/ Finished
 
