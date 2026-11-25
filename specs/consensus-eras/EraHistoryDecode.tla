@@ -26,6 +26,8 @@
 (*   [G2] #3205 (05b6d9f2, queries.go 871-886): the same, then an empty    *)
 (*        result is refused ("era history must contain at least one era    *)
 (*        summary").                                                       *)
+(*   [G3] fix/localstatequery-era-history-tag aad3e65a: [G2], and a reply  *)
+(*        that starts with a tag is refused before decoding.               *)
 (*                                                                         *)
 (* HOW TO READ THE SYMBOLS: see specs/keepalive/KeepAlive.tla and the      *)
 (* "Reading a formula literally" table in the top-level README.            *)
@@ -33,7 +35,7 @@
 EXTENDS Naturals
 
 CONSTANTS
-    GoRule,   \* "main" [G1] or "fix" [G2]
+    GoRule,   \* "main" [G1], "fix" [G2] or "untagged" [G3]
     Tags,     \* tags that may lead the reply, a subset of {"none", "258", "other"}
     MaxEras   \* the most era summaries in an array, e.g. 2
 
@@ -60,12 +62,15 @@ RefAccepts(i) == i.tag = "none" /\ i.kind = "array" /\ i.eras >= 1
 \* In English: "gOuroboros skips every tag; main takes any array or a
 \*   null or undefined as a history [G1]; the fix refuses an empty one
 \*   [G2], and a null or undefined decodes to empty."
+\* aad3e65a also refuses any tag in front [G3].
 \* Literally: "GoAccepts of i is defined as: if GoRule equals "main" then
 \*   TRUE, else the kind of i equals "array" and the eras of i is at
-\*   least 1."
+\*   least 1, and, if GoRule equals "untagged", the tag of i equals
+\*   "none"."
 GoAccepts(i) ==
     IF GoRule = "main" THEN TRUE
-    ELSE i.kind = "array" /\ i.eras >= 1
+    ELSE /\ i.kind = "array" /\ i.eras >= 1
+         /\ (GoRule = "untagged" => i.tag = "none")
 
 \* In English: "Pick any one input; nothing changes after that."
 \* Literally: "Init is defined as: input is a member of Inputs."

@@ -1555,11 +1555,11 @@ Fixed by an open pull request (decide by reviewing and merging it):
 
 Found by the model in a published fix (route each to its pull request; the fix passes its own cells):
 
-- **L25** (#3282): ledger rationals are `UnitInterval`/`NonNegativeInterval`, which require tag 30; the fix still accepts an untagged ratio (`cbor-codec` `CborRationalBoundedFixBug.cfg`).
-- **L28** (#3279): the coin of a Mary `[coin, multiasset]` pair still accepts a bignum (`cbor-codec` `MultiAssetQuantityCoinInPairFixBug.cfg`).
-- **L30** (#3289): a tag other than 258 on a pre-Conway witness-set field still decodes (`ledger-codec` `PreConwaySetTagOtherTagBug.cfg`).
-- **L31** (#3290): Go arrays, empty `IndefLengthList`, byte strings over 64 bytes and nested lists are not encoded as plutus `encodeData` does (`cbor-codec` `ConstructorEncoding*FixBug.cfg`).
-- **#3205** (merged): a tagged one-era era-history reply still decodes; the reference refuses it (`consensus-eras` `EraHistoryDecodeTaggedFixBug.cfg`).
-- **L14** (#3278): the reference's `Word32` wraparound of the next minor from `maxBound` (`ledger-codec` `ProtVerWidthWrapBug.cfg`); reachable only from a minor already at `maxBound`.
+- **L25** (#3282): ledger rationals are `UnitInterval`/`NonNegativeInterval`, which require tag 30; the fix still accepts an untagged ratio (`cbor-codec` `CborRationalBoundedFixBug.cfg`). Fixed on the branch at `aafec34d`: `cbor.Rat` requires one tag 30; query-result plain rationals stay lenient (`CborRational.cfg`, `CborRationalPlain.cfg`).
+- **L28** (#3279): the coin of a Mary `[coin, multiasset]` pair still accepts a bignum (`cbor-codec` `MultiAssetQuantityCoinInPairFixBug.cfg`). Fixed at `15156a03` (`MultiAssetQuantity.cfg`).
+- **L30** (#3289): a tag other than 258 on a pre-Conway witness-set field still decodes (`ledger-codec` `PreConwaySetTagOtherTagBug.cfg`). Fixed at `37968c05`; `e82a8a6c` also refuses Conway pool owners under a tag other than a single 258 (`PreConwaySetTag.cfg`).
+- **L31** (#3290): Go arrays, empty `IndefLengthList`, byte strings over 64 bytes and nested lists are not encoded as plutus `encodeData` does (`cbor-codec` `ConstructorEncoding*FixBug.cfg`). Fixed at `3d91ad2f`, which also chunks bignum magnitudes over 64 bytes (`ConstructorEncoding.cfg`); maps inside fields are still encoded as given.
+- **#3205** (merged): a tagged one-era era-history reply still decodes; the reference refuses it (`consensus-eras` `EraHistoryDecodeTaggedFixBug.cfg`). Fixed by PR #3336 (`aad3e65a`, issue #3335; `EraHistoryDecode.cfg`).
+- **L14** (#3278): the reference's `Word32` wraparound of the next minor from `maxBound` (`ledger-codec` `ProtVerWidthWrapBug.cfg`); reachable only from a minor already at `maxBound`. Fixed at `5efc10c0` in the classic and hard-fork follow rules (`ProtVerWidth.cfg`).
 
 Also needing a decision, though it conforms: **N37**, because PR #3130 follows dmq-node and so departs from the CIP-0137 text. **L4** is decided by PR #3193: BadInputs checks the reference's set and runs first.

@@ -33,6 +33,12 @@
 (*        c2820102 refused.                                                *)
 (*   [G2] fix/cbor-rat-single-tag fe4f8206 (PR #3282): at most one tag,    *)
 (*        and it must be 30; no tag is also accepted, at every version.    *)
+(*   [G3] fix/cbor-rat-single-tag aafec34d: exactly one tag 30, at every   *)
+(*        version; the untagged 820102 is refused. Every ledger field.     *)
+(*   [G4] aafec34d protocol/localstatequery plainRational: no tag or one   *)
+(*        tag 30, for the plain Rationals of query results (stake          *)
+(*        fractions, reward provenance d and eta), which the reference     *)
+(*        writes untagged before version 9 (encodeRatio).                  *)
 (*                                                                         *)
 (* Every gOuroboros cbor.Rat ledger field (a0, rho, tau, d, execution      *)
 (* prices, pool margin, committee quorum, voting thresholds) is a          *)
@@ -48,7 +54,7 @@ CONSTANTS
     Versions,   \* protocol versions to check, e.g. {9, 12}
     Tags,       \* tag numbers that may appear, e.g. {30, 31, 2, 258}
     MaxTags,    \* the most tags written before the array, e.g. 2
-    GoRule,     \* "main" [G1] or "fix" [G2]
+    GoRule,     \* "main" [G1], "fix" [G2], "bounded" [G3] or "plain" [G4]
     RefRule     \* "Rational" [R1] or "Bounded" [R3]
 
 VARIABLE input  \* the one input this behaviour decodes: [pv, tags]
@@ -97,10 +103,21 @@ GoMain(i) == \A k \in DOMAIN i.tags : i.tags[k] \notin {2, 3}
 \* Literally: "GoFix of i is defined as NoneOrOne30 of the tags of i."
 GoFix(i) == NoneOrOne30(i.tags)
 
-\* In English: "The gOuroboros verdict, by the rule this config names."
-\* Literally: "GoAccepts of i is defined as: if GoRule equals "main" then
-\*   GoMain of i, else GoFix of i."
-GoAccepts(i) == IF GoRule = "main" THEN GoMain(i) ELSE GoFix(i)
+\* In English: "cbor.Rat from aafec34d accepts exactly one tag 30, at any
+\*   version." [G3]
+\* Literally: "GoBounded of i is defined as: the tags of i equal the
+\*   sequence holding only 30."
+GoBounded(i) == i.tags = <<30>>
+
+\* In English: "The gOuroboros verdict, by the rule this config names; the
+\*   query results' plain rationals [G4] take no tag or one tag 30, as the
+\*   fix [G2] did."
+\* Literally: "GoAccepts of i is defined as: case GoRule equals "main"
+\*   gives GoMain of i, GoRule equals "bounded" gives GoBounded of i,
+\*   otherwise GoFix of i."
+GoAccepts(i) == CASE GoRule = "main"    -> GoMain(i)
+                  [] GoRule = "bounded" -> GoBounded(i)
+                  [] OTHER              -> GoFix(i)
 
 \* In English: "Pick any one input; nothing changes after that."
 \* Literally: "Init is defined as: input is a member of Inputs."
