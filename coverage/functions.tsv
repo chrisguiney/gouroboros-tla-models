@@ -73,7 +73,7 @@ cbor	ViewWithin	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
 .	Connection.Close	modelled	Connection setup/close/dial
 connection	ConnectionId.String	gap	ConnectionId printing
 .	Connection.DialTimeout	modelled	Connection setup/close/dial
-consensus	BlockBuilder.BuildHeader	gap	Praos header construction
+consensus	BlockBuilder.BuildHeader	vectors	Praos header construction
 consensus	BlockBuilder.CheckSlotLeadership	vectors	Praos leader election (E34 schedules)
 consensus/byron	ByronConfig.EpochFirstSlot	modelled	Byron slot/epoch arithmetic
 consensus/byron	ByronConfig.IsEpochBoundarySlot	modelled	Byron slot/epoch arithmetic
@@ -1457,52 +1457,52 @@ protocol/localmessagesubmission	NewClient	modelled	LocalMessageSubmission submit
 protocol/localmessagesubmission	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
 protocol/localmessagesubmission	NewMsgFromCbor	gap	LocalMessageSubmission codecs
 protocol/localmessagesubmission	NewMsgRejectMessage	gap	LocalMessageSubmission codecs
-protocol/localstatequery	BlockQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	BlockQuery.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
 protocol/localstatequery	Client.Acquire	modelled	LSQ client acquire/release and server
 protocol/localstatequery	Client.DebugChainDepState	vectors	LSQ debug chain-dep state
-protocol/localstatequery	Client.DebugEpochState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.DebugNewEpochState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetAccountState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetChainBlockNo	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetChainPoint	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.DebugEpochState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.DebugNewEpochState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetAccountState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetChainBlockNo	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetChainPoint	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetCommitteeMembersState	vectors	LSQ committee members state
-protocol/localstatequery	Client.GetConstitution	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetCurrentProtocolParams	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetDRepDelegations	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetDRepStakeDistr	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetDRepState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetEpochNo	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetEraHistory	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetFilteredDelegationsAndRewardAccounts	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetFilteredVoteDelegatees	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetGenesisConfig	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetGovState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetLedgerPeerSnapshot	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetConstitution	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetCurrentProtocolParams	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetDRepDelegations	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetDRepStakeDistr	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetDRepState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetEpochNo	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetEraHistory	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetFilteredDelegationsAndRewardAccounts	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetFilteredVoteDelegatees	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetGenesisConfig	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetGovState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetLedgerPeerSnapshot	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetLeiosCommittee	vectors	LSQ Leios committee
-protocol/localstatequery	Client.GetMaxMajorProtocolVersion	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetMaxMajorProtocolVersion	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetNonMyopicMemberRewards	vectors	LSQ non-myopic member rewards
 protocol/localstatequery	Client.GetOpCertCounters	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetPoolDistr2	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetPoolDistr2	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetPoolDistr	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetPoolState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetProposals	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetPoolState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetProposals	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetProposedProtocolParamsUpdates	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetRatifyState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetRewardInfoPools	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetRewardProvenance	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetSPOStakeDistr	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetStakeDelegDeposits	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetStakeDistribution2	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetRatifyState	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetRewardInfoPools	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetRewardProvenance	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetSPOStakeDistr	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetStakeDelegDeposits	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetStakeDistribution2	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetStakeDistribution	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetStakePoolDefaultVote	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetStakePoolParams	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetStakePools	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakePoolDefaultVote	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetStakePoolParams	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetStakePools	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Client.GetStakePoolState	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetStakeSnapshots	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetSystemStart	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetUTxOByAddress	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetUTxOByTxIn	gap	LSQ client query wrappers (version/era gating, result unwrap)
-protocol/localstatequery	Client.GetUTxOWhole	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakeSnapshots	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetSystemStart	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetUTxOByAddress	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetUTxOByTxIn	vectors	LSQ client query encodings (per era, node-to-client v23)
+protocol/localstatequery	Client.GetUTxOWhole	vectors	LSQ client query encodings (per era, node-to-client v23)
 protocol/localstatequery	Committee.MarshalCBOR	gap	LSQ governance state codecs
 protocol/localstatequery	CommitteeMembersStateResult.MarshalCBOR	vectors	LSQ committee members state
 protocol/localstatequery	CommitteeMembersStateResult.UnmarshalCBOR	vectors	LSQ committee members state
@@ -1533,13 +1533,13 @@ protocol/localstatequery	GovStateResult.DecodeDRepPulsingState	gap	LSQ governanc
 protocol/localstatequery	GovStateResult.DecodeFuturePParams	gap	LSQ governance state codecs
 protocol/localstatequery	GovStateResult.MarshalCBOR	gap	LSQ governance state codecs
 protocol/localstatequery	GovStateResult.UnmarshalCBOR	gap	LSQ governance state codecs
-protocol/localstatequery	HardForkQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	HardForkQuery.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
 protocol/localstatequery	HotCredAuthStatusValue.MarshalCBOR	vectors	LSQ committee members state
 protocol/localstatequery	HotCredAuthStatusValue.UnmarshalCBOR	vectors	LSQ committee members state
 protocol/localstatequery	IndividualPoolStake.MarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	IndividualPoolStake.UnmarshalCBOR	gap	LSQ other result codecs
-protocol/localstatequery	LedgerPeerSnapshotResult.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	LedgerPeerSnapshotResult.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	LedgerPeerSnapshotResult.MarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	LedgerPeerSnapshotResult.UnmarshalCBOR	vectors	LSQ ledger peer snapshot codecs
 protocol/localstatequery	LeiosCommitteeResult.MarshalCBOR	vectors	LSQ Leios committee
 protocol/localstatequery	LeiosCommitteeResult.UnmarshalCBOR	vectors	LSQ Leios committee
 protocol/localstatequery	NewClient	modelled	LSQ client acquire/release and server
@@ -1553,31 +1553,31 @@ protocol/localstatequery	NonMyopicMemberRewardsKey.MarshalCBOR	vectors	LSQ non-m
 protocol/localstatequery	NonMyopicMemberRewardsKey.UnmarshalCBOR	vectors	LSQ non-myopic member rewards
 protocol/localstatequery	NonMyopicMemberRewardsResult.MarshalCBOR	vectors	LSQ non-myopic member rewards
 protocol/localstatequery	NonMyopicMemberRewardsResult.UnmarshalCBOR	vectors	LSQ non-myopic member rewards
-protocol/localstatequery	PoolLedgerPeersDetail.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	PoolLedgerPeersDetail.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	PoolLedgerPeers.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	PoolLedgerPeers.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeersDetail.MarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeersDetail.UnmarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeers.MarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeers.UnmarshalCBOR	vectors	LSQ ledger peer snapshot codecs
 protocol/localstatequery	PoolStateParams.MarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	PoolStateParams.UnmarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	PoolStateResult.UnmarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	PrevGovActionIds.MarshalCBOR	gap	LSQ governance state codecs
 protocol/localstatequery	PrevGovActionIds.UnmarshalCBOR	gap	LSQ governance state codecs
 protocol/localstatequery	ProposalsResult.UnmarshalCBOR	gap	LSQ governance state codecs
-protocol/localstatequery	QueryWrapper.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	QueryWrapper.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
 protocol/localstatequery	RatifyStateResult.UnmarshalCBOR	gap	LSQ governance state codecs
-protocol/localstatequery	RelayAccessPoint.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	RelayAccessPoint.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	RelayAccessPoint.MarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	RelayAccessPoint.UnmarshalCBOR	vectors	LSQ ledger peer snapshot codecs
 protocol/localstatequery	RewardInfoPoolsResult.UnmarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	RewardProvenanceResult.UnmarshalCBOR	gap	LSQ other result codecs
-protocol/localstatequery	ShelleyCborQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
-protocol/localstatequery	ShelleyGetLedgerPeerSnapshotQuery.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	ShelleyGetLedgerPeerSnapshotQuery.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	ShelleyCborQuery.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
+protocol/localstatequery	ShelleyGetLedgerPeerSnapshotQuery.MarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	ShelleyGetLedgerPeerSnapshotQuery.UnmarshalCBOR	vectors	LSQ ledger peer snapshot codecs
 protocol/localstatequery	ShelleyNonMyopicMemberRewardsQuery.UnmarshalCBOR	vectors	LSQ non-myopic member rewards
-protocol/localstatequery	ShelleyPoolDistr2Query.PoolFilter	gap	LSQ query envelope decoders
-protocol/localstatequery	ShelleyPoolDistr2Query.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyPoolDistr2Query.PoolFilter	vectors	LSQ query envelope decoders (reference goldens)
+protocol/localstatequery	ShelleyPoolDistr2Query.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
 protocol/localstatequery	ShelleyPoolDistrQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
-protocol/localstatequery	ShelleyPoolStateQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
-protocol/localstatequery	ShelleyQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyPoolStateQuery.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
+protocol/localstatequery	ShelleyQuery.UnmarshalCBOR	vectors	LSQ query envelope decoders (reference goldens)
 protocol/localstatequery	ShelleyStakePoolStateQuery.MarshalCBOR	gap	LSQ query envelope decoders
 protocol/localstatequery	ShelleyStakePoolStateQuery.PoolFilter	gap	LSQ query envelope decoders
 protocol/localstatequery	ShelleyStakePoolStateQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
@@ -1597,8 +1597,8 @@ protocol/localstatequery	UTxOByTxInResult.UnmarshalCBOR	gap	LSQ other result cod
 protocol/localstatequery	UtxoId.MarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	UtxoId.UnmarshalCBOR	gap	LSQ other result codecs
 protocol/localstatequery	UTxOsResult.UnmarshalCBOR	gap	LSQ other result codecs
-protocol/localstatequery	WithOriginSlot.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
-protocol/localstatequery	WithOriginSlot.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	WithOriginSlot.MarshalCBOR	vectors	LSQ ledger peer snapshot codecs
+protocol/localstatequery	WithOriginSlot.UnmarshalCBOR	vectors	LSQ ledger peer snapshot codecs
 protocol/localtxmonitor	Client.GetSizes	modelled	LocalTxMonitor client/server
 protocol/localtxmonitor	Client.HasTxForEra	modelled	LocalTxMonitor client/server
 protocol/localtxmonitor	Client.NextTx	modelled	LocalTxMonitor client/server
