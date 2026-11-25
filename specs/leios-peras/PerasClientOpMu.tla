@@ -44,7 +44,13 @@ CONSTANTS
     DoneCaller,     \* TRUE: another goroutine calls Done(ctx) with a context that ends
     ServerAnswers,  \* FALSE: the server never answers Sync's request (the Go test gates it)
     Await,          \* TRUE: model the server's await goroutine and Stop
-    AwaitOutcomes   \* what AwaitObjectIDsFunc may do: a subset of {"return", "panic", "hang"}
+    AwaitOutcomes,  \* what AwaitObjectIDsFunc may do: a subset of {"return", "panic", "hang"}
+    KeptCall,       \* TRUE: after Sync has ended, another goroutine calls the
+                    \*   client with a context VoteFunc kept from its
+                    \*   CallbackContext
+    ScopedMarker    \* TRUE: the VoteFunc marker refuses a call only while that
+                    \*   VoteFunc call runs; FALSE: for as long as the context
+                    \*   lives
 
 VARIABLES
     holder,         \* who holds the exchange lock: "none", "sync" or "other"
@@ -57,20 +63,22 @@ VARIABLES
     crashed,        \* a panic escaped a goroutine: the process died
     reported,       \* a recovered panic reached the protocol's error channel
     stopper,        \* Stop(ctx) on the server: "idle", "joining", "returned"
-    stopResult      \* what Stop returned: "none", "nil", "ctxErr"
+    stopResult,     \* what Stop returned: "none", "nil", "ctxErr"
+    kept            \* the call with a kept VoteFunc context: "idle", "call",
+                    \*   "wait", "refused" (ErrCalledFromVoteFunc), "returned"
 
 \* In English: "all the variables."
-\* Literally: "vars is defined as the tuple of all eleven variables."
+\* Literally: "vars is defined as the tuple of all twelve variables."
 vars == <<holder, sync, re, reCancelled, other, otherCancelled, await, crashed,
-          reported, stopper, stopResult>>
+          reported, stopper, stopResult, kept>>
 
 \* In English: "Sync is about to take the lock; nobody else has started;
 \* the await goroutine runs if it is modelled."
 \* Literally: "Init is defined as: holder equals "none", sync equals "lock",
 \*   re equals "idle", reCancelled is false, other equals "idle",
 \*   otherCancelled is false, await equals "running" if Await else "none",
-\*   crashed and reported are false, stopper equals "idle", and stopResult
-\*   equals "none"."
+\*   crashed and reported are false, stopper equals "idle", stopResult
+\*   equals "none", and kept equals "idle"."
 Init ==
     /\ holder = "none"
     /\ sync = "lock"
@@ -83,6 +91,7 @@ Init ==
     /\ reported = FALSE
     /\ stopper = "idle"
     /\ stopResult = "none"
+    /\ kept = "idle"
 
 \* In English: "the client's variables" and "the server's variables".
 \* Literally: "clientVars is defined as the tuple of holder, sync, re,
@@ -288,15 +297,50 @@ AwaitStopped ==
     /\ UNCHANGED clientVars /\ UNCHANGED <<crashed, reported, stopper, stopResult>>
 
 -----------------------------------------------------------------------------
+(* A call made after Sync ended with a context VoteFunc kept. *)
+
+\* In English: "Once Sync has ended, VoteFunc having run, another goroutine
+\* calls the client with the context VoteFunc kept."
+\* Literally: "KeptStart is defined as: KeptCall, kept equals "idle", sync
+\*   equals "done", and kept becomes "call"."
+KeptStart ==
+    /\ KeptCall /\ kept = "idle" /\ sync = "done"
+    /\ kept' = "call"
+    /\ UNCHANGED clientVars /\ UNCHANGED serverVars
+
+\* In English: "lockOp's marker check: with the fix, the marker refuses the
+\* call, unless ScopedMarker limits it to the VoteFunc call that made it,
+\* which has returned."
+\* Literally: "KeptCheck is defined as: kept equals "call", and kept
+\*   becomes "refused" if Fixed and ScopedMarker is false, else "wait"."
+KeptCheck ==
+    /\ kept = "call"
+    /\ kept' = IF Fixed /\ ~ScopedMarker THEN "refused" ELSE "wait"
+    /\ UNCHANGED clientVars /\ UNCHANGED serverVars
+
+\* In English: "The call takes the free lock, runs its exchange and
+\* returns."
+\* Literally: "KeptLock is defined as: kept equals "wait", holder equals
+\*   "none", and kept becomes "returned"."
+KeptLock ==
+    /\ kept = "wait" /\ holder = "none"
+    /\ kept' = "returned"
+    /\ UNCHANGED clientVars /\ UNCHANGED serverVars
+
+-----------------------------------------------------------------------------
 
 \* In English: "any step of any goroutine, or of a context ending."
-\* Literally: "Progress is defined as the disjunction of every step above."
+\* Literally: "Progress is defined as: (the disjunction of every step
+\*   above but the kept call's, with kept unchanged), or KeptStart, or
+\*   KeptCheck, or KeptLock."
 Progress ==
-    \/ SyncLock \/ SyncCallback \/ ReCall \/ ReCheck \/ ReLock \/ ReCancel
-    \/ ReGiveUp \/ SyncEnd
-    \/ OtherCall \/ OtherLock \/ OtherUnlock \/ OtherCancel \/ OtherGiveUp
-    \/ AwaitReturn \/ AwaitPanic \/ AwaitUnwind \/ AwaitStopped
-    \/ StopCall \/ StopJoined \/ StopCtxEnds
+    \/ /\ \/ SyncLock \/ SyncCallback \/ ReCall \/ ReCheck \/ ReLock \/ ReCancel
+          \/ ReGiveUp \/ SyncEnd
+          \/ OtherCall \/ OtherLock \/ OtherUnlock \/ OtherCancel \/ OtherGiveUp
+          \/ AwaitReturn \/ AwaitPanic \/ AwaitUnwind \/ AwaitStopped
+          \/ StopCall \/ StopJoined \/ StopCtxEnds
+       /\ UNCHANGED kept
+    \/ KeptStart \/ KeptCheck \/ KeptLock
 
 \* In English: "Once nothing can move, nothing changes. Whether that is a
 \* proper ending is what the invariants judge."
@@ -365,4 +409,9 @@ StopJoinsAwait == stopResult = "nil" => await \in {"none", "ended"}
 LockSound ==
     /\ holder \in {"none", "sync", "other"}
     /\ (sync \in {"exchange", "callback"}) => holder = "sync"
+
+\* In English: "A call made after Sync ended is never refused as a call from
+\* VoteFunc, whatever context it carries."
+\* Literally: "KeptCallNotRefused is defined as: kept is not "refused"."
+KeptCallNotRefused == kept # "refused"
 =============================================================================
