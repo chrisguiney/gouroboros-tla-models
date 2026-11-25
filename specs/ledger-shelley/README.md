@@ -50,7 +50,8 @@ the contract gOuroboros places on its caller, not gOuroboros code.
 Two stake credentials (`c1` holds the pool's reward account), one pool, a
 key deposit of 1, a pool deposit of 2, `eMax` of 2, a fee of 1 per
 transaction. Steps: a transaction carrying one certificate
-(RegKey, DeregKey, Deleg, RegPool, RetirePool with any epoch), a full
+(RegKey, DeregKey, Deleg, RegPool, RetirePool with any epoch) or a Conway
+vote by the pool (PoolVote; the voter must be in `psStakePools`, [R11]), a full
 withdrawal, a reward of one lovelace from the reserves (a stand-in for the
 reward update), a new block within the epoch, and the epoch boundary
 (fees to reserves, then POOLREAP).
@@ -96,6 +97,9 @@ retirement has taken effect:
 | `CertLifecycleStaleHonestBug.cfg` | StaleHonest, gOuroboros today | **`GoAgrees` fails** | 1,725 |
 | `CertLifecycleStaleHonestFixed.cfg` | StaleHonest, with the fix | all hold | 323,461 |
 | `CertLifecycleStaleMockBug.cfg` | StaleMock, with the fix | **`GoAgrees` fails** | 343 |
+| `CertLifecycleEpochAware.cfg` | StaleMock, PR #3129 (`EpochAware`) | all hold | 614,652 (depth 40) |
+| `CertLifecycleEpochAwareHonest.cfg` | StaleHonest, PR #3129 | all hold | 614,652 |
+| `CertLifecycleVoterHidesEpochBug.cfg` | Reaped, PR #3129 at `24916e07` (`VoterSeesEpoch = FALSE`) | **`GoAgrees` fails** | 3 steps |
 
 Questions 1-4 hold: the ledger rules as modelled preserve value and keep
 the deposit pot equal to the obligation, through registration,
@@ -132,6 +136,32 @@ retirements). The point is that gOuroboros has two notions of "registered":
 trust `IsPoolRegistered`. `PoolState`'s doc comment should say which is
 authoritative, or one epoch-aware predicate should serve all three checks.
 
+**One epoch-aware predicate (PR #3129, `EpochAware`).** The PR makes
+`PoolRegistered` (a registration from `PoolCurrentState`, and no retirement
+or one whose epoch is still ahead) decide DELEG, POOL, the Conway voter
+check and `BlockLedgerState`'s new-or-re-registration choice. With it the
+stalest view (`StaleMock`) agrees with the ledger in every state
+(`CertLifecycleEpochAware`), so the PR closes the contract gap as well as
+the defect.
+
+**Review finding: the voter check could not see the epoch
+(`VoterHidesEpochBug`).** Deciding a pool with a pending retirement needs
+the epoch. The Dijkstra voter check reads a committee view that did not
+pass the wrapped state's `EpochState` through, so `PoolRegistered` failed
+and a vote by a registered pool with a pending retirement was refused,
+which the reference accepts ([R11]: membership of `psStakePools`, which a
+pending retirement does not change). Counterexample: register the pool,
+schedule its retirement for epoch 1, vote in epoch 0. The model had shared
+the gap: it had no voter check and no switch for the epoch-aware predicate,
+so it could not have caught it. `PoolVote`, `EpochAware` and
+`VoterSeesEpoch` now cover it, and `RetiringPoolNeverVotesBug` shows the
+passing configs reach a vote by a retiring pool. Fixed at `97dc89b2`: a
+view that answers committee lookups itself (and so must not be unwrapped)
+names its parent through `LedgerStateCapabilityParent`, which first-provider
+lookups such as `EpochStateFor` follow. The same audit found the Dijkstra
+reward-account view hiding DRep delegations from a pre-PV12 withdrawal; it
+now unwraps. That view is outside this model (withdrawals carry no pool).
+
 ### Checking the checks
 
 Each invariant is shown able to fail by a deliberate mistake (all configs
@@ -150,7 +180,8 @@ passing runs do reach them: a reaped pool's deposit going to the treasury
 (`UnclaimedNeverHappensBug`, 855 states), POOLREAP clearing a delegation
 (`DelegationNeverClearedBug`, 1,405), a re-registration cancelling a
 retirement (`ReRegNeverCancelsBug`, 792), and a reaped pool being
-registered again (`ReapedPoolNeverRegisteredBug`, 1,682).
+registered again (`ReapedPoolNeverRegisteredBug`, 1,682), and a vote by a
+pool with a pending retirement (`RetiringPoolNeverVotesBug`).
 
 ## Part 2: stake snapshots (`StakeSnapshots.tla`)
 
@@ -241,7 +272,8 @@ passes after it.
 | Deregistration refund | `keyDeposit` per certificate [S5] | the deposit recorded at registration; `keyDeposit` if registered earlier in the tx [R4] | recorded deposit, else `keyDeposit` | agree with reference |
 | Re-registration of a registered pool | no deposit, future params, cancels retirement [S3] | same [R2] | same | agree |
 | Registration of a pool whose retirement took effect | new pool, deposit due | new pool (not in `psStakePools`) | deposit due; but `BlockLedgerState` kept it as a re-registration when the caller's view is stale | **defect, fixed on branch** |
-| Delegation to / retirement of a reaped pool | rejected | rejected | trusts the caller's `IsPoolRegistered` | **contract gap** |
+| Delegation to / retirement of a reaped pool | rejected | rejected | main: trusts the caller's `IsPoolRegistered`; PR #3129: epoch-aware `PoolRegistered` | **contract gap**, closed by the PR |
+| Vote by a pool with a pending retirement | accepted (in `psStakePools`) | accepted [R11] | PR #3129 `24916e07`: refused in Dijkstra (view hid the epoch); `97dc89b2`: accepted | **defect in PR, fixed** |
 | Order of SNAP and POOLREAP | SNAP then POOLREAP | SNAP then POOLREAP [R6] | not implemented (caller) | n/a |
 | Leader snapshot | set | set [R9] | caller callback, contract says active snapshot | agree on contract |
 | Reward snapshot | go | go, with previous epoch's blocks [R10] | caller supplies `RewardSnapshot` | n/a |
@@ -270,12 +302,17 @@ All IntersectMBO/cardano-ledger commit
 | R8 | `.../Shelley/Rules/PoolReap.hs` | 137-155 | future pool parameters become current |
 | R9 | `libs/cardano-ledger-core/src/Cardano/Ledger/State/SnapShots.hs` | 469-473, 543-555 | set drives leader election; rotation |
 | R10 | `.../Shelley/LedgerState/PulsingReward.hs` 99-100; `.../Shelley/Rules/Tick.hs` 272-276 | | reward update reads go and bprev |
+| R11 | `eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Gov.hs` | 473, 596-604 | a stake-pool voter must be in `psStakePools`, else `VotersDoNotExist` |
 
 gOuroboros commit `61046085`: G1 `ledger/shelley/rules.go` 757-864; G2
 same 1644-1692; G3 same 341-450 and `ledger/common/pool_deposit.go` 40-66;
 G4 `ledger/common/block_state.go` 520-592, 702-753; G5
 `ledger/common/state.go` 103-125; G6 `ledger/common/verify_config.go`
-159-171, `ledger/verify_block.go` 1765-1830.
+159-171, `ledger/verify_block.go` 1765-1830. G7 (PR #3129, `97dc89b2`):
+`ledger/common/pool_deposit.go` `PoolRegistered`, `ledger/common/rules.go`
+`LedgerStateCapabilityParent`, `ledger/conway/rules.go`
+`UtxoValidateUnknownVoters`, `ledger/dijkstra/rules.go`
+`dijkstraCommitteeCredentialView`.
 
 ## What the conformance vectors already cover
 
