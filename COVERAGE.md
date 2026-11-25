@@ -25,10 +25,10 @@ It was done by static reading. No Go test and no TLC run was made for the audit,
 
 | Class | Items | Functions | README notes |
 | --- | ---: | ---: | ---: |
-| modelled | 84 | 412 | 29 |
-| vectors | 74 | 540 | 14 |
-| caller contract | 8 | 38 | 29 |
-| gap | 133 | 705 | 108 |
+| modelled | 85 | 425 | 30 |
+| vectors | 74 | 604 | 14 |
+| caller contract | 8 | 39 | 29 |
+| gap | 132 | 627 | 107 |
 | **total** | **299** | **1695** | **180** |
 
 Items are counted per package, so an item that spans two packages counts twice.
@@ -49,7 +49,7 @@ Items are counted per package, so an item that spans two packages counts twice.
 | `ledger/alonzo` | 26 | 23 | 0 | 23 |
 | `ledger/babbage` | 32 | 22 | 0 | 18 |
 | `ledger/byron` | 7 | 61 | 0 | 5 |
-| `ledger/common` | 83 | 156 | 1 | 162 |
+| `ledger/common` | 96 | 174 | 1 | 131 |
 | `ledger/common/script` | 17 | 2 | 0 | 17 |
 | `ledger/conway` | 18 | 67 | 1 | 41 |
 | `ledger/dijkstra` | 36 | 44 | 0 | 59 |
@@ -102,7 +102,7 @@ These shape how far the "vectors" and "modelled" verdicts reach.
    - Byron `maxTxSize` is not checked (DRIFT L6).
    - `DijkstraLeiosCertificate.Validate` requires exactly Nc seats (DRIFT L9).
 8. **Stale "Not modelled" notes.** `specs/consensus/README.md` still lists Tachys and the Byron delegation map as not modelled; `consensus-tachys` and `ledger-byron/ByronDelegation.tla` now model them. The `pipeline-cbor` note on the retained-CBOR byte budget predates `PipelineLifecycle.tla` `BudgetMatchesActive`.
-9. **`ValidateHeader` is modelled; the production path is not.** Dingo validates headers through `ledger.VerifyBlock` (DRIFT C15). The `consensus-eras` check-order model covers `consensus.ValidateHeader`, so the modelled order and overlay handling are not those of the path in production.
+9. **`ValidateHeader` is modelled; the production path is not.** Dingo validates headers through `ledger.VerifyBlock` (DRIFT C15). The `consensus-eras` check-order model covers `consensus.ValidateHeader`, so the modelled order and overlay handling are not those of the path in production. `specs/ledger-block-overlay` `VerifyBlockIssuer.tla` now models VerifyBlock's verdict and caller contract: it lacked the overlay schedule (DRIFT L20, fixed on a local branch); Dingo passes `SkipStakePoolValidation` and checks the overlay itself.
 
 
 ### Closed since the audit
@@ -116,6 +116,7 @@ These shape how far the "vectors" and "modelled" verdicts reach.
 | Reward update arithmetic: reserve expansion, treasury cut, pool reward (`maxPool'`, apparent performance, pledge), leader and member split, registration prefilter, unregistered rewards and deltaR2 | 3 | modelled | `specs/ledger-rewards/RewardPots.tla` (`ValuePreserved`, `UpdateBalanced`, `SplitMatchesReference`, `NoBlocksNoReward`, `PledgeUnmetNoReward`, `PoolRewardWithinMax`); `ledger/common/rewards_reference_test.go` on `fix/ledger-rewards-reference` (`TestCalculateAdaPotsReferenceTable`, `TestCalculateRewardsReferenceTable`, exact values from a transcription of the reference; `TestRewardUpdateCells`, 24 cells). Defect: DRIFT L17 |
 | Conway GOV rules reached by vectors without the harness validator: well-formedness (and `UpdateCommitteeGovAction.Validate` through it), guardrails script hash, hard-fork follow, return accounts, unknown voters, CC voting restrictions | 7 | vectors | `internal/test/conformance/rules_only_conformance_test.go` on `test/conway-gov-reference`: every Blueprint vector through the full Conway rule list less fee and size; disabling any of these rules fails a vector (UnknownGovActionIds and VotingOnExpiredGovAction, already modelled or caller-owned, fail one together) |
 | `ValidatePoolPledge` (owners as a set) | 1 | modelled | `specs/ledger-rewards` `PledgeUnmetNoReward` with `RewardPotsOwnerListBug.cfg`; `TestValidatePoolPledgeCountsEachOwnerOnce` on `fix/ledger-rewards-reference`. Defect: DRIFT L18 |
+| BlockLedgerState Conway overlay: DRep registrations and delegations, proposals, committee hot keys within a block; VerifyBlock's issuer verdict and caller contract | 9 | modelled | `specs/ledger-block-overlay`; `TestBlockLedgerStateGovernanceSequences` on `test/ledger-block-overlay-model` (6,073 blocks); defects DRIFT L19 (`fix/ledger-block-state-proposed-committee`) and L20 (`fix/ledger-verify-block-tpraos-overlay`, `TestVerifyBlockStateTPraosOverlay`) |
 | `ValidateCommitteeTerm` | 1 | caller contract | godoc: a ratification predicate (Ratify.hs `validCommitteeTerm`), never a transaction rule; no in-repo caller |
 
 Not closed for rewards: `CalculatePoolSaturation` (a percentage of active stake with no reference counterpart; the reference caps at z0 = 1/nOpt inside `maxPool'`), `CalculateOptimalPoolCount` (returns k), `RewardService.ValidateRewardDistribution` (a map comparison). `RewardService` has no caller in gOuroboros (outside its own tests), Dingo, ouroboros-mock or any other workspace repository, and `CalculateEpochRewards` uses hard-coded parameters; recommended for deprecation rather than repair. Shelley's one-reward-per-credential filter and cross-pool aggregation are the caller's.
@@ -393,7 +394,7 @@ gOuroboros 1559924b (origin/main). Static reading only; no tests run. 'Blueprint
 | Bootstrap address attribute size | ByronAddressAttributes.ExtraSize | gap | ledger-utxo lists bootstrap address attributes as not modelled |
 | BlockLedgerState UTxO fold (ApplyTransaction, UtxoById) | BlockLedgerState.ApplyTransaction, BlockLedgerState.UtxoById | modelled | specs/ledger-bbody/BlockBody.tla UtxoMatches, GoAgrees (TestBlockBodyModelLedgerOrder); specs/ledger-utxo/Utxo.tla ValuePreserved, KeptUnspent (TestUtxoRuleModelApply) |
 | BlockLedgerState account/pool fold and queries | BlockLedgerState.ApplyCertificateDepositLevel, BlockLedgerState.ApplyPoolCertificates, BlockLedgerState.IsStakeCredentialRegistered, BlockLedgerState.IsRewardAccountRegistered, BlockLedgerState.RewardAccountBalance, BlockLedgerState.PoolCurrentState, BlockLedgerState.PoolPendingParameters, BlockLedgerState.IsPoolRegistered, BlockLedgerState.IsVrfKeyInUse, BlockLedgerState.IsFutureVrfKeyInUse, FuturePoolParametersStateFor, StakeCredentialDepositStateFor | modelled | specs/ledger-shelley/CertLifecycle.tla GoAgrees, DepositsMatchObligation (StaleHonest/StaleMock views). VRF-key uniqueness pv11 and multi-cert txs not modelled; Go model test cert_lifecycle_model_test.go not on main; DRIFT L1 PR #3129 open |
-| BlockLedgerState Conway overlay (DReps, proposals, committee) within a block | BlockLedgerState.DRepRegistration, BlockLedgerState.DRepRegistrations, BlockLedgerState.GovActionById, BlockLedgerState.GovActionExists, BlockLedgerState.CommitteeMember, DRepDelegationStateFor, CommitteeCredentialStateFor, CommitteeHotCredentialMembersFor, CommitteeVotingStateFor | gap | hand-written block_state_test.go; Blueprint vectors apply per-tx to the mock state, not through BlockLedgerState |
+| BlockLedgerState Conway overlay (DReps, proposals, committee) within a block | BlockLedgerState.DRepRegistration, BlockLedgerState.DRepRegistrations, BlockLedgerState.GovActionById, BlockLedgerState.GovActionExists, BlockLedgerState.CommitteeMember, DRepDelegationStateFor, CommitteeCredentialStateFor, CommitteeHotCredentialMembersFor, CommitteeVotingStateFor | modelled | specs/ledger-block-overlay/GovOverlay.tla OverlayMatches, GoAgrees, NoLeak, FreshOverlay (TestBlockLedgerStateGovernanceSequences on `test/ledger-block-overlay-model`, stacked on the DRIFT L19 fix `fix/ledger-block-state-proposed-committee`) |
 | BlockLedgerState MIR totals within a block | PendingInstantaneousRewardsFor, InstantaneousRewardsTotalsFor | modelled | specs/ledger-ppup-mir/Mir.tla ValuePreserved, QuorumHeld (ledger/ppup_mir_model_test.go on main); several MIR certs per tx not modelled |
 | Genesis delegation scheduling within a block | GenesisDelegationFromCertificate, GenesisDelegationsFor, ScheduleGenesisDelegation | gap | hand-written tests; ledger-shelley excludes genesis delegation, ledger-witnesses assumes the delegation map |
 | Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types) | ValidatePreConwayCertificateTypes, ValidatePoolMetadataForProtocolVersion, ValidatePoolRelaysForProtocolVersion, PoolRelayIpv6WireOrder, PoolRegistrationCertificate.RewardAccountCredential, PoolRegistrationCertificate.SetRewardAccountCredential, PoolRegistrationCertificate.SetCbor, ValidatePoolMargin | gap | unit tests; Blueprint has no POOL family and no Shelley-Babbage pool vectors |
@@ -1097,7 +1098,7 @@ Vector counts verified by script:
 | consensus-nonce | Peras previous epoch nonce | gap | not implemented in consensus/; CIP-0140 |
 | consensus-eras | Peras chain weight (certificate boost) | gap | not implemented in selection*.go; CIP-0140, ouroboros-consensus ChainSel weight |
 | consensus-eras | Leios header checks | modelled | specs/ledger-leios (outside slice D) |
-| consensus-eras | VerifyBlock's own header checks (ledger/verify_block.go) not modelled | gap | DRIFT C15: Dingo validates with VerifyBlock, not ValidateHeader, so the modelled order/overlay logic is not the production path |
+| consensus-eras | VerifyBlock's own header checks (ledger/verify_block.go) not modelled | modelled | specs/ledger-block-overlay/VerifyBlockIssuer.tla AcceptAgrees, NoFalseRejects, with the caller contract in its README; the overlay defect is DRIFT L20 (`fix/ledger-verify-block-tpraos-overlay`); the first-error order differs (VerifyBlockIssuerFirstErrorBug) |
 | consensus-eras | Safe-zone size 3k/f and stability rule `afterVoting >= k` | modelled | EraHistory.tla `SummaryInvariants`, `ConversionsStable` with a slot-deadline abstraction |
 | consensus-eras | Peras rounds in Bound (`boundNextPerasRound`) decoded, not interpreted | caller contract | consensus-eras README Not covered; gOuroboros only decodes |
 | consensus-tachys | Zero-stake pools refused rather than given empty intervals (finding 1) | caller contract | consensus/README.md "Tachys Leader Schedule"; model `TachysScheduleAccept` shows equal schedules |

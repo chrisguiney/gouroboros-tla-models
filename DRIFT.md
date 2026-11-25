@@ -134,6 +134,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L14](#l14) | ledger | Proposed protocol version width in a classic parameter update | Minor is `Word32`; major bounded per era | main: both 16 bits, so a minor above 65,535 is refused; branch: minor 32 bits | Silent on widths | does not conform → conforms | Local branch `fix/ledger-pparam-update-minor-width` |
 | [L15](#l15) | ledger | Zero-coin output in a PlutusV2/V3 TxInfo | `transValue` always writes the ada entry, `{"": {"": 0}}` at zero | main: Shelley, Mary, Alonzo and Babbage `ToPlutusData` drop the ada entry when the coin is 0; branch: kept | Silent | does not conform → conforms | Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. 25 of the 26 PlutusV3 instances in cardano-ledger's Conway `translations.cbor` failed before the fix. A valid transaction cannot reach it today (every output meets the minimum UTxO) |
 | [L16](#l16) | ledger | PlutusV1 TxInfo with a redeemer that points at nothing | Ignored: a V1 TxInfo carries no redeemers | `NewTxInfoV1FromTransaction` resolves every redeemer and returns an error | n/a | conforms (stricter) | Phase-1 rejects such a transaction (extraneous redeemer) before any script runs, so the outcome is the same. The golden test clears the Alonzo generator's arbitrary redeemers for V1 |
+| [L19](#l19) | ledger | Committee certificate after an in-block UpdateCommittee proposal | Accepted: GOVCERT counts the proposals the block's earlier transactions left as potential members | main: `BlockLedgerState` committee lookups ask only the wrapped state, so the certificate is rejected; branch: in-block proposals count | Silent | does not conform → conforms | Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet. Reaches Dingo through `utxoref.StateOverlay` |
+| [L20](#l20) | ledger | `VerifyBlock` issuer in a TPraos overlay slot (d > 0) | Active slot: the scheduled genesis delegate, its VRF key, no stake; non-active slot: rejected | main: every issuer looked up in the pool distribution, so valid delegate blocks are rejected and pool blocks in non-active slots accepted; branch: `VerifyConfig.TPraosOverlay` | OVERLAY rule | does not conform → conforms | Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet. Breaking for callers with stake-pool validation on TPraos blocks. Dingo skips that validation |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1074,6 +1076,28 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`203f3624`, same file as L17), no PR yet. `TestValidatePoolPledgeCountsEachOwnerOnce` fails 2 of 6 cells on the parent commit. Model `specs/ledger-rewards` `RewardPotsOwnerListBug.cfg`. No caller outside gOuroboros tests (workspace search)
 
+### L19
+
+**Committee certificate after an in-block UpdateCommittee proposal** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: LEDGER passes CERTS the committee proposals of the state the block's earlier transactions left, and GOVCERT accepts a hot-key authorization or resignation from a cold credential any of them would add. gOuroboros main: `BlockLedgerState` records the proposal, but `CommitteeMember` and `CommitteeCredentialStateFor(...).CommitteeCredentialMember` ask only the wrapped state, so `UtxoValidateCommitteeCertificates` rejects the later transaction.
+- **Spec.** n/a (Conway formal spec GOVCERT, same rule)
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/conway/impl/src/Cardano/Ledger/Conway/Rules/GovCert.hs` 190-205, `.../Rules/Ledger.hs` 390-416
+- **gOuroboros.** gOuroboros `62fa36d1` `ledger/common/block_state.go` `CommitteeMember`, `blockCommitteeCredentials.CommitteeCredentialMember`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet. `TestBlockLedgerStateTreatsInBlockCommitteeProposalAsPotentialMember` fails on the parent commit. Model `specs/ledger-block-overlay` `GovOverlayGoMainBug.cfg`. Reaches Dingo's mempool and block builder through `utxoref.StateOverlay`
+
+### L20
+
+**`VerifyBlock` issuer in a TPraos overlay slot** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: block application validates the header through PRTCL, whose OVERLAY rule rejects a non-active overlay slot and, in an active one, checks the scheduled genesis delegate's cold key and VRF key with no stake. gOuroboros main: `VerifyBlockState` looks every non-Byron issuer up in `LeaderPoolVrfKeyHash`, the pool distribution, so with stake-pool validation on it rejects every valid genesis-delegate block (all of mainnet Shelley epoch 208, where d = 1) and accepts a pool block in a non-active slot.
+- **Spec.** cardano-ledger `1210d37fe6bd` `eras/shelley/formal-spec/chain.tex` 1170-1305
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-protocol-tpraos/src/Cardano/Protocol/TPraos/Rules/Overlay.hs` 219-282, `libs/cardano-ledger-core/src/Cardano/Ledger/Slot.hs` 117-130; ouroboros-consensus `ec239d57f618` `Ouroboros/Consensus/Ledger/Extended.hs`
+- **gOuroboros.** gOuroboros `62fa36d1` `ledger/verify_block.go` `VerifyBlockState`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet: `VerifyConfig.TPraosOverlay`, required for Shelley-to-Alonzo blocks unless `SkipStakePoolValidation`. 11 of 17 `TestVerifyBlockStateTPraosOverlay` cells fail with main's issuer path. The classification duplicates `consensus.classifyOverlaySlot` (C15); sharing one is a follow-up. Dingo calls `VerifyBlock` with stake-pool validation skipped and checks the overlay itself
+
 ## Pipeline
 
 ### P1
@@ -1190,6 +1214,8 @@ No pull request yet (decide whether and how to fix):
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
 - **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
 - **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. Unreachable on chain today.
+- **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
+- **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.
 
 Fixed by an open pull request (decide by reviewing and merging it):
 
