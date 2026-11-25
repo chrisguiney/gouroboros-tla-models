@@ -1086,7 +1086,7 @@ ledger/dijkstra	UtxoValidateOutputTooSmallUtxo	gap	Dijkstra collateral, outputs,
 ledger/dijkstra	UtxoValidateOutsideForecast	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
 ledger/dijkstra	UtxoValidateOutsideValidityIntervalUtxo	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
 ledger/dijkstra	UtxoValidatePlutusScripts	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
-ledger/dijkstra	UtxoValidatePoolCertificates	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidatePoolCertificates	modelled	Dijkstra sub-transaction certificates, pool deposit and owner witnesses
 ledger/dijkstra	UtxoValidateProposalProcedures	gap	Dijkstra pool, governance, metadata and IsValid rules
 ledger/dijkstra	UtxoValidatePtrPresentInCollateralReturn	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
 ledger/dijkstra	UtxoValidateRedeemerAndScriptWitnesses	modelled	Dijkstra witness rules (top level)
@@ -1099,7 +1099,7 @@ ledger/dijkstra	UtxoValidateSupplementalDatums	modelled	Dijkstra witness rules (
 ledger/dijkstra	UtxoValidateTooManyCollateralInputs	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
 ledger/dijkstra	UtxoValidateTransactionNetworkId	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
 ledger/dijkstra	UtxoValidateTreasuryDonationScripts	gap	Dijkstra pool, governance, metadata and IsValid rules
-ledger/dijkstra	UtxoValidateValueNotConservedLegacyModeUtxo	gap	Dijkstra legacy-mode value and account balance intervals
+ledger/dijkstra	UtxoValidateValueNotConservedLegacyModeUtxo	modelled	Dijkstra sub-transaction certificates, pool deposit and owner witnesses
 ledger/dijkstra	UtxoValidateValueNotConservedUtxo	modelled	Dijkstra sub-transaction batch rules
 ledger/dijkstra	UtxoValidateWithdrawals	modelled	Dijkstra sub-transaction batch rules
 ledger/dijkstra	UtxoValidateWrongNetworkWithdrawal	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts

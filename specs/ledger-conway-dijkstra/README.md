@@ -101,6 +101,30 @@ partial withdrawals are CIP-0159.
   is preserved, no input is spent twice, and an invalid batch gives up only
   its collateral.
 
+`SubCerts.tla` (Dijkstra batches' certificates; extends `SubTx.tla`'s
+families):
+
+- `EBatches`: each level withdraws nothing, zero or one coin, carries one
+  certificate (register, deregister or delegate the one stake credential,
+  or register the one pool), and pays a direct deposit or not; up to two
+  sub-transactions; valid or not; for a credential registered (balance 0
+  or 1) or not and a pool registered or not. The reference applies the
+  sub-transactions, then the top; within a level the withdrawal, then the
+  certificate, then the direct deposit.
+- `DBatches`: each level registers the pool or not; normal or legacy mode;
+  the pool deposits the top and the first sub-transaction leave room for.
+  The batch owes one deposit per pool the original state lacks; in legacy
+  mode the top must also balance alone against the pool state after the
+  sub-transactions.
+- `OBatches`: each level registers the pool with parameters A, A with
+  another BLS key, or B, with or without the owner's witness; the pool
+  absent, or current A or B with pending A, B or none. Owners must witness
+  unless the pool exists before the level and its latest parameters equal
+  the new ones apart from the BLS key; never in an invalid batch.
+- `Spec`: a ledger that applies three valid batches of one sub-transaction
+  and a top and checks that the deposit pot equals the deposits of what is
+  registered and that value is preserved.
+
 ## The questions
 
 1. **`GoAgrees`** (both modules): does gOuroboros accept exactly the
@@ -110,6 +134,9 @@ partial withdrawals are CIP-0159.
 3. **`ValuePreserved`**, **`SpentOnce`**, **`InvalidKeeps`**: the
    reference's batch rules, applied, keep value, never spend an input
    twice, and leave an invalid batch's other inputs alone.
+4. **`DepositsMatch`**, **`ValuePreserved`** (`SubCerts`): certificates
+   threaded through the levels keep the deposit pot equal to what is
+   registered.
 
 ## The answers
 
@@ -119,6 +146,8 @@ partial withdrawals are CIP-0159.
 | `ConwayLedgerDijkstra` | all hold | 6 |
 | `SubTxTable` | `GoAgrees` holds: 29,294 batches in each state | 4 |
 | `SubTxLedger` | `ValuePreserved`, `SpentOnce`, `InvalidKeeps` hold over two batches | 72 |
+| `SubCertsTable` | `GoAgrees` holds: 55,860 entity and 208 deposit batches in each of 6 plain states, 1,168 owner batches in each of 21 | 21 |
+| `SubCertsLedger` | `DepositsMatch`, `ValuePreserved` hold over three batches | 48 |
 
 gOuroboros agrees with the reference on every modelled cell. No defect was
 found in this area. It has been worked over before: treasury values,
@@ -167,6 +196,21 @@ Observations, none of which changes an accepted transaction:
 | `SubTxSpecSubsAgainstOriginalBug` | sub-transactions checked against the original UTxO only | `SpentOnce` |
 | `SubTxSpecInvalidAppliesSubsBug` | an invalid batch spends its sub-transactions' inputs | `InvalidKeeps` |
 | `SubTxSpecDonationLostBug` | donation never reaches the treasury | `ValuePreserved` |
+| `SubCertsGoEntTopFirstBug` | the top's certificates before the sub-transactions' | `GoAgrees` |
+| `SubCertsGoEntUnthreadedBug` | every level against the original account and pool | `GoAgrees` |
+| `SubCertsGoEntCertsFirstBug` | certificate before the level's withdrawal | `GoAgrees` |
+| `SubCertsGoEntDepositFirstBug` | direct deposit before the level's certificate | `GoAgrees` |
+| `SubCertsGoEntAnyPhaseBug` | an invalid batch's certificates checked | `GoAgrees` |
+| `SubCertsGoEntCurrentOnlyBug` | withdrawal account checked in the current state only | `GoAgrees` |
+| `SubCertsGoDepPerLevelBug` | a pool deposit per registering level | `GoAgrees` |
+| `SubCertsGoDepLegacyOriginalBug` | legacy top against the original pool state | `GoAgrees` |
+| `SubCertsGoDepAnyPhaseBug` | an invalid batch's deposits checked | `GoAgrees` |
+| `SubCertsGoOwnUnthreadedBug` | owner rule against the original pool state | `GoAgrees` |
+| `SubCertsGoOwnIgnorePendingBug` | owner rule ignores pending parameters | `GoAgrees` |
+| `SubCertsGoOwnAnyPhaseBug` | owners needed in an invalid batch | `GoAgrees` |
+| `SubCertsGoOwnBlsCountsBug` | a BLS-only change needs the owners | `GoAgrees` |
+| `SubCertsSpecPoolDepositPerLevelBug` | the ledger charges a pool deposit per level | `DepositsMatch` |
+| `SubCertsSpecDirectDepositFreeBug` | a direct deposit not taken from the UTxO | `ValuePreserved` |
 
 Reachability probes, each failing as required: a key withdrawal refused by
 the delegation rule alone, an invalid Dijkstra transaction refused for its
@@ -174,7 +218,17 @@ treasury value, a transaction reading and spending one input accepted at
 version 11 (`ConwayLedger`); an invalid batch with overlapping
 sub-transactions accepted, a partial withdrawal accepted, a legacy top
 draining its sub-transaction's direct deposit, an invalid batch applied, a
-batch moving value to the treasury or reward account (`SubTx`).
+batch moving value to the treasury or reward account (`SubTx`); one level
+withdrawing the whole balance then deregistering, a top-level BLS-only
+re-registration without owners after a sub-transaction registered the
+pool, a credential registered in a sub-transaction and deregistered at the
+top, the pool registered at two levels (`SubCerts`).
+
+`SubCerts` found no difference between the formal specification
+(formal-ledger-specifications `60b68036c8b4`, Dijkstra `Ledger`,
+`Entities`, `Certs` `newCertDeposits`, `Utxo` `producedBatch` and
+`producedLegacy`) and the reference in this area, and none between the
+reference and gOuroboros: no `DRIFT.md` entry.
 
 ## Go tests and mutations (gOuroboros)
 
@@ -193,6 +247,18 @@ table is under test too.
 | `TestSubTxModelTreasury` | 78 |
 | `TestSubTxModelRefScriptSize` | 168 |
 | `TestSubTxModelWithdrawals` | 800 |
+| `TestSubTxModelEntities` (`SubCerts` `EBatches`) | 335,160 |
+| `TestSubTxModelPoolDeposit` (`DBatches`) | 416 |
+| `TestSubTxModelPoolOwnerWitnesses` (`OBatches`) | 8,176 |
+
+The `SubCerts` tests are on branch `test/dijkstra-subtx-certs-model`
+(`ledger/dijkstra/subtx_certs_model_test.go`, commit `b1d3d9db`). The
+entity test runs the production BatchWithdrawals,
+AccountBalanceIntervals (which refuses a direct deposit to a missing
+account), Withdrawals, CertificateDeposits, Delegation and
+PoolCertificates rules; the deposit test both value-conservation rules;
+the owner test RequiredVKeyWitnesses with a ledger state that reports
+pending pool parameters.
 
 The Go gate test uses the eras' real tier: Conway's fixed 25,600 bytes and
 6/5 multiplier, Dijkstra's parameters (25,600 bytes, 3/2), a price of 1/3
@@ -217,6 +283,16 @@ Mutations, each killed (first failing cell):
 | reference-script size of the top only | subs 3 + 3 units, accepted |
 | no aggregate withdrawal bound | withdrawals 1 + 1 against balance 1 with a deposit of 1, accepted |
 | legacy top not exact | legacy, balance 1, top withdraws 0, accepted |
+| delegation overlay not threaded (`validateDijkstraGovernanceLevels` validates every level against the base state) | subs register the credential and the pool, top delegates, refused |
+| direct deposit before certificates (`dijkstraApplyAccountLevel`) | sub registers and deposits, refused |
+| withdrawals dropped from the threaded block state (`ApplyCertificateDepositLevel`) | balance 1, sub withdraws 1, later sub deregisters, refused |
+| legacy check against the original pool state | sub and top register the pool, top leaves no deposit, refused |
+| owner rule unthreaded (`UtxoValidateRequiredVKeyWitnesses` skips `ApplyPoolCertificates`) | subs register A with and without owners, refused |
+| owners required when invalid | invalid, sub registers A without owners, refused |
+
+Moving `ApplyCertificateDepositLevel`'s withdrawals after the certificates
+survives: the per-level Conway rule already sees a level's own withdrawal,
+and the threaded state after the level is the same either way.
 
 ## Specification, reference and gOuroboros
 
@@ -234,6 +310,10 @@ Mutations, each killed (first failing cell):
 | Donation | produced | `conwayProducedValue`; zero does not decode | same | agree |
 | Sub-transaction inputs | in order against the threaded UTxO | `SUBUTXO`, `allInputsTxBodyF` | per level against the original, no duplicates when valid | agree |
 | Withdrawals | partial, aggregate bound; legacy drain | `ENTITIES`, `SUBENTITIES` | `BatchWithdrawals`, threaded `Withdrawals` | agree |
+| Sub-transaction certificates | SUBLEDGERS then ENTITIES; withdraw, CERTS, deposit | `SUBENTITIES`, `SUBCERTS` (Conway DELEG, Dijkstra POOL) | levels in order through `BlockLedgerState` and overlays | agree |
+| Batch pool deposit | `newCertDeposits` over `allDCerts` | `getTotalDepositsTxCerts` over the batch | one per operator over the flattened batch | agree |
+| Legacy-mode deposit | `producedLegacy` with `pools'` | top alone, `postSubsPState` | top alone after applying sub levels | agree |
+| Owner witnesses | — | `poolOwnersWitnessRequired`, pre-level `PState`, never when invalid | `PoolOwnersWitnessRequired`, threaded | agree |
 | Removed fields | — | update field, MIR, genesis delegation; Dijkstra tags 0, 1 | decode errors | agree |
 
 ## Sources
@@ -246,9 +326,13 @@ the full list with line numbers is in the header of each module
 
 Model `ledger-utxo`'s checks (assumed to pass), witnesses and script evaluation,
 governance (model `ledger-governance`), certificate state transitions beyond registration
-(model `ledger-shelley`), pool deposits, account balance intervals and guards, the
+(model `ledger-shelley`), account balance intervals and guards, the
 per-block reference-script limit (block bodies), protocol versions above
-12, and sub-transactions' certificates and governance procedures.
+12, and sub-transactions' governance procedures (proposals and votes;
+SUBGOV runs the Conway GOV transition per level). `SubCerts` covers one
+credential and one pool: DRep and committee certificates, pool
+retirement, several certificates in one level, and legacy-mode
+withdrawals with certificates are left out.
 
 ## Running it
 
