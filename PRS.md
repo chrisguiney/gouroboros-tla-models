@@ -53,12 +53,14 @@ closes. A PR can draw on more than one model.
 | `ledger-conway-dijkstra` | #3218 (table tests) | #3217 | open |
 | `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | open |
 | `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | open |
-| `dmq` (`LocalMessageSubmissionOwnAnswer`) | #3231 (`SubmitMessage` returns its own answer; breaking; merge 9 of 12) | #3225 | open |
-| none (goleak, CONCURRENCY C8) | #3232 (a finished range's delivery stops when its caller leaves; merge 10 of 12) | #3226 | open |
-| `pipeline-cbor` (`PipelineLifecycle`) | #3233 (`Stop(ctx)`, ApplyFunc may stop or drain, parent-cancel teardown; folds `fix/pipeline-callback-stop`, `fix/pipeline-cancel-cleanup`, `test/pipeline-lifecycle-model`; breaking; merge 11 of 12; #3161 first) | #3227, #3228 | open |
-| `ledger-hash-cache` | #3234 (scoped-memo panic retried; folds `test/ledger-hash-cache-model`; merge 12 of 12) | #3229 | open |
+| `dmq` (`LocalMessageSubmissionOwnAnswer`) | #3231 (`SubmitMessage` returns its own answer; breaking; merge 1 of 12) | #3225 | open |
+| none (goleak, CONCURRENCY C8) | #3232 (a finished range's delivery stops when its caller leaves; merge 2 of 12) | #3226 | open |
+| `pipeline-cbor` (`PipelineLifecycle`) | #3233 (`Stop(ctx)`, ApplyFunc may stop or drain, parent-cancel teardown; folds `fix/pipeline-callback-stop`, `fix/pipeline-cancel-cleanup`, `test/pipeline-lifecycle-model`; breaking; merge 3 of 12; #3161 first) | #3227, #3228 | open |
+| `connection` (`ConnectionTeardown`), `engine` (`EngineLifecycle`) | #3239 (teardown during Dial, late forwarder, Close before setup, protocol-loop join; merge 5 of 12) | #3236, #3237, #3238 | open |
+| `connection` (`ConnectionTeardown`, Muxer.Stop join) | ouroboros-mock #370 (Stop and Close with either signature; released before merge 6) | ouroboros-mock #369 | open |
+| `ledger-hash-cache` | #3234 (scoped-memo panic retried; folds `test/ledger-hash-cache-model`; merge 4 of 12) | #3229 | open |
 
-## Held: merges 1 to 8 of 12 (not published)
+## Held: merges 6 to 12 of 12 (merge 6 waits for the ouroboros-mock release and closes #3187)
 
 Held because the open issue #3187 (Stop returns before started goroutines
 exit) already covers A3, A6 and A8; these branches do not finish it (the
