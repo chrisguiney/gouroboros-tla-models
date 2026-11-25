@@ -400,6 +400,25 @@ cardano-ledger at
 - Peras rounds in `Bound` (`boundNextPerasRound`): decoded by gOuroboros,
   not interpreted.
 
+## Era history reply decode (`EraHistoryDecode.tla`)
+
+A table model, written bug-first for #3205: a `GetEraHistory` reply's
+outer shape (definite or indefinite array of 0 to 2 eras, null, undefined)
+under no tag, tag 258 or another tag. The reference decodes a list
+(`defaultDecodeList`: definite or indefinite, no tag) and refuses an empty
+one (`Summary.hs` 630-679).
+
+| Config | Rule | Result | Counterexample, and the Go input it matches |
+| --- | --- | --- | --- |
+| `EraHistoryDecodeMainBug` | main before #3205, untagged | fails `EraHistoryAsSummaryDecoder` | indefinite array of no eras, `9fff` (`TestEraHistoryReplyRequiresAnEra`) |
+| `EraHistoryDecodeTaggedFixBug` | #3205 with tags | fails `EraHistoryAsSummaryDecoder` | tag 258 around a one-era array: decoded, the reference refuses |
+| `EraHistoryDecode` | #3205 (`05b6d9f2`), untagged | passes | |
+
+What the model found: `growingArray` skips any leading tag, so after the
+fix a tagged one-era reply (`d90102` or `d81f` in front) still decodes,
+confirmed in Go on `origin/main`. A reference node never sends one, so
+nothing goes wrong with a reference peer; the decoder is only more lenient.
+
 ## Running it
 
 ```sh
