@@ -212,9 +212,10 @@ the block itself (`getTipInfo` reads `byronHeaderIsEBB`, [B1] 30-32).
 
 | Config | gOuroboros | Result |
 | --- | --- | --- |
-| `ByronEnvelope` | PR #3111 at `b137d455` | `EnvelopeAgrees`, `ReprIrrelevant` hold |
+| `ByronEnvelope` | PR #3111 at `fce3c429` | `EnvelopeAgrees`, `ReprIrrelevant` hold |
 | `ByronEnvelopeEBBHeaderOnlyBug` | PR #3111 at `094aeac6`: only a `*ByronEpochBoundaryBlockHeader` counts as an EBB | `EnvelopeAgrees` fails: a main block after an EBB block in the same slot is refused |
 | `ByronEnvelopeProbeSharedSlotBug` | probe | `NoMainSharesEBBSlot` fails: the shared slot is reachable |
+| `ByronEnvelopeOriginReadsPrevBug` | PR #3111 at `08b86c41`: after Origin, a nonzero `PrevBlockNumber` with no `PrevHeaderHash` is refused | `EnvelopeAgrees` fails: block 0 after Origin is refused; fixed at `fce3c429` |
 
 **The modelling gap.** The earlier Byron work was a Go table only
 (`TestByronEnvelopeMatchesReferenceTable`), and it passed every predecessor
