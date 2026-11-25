@@ -127,6 +127,7 @@ protocol.
 
 - [Pull requests each model produced](PRS.md): local bookkeeping; the models are not published.
 - [Drift](DRIFT.md): every place gOuroboros differs from the reference, with the spec's verdict.
+- [Coverage audit](COVERAGE.md): every logic-bearing function in gOuroboros classed as modelled, checked by reference vectors, left to the caller, or a gap, with the gaps ranked.
 - [Concurrency inventory](CONCURRENCY.md): every lock, goroutine and channel in gOuroboros, the hazards among them, and which concurrency models to write next.
 
 `make models` checks every configuration of every model; a configuration
