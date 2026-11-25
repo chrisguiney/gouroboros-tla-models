@@ -25,11 +25,11 @@ It was done by static reading. No Go test and no TLC run was made for the audit,
 
 | Class | Items | Functions | README notes |
 | --- | ---: | ---: | ---: |
-| modelled | 85 | 425 | 30 |
+| modelled | 87 | 431 | 32 |
 | vectors | 78 | 660 | 14 |
 | caller contract | 8 | 39 | 29 |
-| gap | 130 | 571 | 107 |
-| **total** | **301** | **1695** | **180** |
+| gap | 129 | 565 | 105 |
+| **total** | **302** | **1695** | **180** |
 
 Items are counted per package, so an item that spans two packages counts twice.
 
@@ -61,7 +61,7 @@ Items are counted per package, so an item that spans two packages counts twice.
 | `protocol` | 7 | 0 | 0 | 11 |
 | `protocol/blockfetch` | 6 | 0 | 1 | 2 |
 | `protocol/chainsync` | 10 | 7 | 5 | 2 |
-| `protocol/common` | 0 | 2 | 2 | 17 |
+| `protocol/common` | 6 | 2 | 2 | 11 |
 | `protocol/handshake` | 6 | 0 | 1 | 0 |
 | `protocol/keepalive` | 6 | 0 | 1 | 1 |
 | `protocol/leiosfetch` | 5 | 0 | 1 | 9 |
@@ -110,6 +110,7 @@ These shape how far the "vectors" and "modelled" verdicts reach.
 | Item | Functions | Now | Test (gOuroboros branch) |
 | --- | ---: | --- | --- |
 | LSQ queries (client encodings per era, server envelope decoders) and ledger peer snapshot codecs | 55 | vectors | `protocol/localstatequery/reference_golden_test.go` on `test/localstatequery-reference`: all 220 `Query_*`, 3 `TopLevelQuery_*` and the era-indexed `Result_*` goldens of ouroboros-consensus `ec239d57f618` (node-to-client v23 only). Defects: DRIFT N48 (`fix/localstatequery-era-set-encoding`), N49 (`fix/localstatequery-account-state-all-eras`), N50 (`fix/localstatequery-decode-future-pparams`); recorded N51 |
+| DMQ message authentication (`MessageAuthenticator`: body size, opcert, stake, chain counter, KES period and signature, counter rotation, batch prepare and commit) and TTL validation (`NewTTLValidator`, `ValidateMessageTTLAt`) | 6 | modelled | `specs/dmq/MessageValidity.tla` (`NoAcceptBeyondReference`, `AcceptAsReference`, `SeenMonotone`, `RejectKeepsSeen`) against dmq-node `Validate.hs`; dmq-node ships no signed vectors, so the Go cases are derived from its code and signed in the test: `TestVerifyMessageCounterAndPoolAsReference` (48 cells) on `test/dmq-validity-reference`, `TestVerifyMessageKESPeriodAsReference`, `TestValidateMessageTTLAtAsReference`, `TestPrepareMessagesCommitRechecksEveryCounter`, `TestVerifyMessageBodySizeAsReference` on the four fix branches. Defects: DRIFT N52-N55; recorded N56, N57 |
 | `BlockBuilder.BuildHeader` | 1 | vectors | `consensus/header_reference_test.go` on `test/consensus-header-reference`: ouroboros-consensus `ec239d57f618` Header_Shelley..Header_Conway, body byte for byte and TPraos KES signature |
 | Min fee, tx size and execution-unit fee; pre-Conway `MinFeeTx` / `MinCoinTxOut`; every era's max-size rule | 17 | vectors | `ledger/fee_reference_test.go` on `test/ledger-fee-reference`: cardano-ledger `tx.cbor` and `pparams.json` goldens for Shelley-Conway, expectations derived from `sizeTxF`, `alonzoMinFeeTx`, `txscriptfee`, `utxoEntrySize`, `babbageMinUTxOValue` and the Allegra pointwise output rule; `tierRefScriptFee` replayed from the reference's own unit-test values |
 | Protocol parameter update keys and application, Shelley-Conway | 10 | vectors | `ledger/pparam_update_keys_test.go` on `test/ledger-pparam-update-reference`: keys 0-40 against each era's `eraPParams` list; each accepted key must change the parameters |
@@ -741,9 +742,10 @@ Counts (items are per package): modelled 29 items / 158 functions, vectors 31 it
 
 | Item | Functions | Class | Evidence |
 |---|---|---|---|
-| DMQ message authentication (CIP-0137) | NewMessageAuthenticator, MessageAuthenticator.VerifyMessage, MessageAuthenticator.PrepareMessages, MessageAuthenticator.VerifyMessages | gap | dmq README 'Not modelled': authentication; authentication_test.go self-signed end-to-end only |
+| DMQ message authentication (CIP-0137) | NewMessageAuthenticator, MessageAuthenticator.VerifyMessage, MessageAuthenticator.PrepareMessages, MessageAuthenticator.VerifyMessages | modelled | specs/dmq/MessageValidity.tla: NoAcceptBeyondReference, AcceptAsReference, SeenMonotone, RejectKeepsSeen; validity_reference_test.go and the fix branches' reference tests (DRIFT N52-N55) |
 | DMQ no-op authenticator/TTL | NewNoOpAuthenticator, NewNoOpTTLValidator | caller-contract | godoc protocol/common/authentication.go NewNoOpAuthenticator/NewNoOpTTLValidator: caller opts out of verification |
-| DMQ TTL validation | NewTTLValidator, TTLValidator.ValidateMessageTTLAt, TTLValidator.GetTimeUntilExpiration | gap | dmq README 'Not modelled': TTLs; authentication_test.go hand-written boundaries |
+| DMQ TTL validation | NewTTLValidator, TTLValidator.ValidateMessageTTLAt | modelled | specs/dmq/MessageValidity.tla: NoAcceptBeyondReference (MessageValidityLaxUpperBug, MessageValidityTruncateNowBug); ttl_reference_test.go on fix/dmq-ttl-reference-bounds (DRIFT N53) |
+| DMQ time until expiration | TTLValidator.GetTimeUntilExpiration | gap | no reference counterpart; reads the wall clock |
 | DMQ message codec and message ID | DmqMessagePayload.UnmarshalCBOR, DmqMessage.MarshalCBOR, DmqMessage.UnmarshalCBOR, DmqMessage.ID, DmqMessage.SetComputedMessageID, ComputeDmqMessageID, ToRejectReasonData, RejectReasonData.MarshalCBOR, RejectReasonData.UnmarshalCBOR, FromRejectReasonData | gap | authentication_test.go TestComputeDmqMessageIDGoldenVector and reject_reason_test.go TestRejectReasonDataEncodesLikeDmqNode are hand-written, no dmq-node provenance; dmq README: wire tags checked byte-for-byte by hand |
 | Point codec | Point.UnmarshalCBOR, Point.MarshalCBOR | vectors | protocol/chainsync/messages_test.go TestMsgRollForwardNodeToNode/NodeToClient decode real testnet RollForward captures (5 testdata files) whose tip carries a Point |
 
@@ -989,8 +991,8 @@ Counts (items are per package): modelled 29 items / 158 functions, vectors 31 it
 | localstatequery | Timeouts | gap | DRIFT N30 |
 | localstatequery | Message size limit (MaxReadBufferSize) | gap | unmodelled |
 | dmq | Message bodies, sizes | gap | see DMQ codec items |
-| dmq | Authentication | gap | see 'DMQ message authentication' |
-| dmq | TTLs | gap | see 'DMQ TTL validation' |
+| dmq | Authentication | modelled | specs/dmq/MessageValidity.tla |
+| dmq | TTLs | modelled | specs/dmq/MessageValidity.tla |
 | dmq | Replay caches (Config-wide lock C22, cleaner C23) | gap | CONCURRENCY.md rank 16 DmqReplayShared/LmsReplayTokens |
 | dmq | dmq-node V2 pipelined inbound | gap | unmodelled |
 | dmq | Time limits as durations | gap | DRIFT N39 |

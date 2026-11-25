@@ -106,6 +106,12 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N49](#n49) | network | Local-state-query `GetAccountState` and `GetGovState` before Conway | Both decoded and answered in every Shelley-based era | main: the client refuses both before Conway; branch: `GetAccountState` sent from Shelley; `GetGovState` still Conway only (its result type is Conway's) | Silent | does not conform → conforms (`GetAccountState`) | `GetAccountState` fixed on local branch `fix/localstatequery-account-state-all-eras` (`ddae722e`), no PR yet; `GetGovState` recorded |
 | [N50](#n50) | network | Local-state-query `GetFuturePParams` (Shelley query 33) | Decoded and answered from Conway | main: the server fails with "unknown Block query type: 33"; no client call; branch: decoded and handed to the query callback | Silent | does not conform → conforms (server decode) | Fixed on local branch `fix/localstatequery-decode-future-pparams` (`dd131af9`), no PR yet; client call not added |
 | [N51](#n51) | network | Local-state-query queries gOuroboros does not decode or re-encode exactly | `QueryAnytime` (`GetEraStart`) and Byron's own queries decoded; era history written as an indefinite list; UTxO filters keep their tag | `QueryAnytime` and Byron queries fail to decode; decoded UTxO filters re-encode without the tag; era history has no list encoder (each era summary re-encodes exactly) | Silent | does not conform (decode); conforms (re-encode, both forms decode) | Recorded; pinned by `reference_golden_test.go` on `test/localstatequery-reference` |
+| [N52](#n52) | network | DMQ: KES evolution a message signature is checked at | The claimed KES period minus the opcert start; the current slot is not used | main: the node's current KES period minus the opcert start; branch: the claimed period, the opcert window must also contain the current period | Silent (verify the KES signature with the opcert's key) | does not conform → conforms | Fixed on local branch `fix/dmq-kes-claimed-period` (`7e1a0820`), no PR (model `dmq` `MessageValidityKesAtCurrentBug.cfg`) |
+| [N53](#n53) | network | DMQ: message expiry bounds | Expired if now > expiresAt with a sub-second clock; too far if expiresAt >= now + 1800 s | main: now truncated to seconds; expiresAt = now + maxTTL accepted; branch: as the reference | Expired messages invalid; too far ahead a violation; no exact bound | does not conform → conforms | Fixed on local branch `fix/dmq-ttl-reference-bounds` (`1f492baf`), no PR |
+| [N54](#n54) | network | DMQ: message body size | 90 to 2000 bytes, refused at decode | main: any size; branch: `ErrMessageBodySize` outside 90..2000 | `messageBody = bstr .size (90..2000)` | does not conform → conforms | Fixed on local branch `fix/dmq-message-body-size` (`9804e9d9`), no PR |
+| [N55](#n55) | network | DMQ: batch commit and opcert counters | Each message checked against the counters recorded when it is validated | main: commit re-checks only each pool's last counter in the batch; branch: every counter | Counter strictly lower than one seen is a violation | does not conform → conforms | Fixed on local branch `fix/dmq-commit-recheck-every-counter` (`aa2673b6`), no PR (model `dmq` `MessageValidityBatchFinalOnlyRecheckBug.cfg`) |
+| [N56](#n56) | network | DMQ: gOuroboros-only message checks | Counter compared only with counters seen in messages; current slot not consulted; one message per pool per 60 s (`SigTooFrequent`) | Counter must not be below the chain-state counter; opcert window must contain the current KES period; no rate limit | The CIP suggests the chain's counter as one option; rate limiting suggested | conforms (stricter, and missing the rate limit) | Recorded; decision needed on the rate limit |
+| [N57](#n57) | network | DMQ: bytes the message id and KES signature cover | The payload bytes as received | The payload re-encoded from its decoded fields | `messageId` = Blake2b-256 of the CBOR payload | conforms for canonical encodings | Recorded; a non-canonical payload dmq-node accepts is refused |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -732,6 +738,73 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** does not conform (decode); conforms (re-encode: both forms decode)
 - **Status.** Recorded
 
+
+### N52
+
+**DMQ: KES evolution a message signature is checked at** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: verifies at `sigKESPeriod - ocertKESPeriod`, after checking the claimed period lies in `[ocertKESPeriod, ocertKESPeriod + maxKESEvo)`; the node's slot plays no part. gOuroboros: main verifies at `currentKESPeriod - ocertKESPeriod`, so a message signed late in one period is refused once the period turns, and one signed at the current period while claiming an earlier one is accepted (dmq-node answers that with `InvalidKESSignature` and disconnects the peer).
+- **Spec.** CIPs `db48da14bff1` `CIP-0137/README.md` 395-402: "Verify the KES signature of the message body with the KES verification key from the operational certificate" (no period named)
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Validate.hs` 156-161, 207-212; test generator `dmq-node/test/DMQ/Protocol/SigSubmission/Test.hs` 458 signs at the same evolution
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `verifyKESSignature` and `verifyKesComponents`; branch `fix/dmq-kes-claimed-period` `7e1a0820`, test `TestVerifyMessageKESPeriodAsReference` (3 of 11 cells fail on main)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on a local branch, no PR. The branch keeps gOuroboros's check that the opcert window contains the current period (N56)
+
+### N53
+
+**DMQ: message expiry bounds** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: `posixNow <= expiresAt` and `expiresAt < now + maxSigExpiresAtDelay` (1800 s), with `now` at sub-second precision. gOuroboros: main truncates `now` to whole seconds and accepts `expiresAt <= now + maxTTL`.
+- **Spec.** CIPs `db48da14bff1` `CIP-0137/README.md` 336-337
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Validate.hs` 115-122; `dmq-node/src/DMQ/Policy.hs` 60-61
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `TTLValidator.ValidateMessageTTLAt`; branch `fix/dmq-ttl-reference-bounds` `1f492baf`, test `TestValidateMessageTTLAtAsReference`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on a local branch, no PR. `DmqMessage.IsValidAt` (notification queue pruning) still truncates; dmq-node's mempool drops a message when `expiresAt <= now` (`NodeKernel.hs` 317), a half-second difference not fixed
+
+### N54
+
+**DMQ: message body size** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: the decoder refuses a body under 90 or over 2000 bytes. gOuroboros: main accepts any size, so it can accept and relay a message dmq-node refuses as a decode failure.
+- **Spec.** CIPs `db48da14bff1` `CIP-0137/README.md` 155: "messageBody = bstr .size (90..2000)"
+- **Reference.** `dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` 193-202; `dmq-node/src/DMQ/Policy.hs` 42-49
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `verifyMessageInternal`; branch `fix/dmq-message-body-size` `9804e9d9`, test `TestVerifyMessageBodySizeAsReference`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on a local branch, no PR. The check is in the authenticator, so a no-op authenticator skips it; dmq-node checks at decode
+
+### N55
+
+**DMQ: batch commit and opcert counters** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: one STM transaction checks each message against the counters the earlier ones recorded. gOuroboros: main's `PrepareMessages` commit re-checks only each pool's last counter in the batch, so a batch `[p:1, p:2]` prepared before another commit recorded `p:2` still commits and accepts `p:1`.
+- **Spec.** CIPs `db48da14bff1` `CIP-0137/README.md` 411
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Validate.hs` 96-100, 183-197
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `PrepareMessages`; branch `fix/dmq-commit-recheck-every-counter` `aa2673b6`, test `TestPrepareMessagesCommitRechecksEveryCounter`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on a local branch, no PR
+
+### N56
+
+**DMQ: gOuroboros-only message checks** (kind 2: recorded)
+
+- **What differs.** gOuroboros refuses a message whose opcert counter is below the node's chain-state counter (`PoolOpCertIssueNumber`) and one whose opcert window does not contain the node's current KES period; dmq-node does neither. dmq-node refuses a second message from a pool within 60 s (`SigTooFrequent`, which disconnects the peer); gOuroboros has no such limit, so it may relay a message dmq-node peers refuse.
+- **Spec.** CIPs `db48da14bff1` `CIP-0137/README.md` 405-411 (the chain's counter is one suggested source), 528 (rate limiting suggested)
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Validate.hs` 124-145, 183-197; `dmq-node/src/DMQ/Policy.hs` 52-55
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `verifyMessageInternal` Step 4, `verifyKESSignature`; pinned by `TestVerifyMessageChainCounterIsStricter` on `test/dmq-validity-reference` `3ff81454` and the last two cells of `TestVerifyMessageKESPeriodAsReference`
+- **Verdict.** conforms (stricter); the rate limit is missing
+- **Status.** Recorded; decision needed on adding the rate limit
+
+### N57
+
+**DMQ: bytes the message id and KES signature cover** (kind 2: recorded)
+
+- **What differs.** Reference: hashes and verifies the payload bytes exactly as received (`sigSignedBytes`, cut from the wire between two offsets). gOuroboros: re-encodes the decoded payload. Identical for canonical CBOR; a payload with non-minimal integer widths that dmq-node accepts is refused by gOuroboros.
+- **Spec.** CIPs `db48da14bff1` `CIP-0137/README.md` 370-376
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Validate.hs` 60-64; `dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` 169-181
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/common/authentication.go` `verifyMessageID`, `verifyKESSignature`; `protocol/common/dmq.go` `ComputeDmqMessageID`
+- **Verdict.** conforms for canonical encodings
+- **Status.** Recorded; closing it needs the decoded message to keep its payload bytes (codec work)
+
 ## Consensus
 
 ### C1
@@ -1265,6 +1338,11 @@ No pull request yet (decide whether and how to fix):
 - **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
 - **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.
 
+- **N52** DMQ KES signature checked at the current period. Fixed on local branch `fix/dmq-kes-claimed-period` (`7e1a0820`), no PR yet.
+- **N53** DMQ expiry bounds. Fixed on local branch `fix/dmq-ttl-reference-bounds` (`1f492baf`), no PR yet.
+- **N54** DMQ body size. Fixed on local branch `fix/dmq-message-body-size` (`9804e9d9`), no PR yet; breaking for callers that authenticate bodies under 90 bytes.
+- **N55** DMQ batch commit re-check. Fixed on local branch `fix/dmq-commit-recheck-every-counter` (`aa2673b6`), no PR yet.
+- **N56** DMQ per-pool rate limit (`SigTooFrequent`). Not fixed; decide whether gOuroboros should enforce it.
 Fixed by an open pull request (decide by reviewing and merging it):
 
 - **N7** Chain-sync node-to-node message size limit. Open PR #3112.

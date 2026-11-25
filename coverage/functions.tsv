@@ -1374,20 +1374,20 @@ protocol/common	DmqMessagePayload.UnmarshalCBOR	gap	DMQ message codec and messag
 protocol/common	DmqMessage.SetComputedMessageID	gap	DMQ message codec and message ID
 protocol/common	DmqMessage.UnmarshalCBOR	gap	DMQ message codec and message ID
 protocol/common	FromRejectReasonData	gap	DMQ message codec and message ID
-protocol/common	MessageAuthenticator.PrepareMessages	gap	DMQ message authentication (CIP-0137)
-protocol/common	MessageAuthenticator.VerifyMessage	gap	DMQ message authentication (CIP-0137)
-protocol/common	MessageAuthenticator.VerifyMessages	gap	DMQ message authentication (CIP-0137)
-protocol/common	NewMessageAuthenticator	gap	DMQ message authentication (CIP-0137)
+protocol/common	MessageAuthenticator.PrepareMessages	modelled	DMQ message authentication (CIP-0137)
+protocol/common	MessageAuthenticator.VerifyMessage	modelled	DMQ message authentication (CIP-0137)
+protocol/common	MessageAuthenticator.VerifyMessages	modelled	DMQ message authentication (CIP-0137)
+protocol/common	NewMessageAuthenticator	modelled	DMQ message authentication (CIP-0137)
 protocol/common	NewNoOpAuthenticator	caller-contract	DMQ no-op authenticator/TTL
 protocol/common	NewNoOpTTLValidator	caller-contract	DMQ no-op authenticator/TTL
-protocol/common	NewTTLValidator	gap	DMQ TTL validation
+protocol/common	NewTTLValidator	modelled	DMQ TTL validation
 protocol/common	Point.MarshalCBOR	vectors	Point codec
 protocol/common	Point.UnmarshalCBOR	vectors	Point codec
 protocol/common	RejectReasonData.MarshalCBOR	gap	DMQ message codec and message ID
 protocol/common	RejectReasonData.UnmarshalCBOR	gap	DMQ message codec and message ID
 protocol/common	ToRejectReasonData	gap	DMQ message codec and message ID
-protocol/common	TTLValidator.GetTimeUntilExpiration	gap	DMQ TTL validation
-protocol/common	TTLValidator.ValidateMessageTTLAt	gap	DMQ TTL validation
+protocol/common	TTLValidator.GetTimeUntilExpiration	gap	DMQ time until expiration
+protocol/common	TTLValidator.ValidateMessageTTLAt	modelled	DMQ TTL validation
 protocol	GetProtocolVersion	gap	Version tables and feature flags (versions.go)
 protocol	GetProtocolVersionMapDMQNtC	gap	Version tables and feature flags (versions.go)
 protocol	GetProtocolVersionMapDMQNtN	gap	Version tables and feature flags (versions.go)
