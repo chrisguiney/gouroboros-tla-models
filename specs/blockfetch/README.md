@@ -420,6 +420,15 @@ and others), range continuity and block validation, the block processing
 pipeline, compressed blocks (CIP-0150), `RangeTimeout`, and requests made
 after `Stop` has queued `MsgClientDone`.
 
+## After merging main into #3114
+
+Merge `a93b4116` (main at `71ea8189`, with #3159) conflicted only in
+`protocol/PROTOCOL_LIMITS.md`: the text now says both that only the client
+enforces the Busy and Streaming timeouts and that they default to 60 s. A
+documentation change, which cannot affect the model. The one red job at the
+previous head, `TestReceiveMatchesModel/server/inBusy/Oversized` on Go 1.27
+amd64, passed on the other jobs there and `-race -count=5` here.
+
 ## Running it
 
 ```sh

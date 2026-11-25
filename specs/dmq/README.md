@@ -101,6 +101,8 @@ both are `TRUE` after the wire fix.
 | `MessageSubmissionV2NoIdsReplyBug.cfg`: V2, a gOuroboros Client before the wire fix: no `MsgReplyNoSigIds` | | **fails**: deadlock, a blocking request with nothing left to give |
 | `MessageSubmissionRepeatBug.cfg`: any request, gOuroboros today | | **fails** `NoRepeatServe` |
 | `MessageSubmissionServerRepeatBug.cfg`: the gOuroboros Server today, a refusing outbound | | **fails** `HonestNeverRefused` |
+| `MessageSubmissionV1Restart.cfg`: V1, two runs, the Server restarting after `MsgDone` and forgetting the ids it asked for | 318 | passes, with `AskedInWindow` |
+| `MessageSubmissionV1RestartAskedBug.cfg`: the same, the restart keeping them | | **fails** `AskedInWindow` |
 
 The window rules hold, on both sides, against any peer: each side's checks are
 the reference's checks. The repeat rule does not: **the gOuroboros Client
@@ -109,6 +111,21 @@ and **the gOuroboros Server's `RequestMessages` sends such a request** if its
 application asks, which dmq-node's V2 outbound answers by closing the
 connection. The trace for the first is three steps: a blocking request, a
 reply with one id, then two `MsgRequestMessages` for that id.
+
+### The repeat check across a restart (#3130 after merging main)
+
+Main's #3197 restarts the Server after a V1 client's `MsgDone`, dropping the
+run's outstanding IDs and requests. #3130's repeat check keeps a record of
+the IDs the Server asked bodies for (`requestedIDs`), which a reply to the
+next ID request releases with its acknowledgement. `MsgDone` is the answer to
+a blocking request, so that acknowledgement is never applied, and the merged
+code kept the record across the restart: a client announcing the same ID in
+the next run could never have its body asked for. `Restart` (V1 only, as V2's
+`MsgDone` comes from the Server) and `AskedInWindow` (the Server has asked only
+for ids in its current window) show it; the fix, #3130 `50ef28f8` on merge
+`867599d8`, resets the record with the window, and
+`TestServerRestartForgetsRequestedIDs` fails without it. Every earlier config
+runs one run (`MaxRuns = 1`) and is unchanged.
 
 ### Checking the checks
 

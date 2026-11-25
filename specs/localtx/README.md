@@ -331,6 +331,16 @@ limits, the server's transaction-ID cache, and API misuse such as
 `Release()` from Idle (it sends `MsgRelease` and fails the same way as
 `Stop()` did).
 
+## After merging main into #3196
+
+Merge `763c0977` (main at `cc300dc8`) keeps #3196's await on
+`MsgAwaitAcquire` and get-measures on top of main's restart after `MsgDone`
+(#3197) and maphash ID cache (#3224). The await watches the stop channel of
+the run that is waiting, as every other restarted call does. `MsgDone` is
+accepted only in `StIdle`, after `MsgRelease` has cleared the held snapshot,
+so a restarted run never starts holding one and the merge changes nothing the
+model checks.
+
 ## Running it
 
 ```sh

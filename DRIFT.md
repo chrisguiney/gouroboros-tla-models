@@ -119,7 +119,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [C15](#c15) | consensus | TPraos overlay schedule (d > 0) | A non-active overlay slot is rejected; an active one belongs to a genesis delegate, checked against its delegation with no stake | main: `ValidateHeaderInput` cannot carry d or the genesis delegations, so a valid genesis-delegate header is rejected (no stake, no pool VRF key) and a pool header in a non-active slot is accepted; branch: required `Overlay`, `ErrNotActiveSlot`, `ErrWrongGenesisColdKey`, `ErrWrongGenesisVRFKey` | OVERLAY rule: Active-OBFT and Decentralized | does not conform → conforms | Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), no PR yet (model `consensus-eras`, `OverlayGenesisBug`, `OverlayNonActiveBug`). No production caller: Dingo validates with `VerifyBlock` and its own overlay check |
 | [C16](#c16) | consensus | Header envelope: ObsoleteNode, header size, body size | Checked before the protocol rules | main: not in `ValidateHeader`; branch: required `Envelope`, `ErrObsoleteNode`, `ErrHeaderSizeTooLarge`, `ErrBlockSizeTooLarge`; a missing input is the only error (`ErrMissingHeaderInput`) | `chainChecks` | does not conform → conforms | Fixed on the same branch (model `consensus-eras`, `ExtrasBug`, `MissingInputBug`) |
 | [C17](#c17) | consensus | Byron slot to epoch past Byron | The era history (`Summary`) converts every slot | main: `ByronConfig.SlotToEpoch` divides any slot by the Byron epoch length (mainnet slot 4514400 gives 209, not 208); branch: `EndSlot` and `SlotToEpochChecked` (`ErrSlotAfterByron`) | Conversions use each era's own epoch size | does not conform → conforms | Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet (model `consensus-eras`, `GoByronSoundBug`). Only tests call it |
-| [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129 (head `97dc89b2`). Dingo's view already satisfies the contract |
+| [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129 (head `e7b4261d`, main merged in). Dingo's view already satisfies the contract |
 | [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: a pure function, covered by Go tests |
 | [L3](#l3) | ledger | Conway CC vote with a nil voter key | Not representable | main: `UtxoValidateCCVotingRestrictions` panics; PR: skips it as the sibling rules do | n/a (unreachable from decoded CBOR) | conforms | Open PR #3155. Library defect, hand-built transactions only |
 | [L4](#l4) | ledger | BadInputs covers only spent inputs | Alonzo: spent and collateral inputs; Babbage: reference inputs too | main: spent inputs only; missing collateral and reference inputs are caught by the witness rules instead; PR: the reference's set, with BadInputs first in each rule list | All of them must exist | conforms | Open PR #3193 at `efd0b081` (model `ledger-utxo` `GoBadInputsComplete`, `GoMissingInputIsBadInputs`) |
@@ -333,7 +333,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/BlockFetch/Client.hs` (a receiver per pipelined request)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/blockfetch/client.go` 1238; PR #3114 head `d10daf24` same file 140-147 (`sending`), 1116-1140 (a refused request leaves the queue before the send token is handed back; at `395b9c2e7` the token was released first, so a concurrent range's answers could reach the stale entry: review finding, model `blockfetch` `BlockFetchQueueSendFailsEarlyTokenBug.cfg`)
 - **Verdict.** conforms
-- **Status.** Open PR #3114 at `d10daf24`. Library defect; Dingo works around it
+- **Status.** Open PR #3114 at `d10daf24` (head `a93b4116`, main merged in). Library defect; Dingo works around it
 
 ### N17
 
@@ -388,7 +388,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../TxSubmission/Outbound.hs` 95-104 (`TxOutboundV_2`), 150 (`reqNo0 \`min\` maxReqNo`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/txsubmission/client.go` 331-339
 - **Verdict.** does not conform
-- **Status.** Fixed in PR #3195, head `8ece4753`; model `txsubmission` `TxSubmissionV16ClampBug.cfg` reproduces main. Default windows (10 each side) never trigger it. Review: the first draft `4b7d5262` clamped a blocking request on a full window to zero and sent an empty blocking reply (`TxSubmissionV16ClampBlockingBug.cfg`); `8f6c6d5b` refuses a blocking request for nothing or with ids left before clamping, as `Outbound.hs` 182-185 does; `8ece4753` (test only) pins the served side, a blocking request acknowledging the whole window (`TxSubmissionV16RefuseAckedBlockingBug.cfg`). A non-blocking request clamped to zero gets an empty reply, as the reference does (`ProbeNoZeroClamp`)
+- **Status.** Fixed in PR #3195, head `e5c47f5f` (main merged in); model `txsubmission` `TxSubmissionV16ClampBug.cfg` reproduces main. Default windows (10 each side) never trigger it. Review: the first draft `4b7d5262` clamped a blocking request on a full window to zero and sent an empty blocking reply (`TxSubmissionV16ClampBlockingBug.cfg`); `8f6c6d5b` refuses a blocking request for nothing or with ids left before clamping, as `Outbound.hs` 182-185 does; `8ece4753` (test only) pins the served side, a blocking request acknowledging the whole window (`TxSubmissionV16RefuseAckedBlockingBug.cfg`). A non-blocking request clamped to zero gets an empty reply, as the reference does (`ProbeNoZeroClamp`)
 
 ### N22
 
@@ -634,7 +634,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../MiniProtocol/LeiosNotify/Client.hs` 105 (`MsgCanceled -> throwIO ExnLeiosNotifyUnexpectedCancel`), 228 (`drainThePipe`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/leiosnotify/client.go` 95-97, 168, 215; PR #3160 head `ad0d48de` same file 34-38, 188, 235, and `Sync`, which checks `quitting` before the running loop so that `Sync` after `Stop` returns `ErrProtocolShuttingDown` even while the loop is still parked (at `cfa1edeb` it returned "notification loop is already running")
 - **Verdict.** conforms
-- **Status.** Open PR #3160 (head `ad0d48de`). Model: `specs/leios-peras/LeiosNotifySyncOrderBug.cfg` (`SyncAfterStopReportsShutdown`)
+- **Status.** Open PR #3160 (head `75953b20`, main merged in). Model: `specs/leios-peras/LeiosNotifySyncOrderBug.cfg` (`SyncAfterStopReportsShutdown`)
 
 ### N44
 
@@ -883,7 +883,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **gOuroboros.** gOuroboros `d0b95845` `ledger/shelley/rules.go` 791, 1652; `ledger/common/block_state.go` 747-752; PR #3129 head `97dc89b2` `ledger/common/pool_deposit.go` 43 (`PoolRegistered`), `block_state.go` 163, `ledger/common/rules.go` `LedgerStateCapabilityParent`
 - **Review follow-up.** At `24916e07` the Dijkstra voter check read a committee view that hid the epoch, so a vote by a registered pool with a pending retirement was refused (reference: Conway `Rules/Gov.hs` 473, 596-604 accepts any `psStakePools` member). Fixed at `97dc89b2`; model `ledger-shelley` `VoterHidesEpochBug` / `EpochAware`
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3129 (head `97dc89b2`). Dingo's view already satisfies the contract
+- **Status.** Open PR #3129 (head `e7b4261d`, main merged in). Dingo's view already satisfies the contract
 
 ### L2
 
@@ -1128,7 +1128,7 @@ No pull request yet (decide whether and how to fix):
 - **N13** Handshake `MsgAcceptVersion` carries the server's own data. Fixed on local branch `fix/handshake-accept-negotiated-data`.
 - **N14** Handshake version keys out of order. Fixed on local branch `fix/handshake-version-key-order`.
 - **N18** Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client). Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives.
-- **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed in PR #3195 (head `8ece4753`).
+- **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed in PR #3195 (head `e5c47f5f`).
 - **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Opt-in fix in PR #3196 (head `26f0e50a`), which depends on PR #3154 for the client side.
 - **N28** Local-tx-monitor `MsgGetMeasures`. Not fixed; a missing feature.
 - **N32** Other servers that do not restart after `MsgDone`. Fixed in PR #3197 (head `c107bb53`). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.
