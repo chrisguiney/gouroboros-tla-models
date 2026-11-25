@@ -438,11 +438,11 @@ ledger/common	BlockBodySizeFromCbor	modelled	Block body counts, validity flags, 
 ledger/common	BlockLedgerState.ApplyCertificateDepositLevel	modelled	BlockLedgerState account/pool fold and queries
 ledger/common	BlockLedgerState.ApplyPoolCertificates	modelled	BlockLedgerState account/pool fold and queries
 ledger/common	BlockLedgerState.ApplyTransaction	modelled	BlockLedgerState UTxO fold (ApplyTransaction, UtxoById)
-ledger/common	BlockLedgerState.CommitteeMember	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
-ledger/common	BlockLedgerState.DRepRegistration	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
-ledger/common	BlockLedgerState.DRepRegistrations	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
-ledger/common	BlockLedgerState.GovActionById	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
-ledger/common	BlockLedgerState.GovActionExists	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.CommitteeMember	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.DRepRegistration	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.DRepRegistrations	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.GovActionById	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.GovActionExists	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
 ledger/common	BlockLedgerState.IsFutureVrfKeyInUse	modelled	BlockLedgerState account/pool fold and queries
 ledger/common	BlockLedgerState.IsPoolRegistered	modelled	BlockLedgerState account/pool fold and queries
 ledger/common	BlockLedgerState.IsRewardAccountRegistered	modelled	BlockLedgerState account/pool fold and queries
@@ -472,9 +472,9 @@ ledger/common	CheckAddressFullyConsumed	vectors	Address parse/encode, accessors,
 ledger/common	CheckAddressPointerInRange	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	CloneCostModels	vectors	Protocol parameter CBOR codecs (ExUnits, prices, cost models)
 ledger/common	CombineNonces	modelled	Nonce combination, rolling and epoch nonce
-ledger/common	CommitteeCredentialStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
-ledger/common	CommitteeHotCredentialMembersFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
-ledger/common	CommitteeVotingStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	CommitteeCredentialStateFor	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	CommitteeHotCredentialMembersFor	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	CommitteeVotingStateFor	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
 ledger/common	CompareRedeemerKeys	vectors	Script integrity hash encoding (language views, redeemer key order)
 ledger/common	ComposeUtxoValidationRules	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	ConsumedReferenceScriptSizePerBlock	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
@@ -500,7 +500,7 @@ ledger/common	DeregistrationDrepCertificate.UnmarshalCBOR	vectors	Ledger CBOR co
 ledger/common	DeregistrationDrepCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	DijkstraBlsProofDomainFor	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
 ledger/common	DijkstraLeiosCertificateMessageFor	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
-ledger/common	DRepDelegationStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	DRepDelegationStateFor	modelled	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
 ledger/common	Drep.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	Drep.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	Drep.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
