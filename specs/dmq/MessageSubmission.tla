@@ -134,7 +134,17 @@ CONSTANTS
     \* "none", or a check removed from the outbound to prove an invariant
     \* can fail: "noWindow" (the MaxUnacked limit), "noBlockRule" (blocking
     \* iff nothing is left).
-    Mutation
+    Mutation,
+    \* How many V1 runs one connection may carry. After the outbound's
+    \* MsgDone the inbound (the gOuroboros Server, the V1 responder)
+    \* restarts in StInit, as dmq-node's inbound governor restarts a
+    \* responder that ended cleanly [R6]; 1 means no restart.
+    MaxRuns,
+    \* TRUE: the restart drops the ids the inbound asked bodies for along
+    \* with its window (Server.handleDone resets requestedIDs). FALSE: it
+    \* keeps them, so with InRefusesRepeat an id announced again in the next
+    \* run could never have its body asked for.
+    ForgetAskedOnRestart
 
 \* In English: "Id 0 is an id the outbound never announced; real ids are
 \* 1..MaxIds, handed out in order."
@@ -185,11 +195,12 @@ VARIABLES
     outServed, \* ids the outbound has served bodies for, still unacknowledged
     nextId,    \* the next id the outbound's queue will announce
     refused,   \* "none", or why the outbound refused a request [S1]
-    servedTwice \* TRUE once the outbound served one id's body twice
+    servedTwice, \* TRUE once the outbound served one id's body twice
+    runs       \* how many runs have started on the connection
 
-\* Literally: "vars is defined as the tuple of all nine variables."
+\* Literally: "vars is defined as the tuple of all ten variables."
 vars == <<st, req, inQ, outQ, inAsked, outServed, nextId, refused,
-          servedTwice>>
+          servedTwice, runs>>
 
 \* In English: "The empty request: not blocking, acknowledging nothing, asking
 \* for nothing."
@@ -203,7 +214,7 @@ NoReq == [blocking |-> FALSE, ack |-> 0, n |-> 0]
 \*   else "Idle"), and req equals NoReq, and inQ equals the empty sequence and
 \*   outQ equals the empty sequence, and inAsked equals the empty set and
 \*   outServed equals the empty set, and nextId equals 1, and refused equals
-\*   "none", and servedTwice equals FALSE."
+\*   "none", and servedTwice equals FALSE, and runs equals 1."
 Init ==
     /\ st = IF Version = 1 THEN "Init" ELSE "Idle"
     /\ req = NoReq
@@ -212,6 +223,7 @@ Init ==
     /\ nextId = 1
     /\ refused = "none"
     /\ servedTwice = FALSE
+    /\ runs = 1
 
 \* In English: "Some end of the connection runs the inbound side, the one
 \* that asks. In V1 it always does; in V2 only when the two ends agree that
@@ -231,7 +243,7 @@ InboundRuns == Version = 1 \/ RolesMatch
 SendInit ==
     /\ Version = 1 /\ st = "Init"
     /\ st' = "Idle"
-    /\ UNCHANGED <<req, inQ, outQ, inAsked, outServed, nextId, refused,
+    /\ UNCHANGED <<runs, req, inQ, outQ, inAsked, outServed, nextId, refused,
                    servedTwice>>
 
 -----------------------------------------------------------------------------
@@ -267,7 +279,7 @@ RequestIds ==
                    /\ UNCHANGED refused
               ELSE /\ refused' = "ids request"
                    /\ UNCHANGED <<st, req>>
-    /\ UNCHANGED <<inQ, outQ, inAsked, outServed, nextId, servedTwice>>
+    /\ UNCHANGED <<runs, inQ, outQ, inAsked, outServed, nextId, servedTwice>>
 
 \* In English: "The outbound answers with k fresh ids from its queue: no
 \* more than asked for, at least one if blocking [S2]. Both sides drop the
@@ -299,7 +311,7 @@ ReplyIds ==
               /\ inAsked' = inAsked \ dropped
               /\ nextId' = nextId + k
     /\ st' = "Idle" /\ req' = NoReq
-    /\ UNCHANGED <<refused, servedTwice>>
+    /\ UNCHANGED <<runs, refused, servedTwice>>
 
 \* In English: "In V2, when the outbound can say so, it answers a blocking
 \* request with no ids: both sides drop the ack oldest ids (all of them,
@@ -324,7 +336,7 @@ ReplyNoIds ==
           /\ outServed' = outServed \ dropped
           /\ inAsked' = inAsked \ dropped
     /\ st' = "Idle" /\ req' = NoReq
-    /\ UNCHANGED <<nextId, refused, servedTwice>>
+    /\ UNCHANGED <<runs, nextId, refused, servedTwice>>
 
 -----------------------------------------------------------------------------
 (* Bodies.                                                                 *)
@@ -369,7 +381,7 @@ RequestBodies ==
                 /\ servedTwice' = (servedTwice \/ ids \cap outServed /= {})
                 /\ outServed' = outServed \cup ids
                 /\ UNCHANGED refused
-    /\ UNCHANGED <<req, inQ, outQ, nextId>>
+    /\ UNCHANGED <<runs, req, inQ, outQ, nextId>>
 
 \* In English: "The outbound answers with the bodies it still has (it may
 \* omit some) and the inbound is back in StIdle."
@@ -379,7 +391,7 @@ RequestBodies ==
 ReplyBodies ==
     /\ st = "Messages"
     /\ st' = "Idle"
-    /\ UNCHANGED <<req, inQ, outQ, inAsked, outServed, nextId, refused,
+    /\ UNCHANGED <<runs, req, inQ, outQ, inAsked, outServed, nextId, refused,
                    servedTwice>>
 
 -----------------------------------------------------------------------------
@@ -399,8 +411,31 @@ SendDone ==
     /\ \/ Version = 1 /\ st = "IdsBlocking"
        \/ Version = 2 /\ st = "Idle" /\ InboundRuns
     /\ st' = "Done"
-    /\ UNCHANGED <<req, inQ, outQ, inAsked, outServed, nextId, refused,
+    /\ UNCHANGED <<runs, req, inQ, outQ, inAsked, outServed, nextId, refused,
                    servedTwice>>
+
+\* In English: "In V1, after the outbound's MsgDone, the inbound restarts
+\* in StInit for a new run on the same connection [R6]. The windows and
+\* the bodies served belong to the run and start empty; the outbound
+\* announces again from its queue, so the same ids may come back. With
+\* ForgetAskedOnRestart the inbound's record of ids it asked for goes too."
+\* Literally: "Restart is defined as: Version equals 1, and st equals
+\*   "Done", and refused equals "none", and runs is less than MaxRuns, and st
+\*   in the next state equals "Init", and req in the next state equals NoReq,
+\*   and inQ and outQ in the next state equal the empty sequence, and
+\*   outServed in the next state equals the empty set, and inAsked in the
+\*   next state equals (if ForgetAskedOnRestart then the empty set else
+\*   inAsked), and nextId in the next state equals 1, and runs in the next
+\*   state equals runs plus 1, and refused and servedTwice are unchanged."
+Restart ==
+    /\ Version = 1 /\ st = "Done" /\ refused = "none" /\ runs < MaxRuns
+    /\ st' = "Init" /\ req' = NoReq
+    /\ inQ' = <<>> /\ outQ' = <<>>
+    /\ outServed' = {}
+    /\ inAsked' = IF ForgetAskedOnRestart THEN {} ELSE inAsked
+    /\ nextId' = 1
+    /\ runs' = runs + 1
+    /\ UNCHANGED <<refused, servedTwice>>
 
 -----------------------------------------------------------------------------
 
@@ -422,11 +457,12 @@ Quiet ==
 \* In English: "A step is MsgInit, a request or reply for ids, a request or
 \* reply for bodies, done, or, once nothing more happens, nothing."
 \* Literally: "Next is defined as: SendInit, or RequestIds, or ReplyIds, or
-\*   ReplyNoIds, or RequestBodies, or ReplyBodies, or SendDone, or Quiet."
+\*   ReplyNoIds, or RequestBodies, or ReplyBodies, or SendDone, or Restart,
+\*   or Quiet."
 Next ==
     \/ SendInit \/ RequestIds \/ ReplyIds \/ ReplyNoIds
     \/ RequestBodies \/ ReplyBodies
-    \/ SendDone \/ Quiet
+    \/ SendDone \/ Restart \/ Quiet
 
 \* In English: "Start in Init, and from then on every step is a Next step."
 \* Literally: "Spec is defined as: Init holds at the start, and always, every
@@ -463,6 +499,12 @@ NoRepeatServe == ~servedTwice
 \* Literally: "HonestNeverRefused is defined as: if refused does not equal
 \*   "none", then Rogue is true."
 HonestNeverRefused == refused /= "none" => Rogue
+
+\* In English: "The inbound has asked bodies only for ids in its current
+\* window, so every id it is announced it may still ask for once."
+\* Literally: "AskedInWindow is defined as: inAsked is a subset of Range of
+\*   inQ."
+AskedInWindow == inAsked \subseteq Range(inQ)
 
 \* Probes, each EXPECTED to be violated.
 \* In English: "The window never fills." Violated = it does.

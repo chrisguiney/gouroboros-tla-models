@@ -365,6 +365,13 @@ stands for every combined field); key order in `HandshakeSimOpen.tla`;
 version numbers gOuroboros cannot decode; the 20 s delay before the reference closes
 a query connection; the connection-wide handshake timeout in `connection.go`.
 
+## After merging main into #3127
+
+Merge `5c13b3df` (main at `71ea8189`) answers a query only after the version
+and network-magic checks, as #3127 does, and accepts with the agreed data from
+main's #3194. The two are separate branches of the same handler, so the
+merge changes nothing the model checks.
+
 ## Running it
 
 ```sh
