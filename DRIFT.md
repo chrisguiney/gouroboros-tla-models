@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-99 entries. On `main`: does not conform 50; conforms 25; conforms (implementation choice) 14; conforms (stricter) 10. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+100 entries. On `main`: does not conform 53; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
