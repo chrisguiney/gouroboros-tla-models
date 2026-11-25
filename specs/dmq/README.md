@@ -473,7 +473,10 @@ With the fixes `MessageIngress.cfg` (148,820 states) passes every question.
 Mutations: `RateOnDuplicateBug` (the limit applied to an accepted message, so
 relaying it fails), `NoRateRecheckBug` (commit without re-checking the limit
 accepts two concurrent submissions), `DupRaceFatalBug` (a submission that lost
-a race to the same message is refused). Probes: `ProbeKeepValidBug` (a reply
+a race to the same message is refused), `RecheckWhenOffBug` (with the limit
+off, Delay 0, commit still compares a prepared time with a later acceptance
+and refuses the negative gap; `LimitOff.cfg` is the fixed run, and adds the
+question `OffNeverRefused`). Probes: `ProbeKeepValidBug` (a reply
 both accepts a message and disconnects, as in the reference),
 `ProbeTooFrequentBug` (a message with no other failure is refused as too
 frequent).
