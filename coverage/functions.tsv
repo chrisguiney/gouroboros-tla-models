@@ -171,7 +171,7 @@ ledger/allegra	NewAllegraBlockHeaderFromCbor	vectors	allegra codecs
 ledger/allegra	NewAllegraTransactionBodyFromCbor	vectors	allegra codecs
 ledger/allegra	NewAllegraTransactionFromCbor	vectors	allegra codecs
 ledger/allegra	UtxoValidateFeeTooSmallUtxo	modelled	Allegra UTxO rule
-ledger/allegra	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/allegra	UtxoValidateMaxTxSizeUtxo	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/allegra	UtxoValidateNativeScripts	modelled	Native scripts (witness family)
 ledger/allegra	UtxoValidateOutputTooSmallUtxo	modelled	Allegra UTxO rule
 ledger/allegra	UtxoValidateOutsideValidityIntervalUtxo	modelled	Allegra UTxO rule
@@ -185,9 +185,9 @@ ledger/alonzo	AlonzoGenesisCostModels.UnmarshalJSON	vectors	Alonzo genesis
 ledger/alonzo	AlonzoGenesisExecutionPrices.UnmarshalJSON	vectors	Alonzo genesis
 ledger/alonzo	AlonzoGenesisExUnits.UnmarshalJSON	vectors	Alonzo genesis
 ledger/alonzo	AlonzoProtocolParameters.UpdateFromGenesis	gap	Shelley-Babbage pparam update application
-ledger/alonzo	AlonzoProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/alonzo	AlonzoProtocolParameters.Update	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/alonzo	AlonzoProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
-ledger/alonzo	AlonzoProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/alonzo	AlonzoProtocolParameterUpdate.UnmarshalCBOR	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/alonzo	AlonzoRedeemers.Indexes	modelled	Alonzo UTxO, collateral and IsValid rules
 ledger/alonzo	AlonzoRedeemers.Iter	modelled	Alonzo UTxO, collateral and IsValid rules
 ledger/alonzo	AlonzoRedeemers.MarshalJSON	gap	UTxO RPC / JSON / String conversions
@@ -217,8 +217,8 @@ ledger/alonzo	AlonzoTransaction.Produced	modelled	Alonzo UTxO, collateral and Is
 ledger/alonzo	AlonzoTransaction.UnmarshalCBOR	vectors	alonzo codecs
 ledger/alonzo	AlonzoTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/alonzo	AlonzoTransactionWitnessSet.UnmarshalCBOR	vectors	alonzo codecs
-ledger/alonzo	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
-ledger/alonzo	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/alonzo	MinCoinTxOut	vectors	Fees, size and minimum coin (cardano-ledger goldens)
+ledger/alonzo	MinFeeTx	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/alonzo	NewAlonzoBlockFromCbor	vectors	alonzo codecs
 ledger/alonzo	NewAlonzoBlockHeaderFromCbor	vectors	alonzo codecs
 ledger/alonzo	NewAlonzoGenesisFromFile	vectors	Alonzo genesis
@@ -234,7 +234,7 @@ ledger/alonzo	UtxoValidateFeeTooSmallUtxo	modelled	Alonzo UTxO, collateral and I
 ledger/alonzo	UtxoValidateInsufficientCollateral	modelled	Alonzo UTxO, collateral and IsValid rules
 ledger/alonzo	UtxoValidateIsValidFlag	modelled	Alonzo UTxO, collateral and IsValid rules
 ledger/alonzo	UtxoValidateMalformedReferenceScripts	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
-ledger/alonzo	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/alonzo	UtxoValidateMaxTxSizeUtxo	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/alonzo	UtxoValidateMetadata	gap	Pre-Conway metadata rule
 ledger/alonzo	UtxoValidateNoCollateralInputs	modelled	Alonzo UTxO, collateral and IsValid rules
 ledger/alonzo	UtxoValidateOutputTooBigUtxo	modelled	Alonzo UTxO, collateral and IsValid rules
@@ -256,9 +256,9 @@ ledger/babbage	BabbageBlock.MarshalCBOR	vectors	babbage codecs
 ledger/babbage	BabbageBlock.Transactions	modelled	Block.Transactions validity flags (Alonzo+)
 ledger/babbage	BabbageBlock.UnmarshalCBOR	vectors	babbage codecs
 ledger/babbage	BabbageBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
-ledger/babbage	BabbageProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/babbage	BabbageProtocolParameters.Update	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/babbage	BabbageProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
-ledger/babbage	BabbageProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/babbage	BabbageProtocolParameterUpdate.UnmarshalCBOR	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/babbage	BabbageTransactionBody.Certificates	modelled	Babbage UTxO, collateral and IsValid rules
 ledger/babbage	BabbageTransactionBody.Collateral	modelled	Babbage UTxO, collateral and IsValid rules
 ledger/babbage	BabbageTransactionBody.CollateralReturn	modelled	Babbage UTxO, collateral and IsValid rules
@@ -289,8 +289,8 @@ ledger/babbage	BabbageTransaction.UnmarshalCBOR	vectors	babbage codecs
 ledger/babbage	BabbageTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/babbage	BabbageTransactionWitnessSet.MarshalCBOR	vectors	babbage codecs
 ledger/babbage	BabbageTransactionWitnessSet.UnmarshalCBOR	vectors	babbage codecs
-ledger/babbage	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
-ledger/babbage	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/babbage	MinCoinTxOut	vectors	Fees, size and minimum coin (cardano-ledger goldens)
+ledger/babbage	MinFeeTx	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/babbage	NewBabbageBlockFromCbor	vectors	babbage codecs
 ledger/babbage	NewBabbageBlockHeaderFromCbor	vectors	babbage codecs
 ledger/babbage	NewBabbageTransactionBodyFromCbor	vectors	babbage codecs
@@ -309,7 +309,7 @@ ledger/babbage	UtxoValidateInlineDatumsWithPlutusV1	modelled	Babbage witness/dat
 ledger/babbage	UtxoValidateInsufficientCollateral	modelled	Babbage UTxO, collateral and IsValid rules
 ledger/babbage	UtxoValidateIsValidFlag	modelled	Babbage UTxO, collateral and IsValid rules
 ledger/babbage	UtxoValidateMalformedReferenceScripts	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
-ledger/babbage	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/babbage	UtxoValidateMaxTxSizeUtxo	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/babbage	UtxoValidateMetadata	gap	Pre-Conway metadata rule
 ledger/babbage	UtxoValidateNativeScripts	modelled	Native scripts (witness family)
 ledger/babbage	UtxoValidateNoCollateralInputs	modelled	Babbage UTxO, collateral and IsValid rules
@@ -459,8 +459,8 @@ ledger/common	ByronAddressAttributes.UnmarshalCBOR	vectors	Address parse/encode,
 ledger/common	ByronTxFeePolicy.MinFee	modelled	Byron min fee policy
 ledger/common	CalculateAdaPots	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
 ledger/common	CalculateEpochNonce	modelled	Nonce combination, rolling and epoch nonce
-ledger/common	CalculateExecutionUnitsFee	gap	Min fee, tx size, execution-unit fee (incl. Conway ref-script tiers)
-ledger/common	CalculateMinFee	gap	Min fee, tx size, execution-unit fee (incl. Conway ref-script tiers)
+ledger/common	CalculateExecutionUnitsFee	vectors	Fees, size and minimum coin (cardano-ledger goldens)
+ledger/common	CalculateMinFee	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/common	CalculateOptimalPoolCount	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
 ledger/common	CalculatePoolSaturation	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
 ledger/common	CalculateRewards	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
@@ -754,7 +754,7 @@ ledger/common	TxComponent.String	gap	Error()/Unwrap/WithDiagnostic string method
 ledger/common	TxDecodeError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
 ledger/common	TxDecodeError.Unwrap	gap	Error()/Unwrap/WithDiagnostic string methods
 ledger/common	TxDecodeError.WithDiagnostic	gap	Error()/Unwrap/WithDiagnostic string methods
-ledger/common	TxSize	gap	Min fee, tx size, execution-unit fee (incl. Conway ref-script tiers)
+ledger/common	TxSize	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/common	UnwrapLedgerState	caller-contract	UnwrapLedgerState capability lookup
 ledger/common	UpdateCommitteeGovAction.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	UpdateCommitteeGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
@@ -858,10 +858,10 @@ ledger/conway	ConwayParameterChangeGovAction.SecurityGroupFields	gap	Conway ppar
 ledger/conway	ConwayParameterChangeGovAction.ToPlutusData	gap	Conway script-context translation of governance
 ledger/conway	ConwayParameterChangeGovAction.UnmarshalCBOR	vectors	conway codecs
 ledger/conway	ConwayProposalProcedure.UnmarshalCBOR	vectors	conway codecs
-ledger/conway	ConwayProtocolParameters.ApplyUpdate	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameters.ApplyUpdate	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/conway	ConwayProtocolParameters.CommitteeMaxTermLength	gap	Conway pparams application and security groups
 ledger/conway	ConwayProtocolParameters.UpdateFromGenesis	gap	Conway pparams application and security groups
-ledger/conway	ConwayProtocolParameters.Update	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameters.Update	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/conway	ConwayProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/conway	ConwayProtocolParameterUpdate.SecurityGroupFields	gap	Conway pparams application and security groups
 ledger/conway	ConwayProtocolParameterUpdate.ToPlutusData	gap	Conway script-context translation of governance
@@ -935,7 +935,7 @@ ledger/conway	UtxoValidateHardForkCanFollow	gap	Conway governance rules not pinn
 ledger/conway	UtxoValidateInsufficientCollateral	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateIsValidFlag	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateMalformedReferenceScripts	vectors	Conway rules exercised by Blueprint vectors
-ledger/conway	UtxoValidateMaxTxSizeUtxo	gap	Conway max tx size
+ledger/conway	UtxoValidateMaxTxSizeUtxo	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/conway	UtxoValidateMetadata	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateNoCollateralInputs	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateOutputTooBigUtxo	vectors	Conway rules exercised by Blueprint vectors
@@ -1130,10 +1130,10 @@ ledger/mary	MaryBlock.MarshalCBOR	vectors	mary codecs
 ledger/mary	MaryBlock.Transactions	vectors	Block.Transactions (pre-Alonzo)
 ledger/mary	MaryBlock.UnmarshalCBOR	vectors	mary codecs
 ledger/mary	MaryBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
-ledger/mary	MaryProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/mary	MaryProtocolParameters.Update	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/mary	MaryProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/mary	MaryProtocolParameterUpdate.MarshalCBOR	gap	Shelley-Babbage pparam update application
-ledger/mary	MaryProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/mary	MaryProtocolParameterUpdate.UnmarshalCBOR	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/mary	MaryTransactionBody.Certificates	modelled	Mary UTxO rule
 ledger/mary	MaryTransactionBody.Id	vectors	Mary tx id
 ledger/mary	MaryTransactionBody.Inputs	modelled	Mary UTxO rule
@@ -1156,8 +1156,8 @@ ledger/mary	MaryTransactionOutputValue.UnmarshalCBOR	vectors	mary codecs
 ledger/mary	MaryTransaction.Produced	modelled	Mary UTxO rule
 ledger/mary	MaryTransaction.UnmarshalCBOR	vectors	mary codecs
 ledger/mary	MaryTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
-ledger/mary	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
-ledger/mary	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/mary	MinCoinTxOut	vectors	Fees, size and minimum coin (cardano-ledger goldens)
+ledger/mary	MinFeeTx	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/mary	NewMaryBlockFromCbor	vectors	mary codecs
 ledger/mary	NewMaryBlockHeaderFromCbor	vectors	mary codecs
 ledger/mary	NewMaryTransactionBodyFromCbor	vectors	mary codecs
@@ -1165,7 +1165,7 @@ ledger/mary	NewMaryTransactionFromCbor	vectors	mary codecs
 ledger/mary	NewMaryTransactionOutputFromCbor	vectors	mary codecs
 ledger/mary	OutputTooBigUtxoError.Error	gap	Errors: Error() strings
 ledger/mary	UtxoValidateFeeTooSmallUtxo	modelled	Mary UTxO rule
-ledger/mary	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/mary	UtxoValidateMaxTxSizeUtxo	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/mary	UtxoValidateOutputTooBigUtxo	modelled	Mary UTxO rule
 ledger/mary	UtxoValidateOutputTooSmallUtxo	modelled	Mary UTxO rule
 ledger/mary	UtxoValidateValueNotConservedUtxo	modelled	Mary UTxO rule
@@ -1192,8 +1192,8 @@ ledger	ScriptWitnessNotValidatingUTXOW.Error	gap	ApplyTxError / UTXO(W) failure 
 ledger/shelley	BadInputsUtxoError.Error	gap	Errors: Error() strings
 ledger/shelley	FeeTooSmallUtxoError.Error	gap	Errors: Error() strings
 ledger/shelley	IncorrectWithdrawalAmountError.Error	gap	Errors: Error() strings
-ledger/shelley	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
-ledger/shelley	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/shelley	MinCoinTxOut	vectors	Fees, size and minimum coin (cardano-ledger goldens)
+ledger/shelley	MinFeeTx	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/shelley	MIRNegativesNotCurrentlyAllowedError.Error	gap	Errors: Error() strings
 ledger/shelley	MIRProducesNegativeUpdateError.Error	gap	Errors: Error() strings
 ledger/shelley	MustNewShelleyTransactionInput	gap	Shelley constructors
@@ -1220,9 +1220,9 @@ ledger/shelley	ShelleyGenesis.InitialPools	gap	Shelley genesis staking and CBOR
 ledger/shelley	ShelleyGenesis.MarshalCBOR	gap	Shelley genesis staking and CBOR
 ledger/shelley	ShelleyGenesis.PoolById	gap	Shelley genesis staking and CBOR
 ledger/shelley	ShelleyProtocolParameters.UpdateFromGenesis	gap	Shelley-Babbage pparam update application
-ledger/shelley	ShelleyProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/shelley	ShelleyProtocolParameters.Update	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/shelley	ShelleyProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
-ledger/shelley	ShelleyProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/shelley	ShelleyProtocolParameterUpdate.UnmarshalCBOR	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/shelley	ShelleyTransactionBody.Certificates	modelled	Shelley UTxO rule core
 ledger/shelley	ShelleyTransactionBody.Id	vectors	Shelley tx id
 ledger/shelley	ShelleyTransactionBody.Inputs	modelled	Shelley UTxO rule core
@@ -1248,7 +1248,7 @@ ledger	ShelleyTxValidationError.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure
 ledger/shelley	UtxoValidateDelegation	modelled	Shelley DELEG/POOL certificates
 ledger/shelley	UtxoValidateFeeTooSmallUtxo	modelled	Shelley UTxO rule core
 ledger/shelley	UtxoValidateInputSetEmptyUtxo	modelled	Shelley UTxO rule core
-ledger/shelley	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/shelley	UtxoValidateMaxTxSizeUtxo	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/shelley	UtxoValidateMetadata	gap	Pre-Conway metadata rule
 ledger/shelley	UtxoValidateNativeScripts	modelled	Native scripts (witness family)
 ledger/shelley	UtxoValidateNoDuplicateInputs	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks

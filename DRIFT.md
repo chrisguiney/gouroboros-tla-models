@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-82 entries. On `main`: does not conform 36; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
+83 entries. On `main`: does not conform 37; conforms 24; conforms (implementation choice) 14; conforms (stricter) 8.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -131,6 +131,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L10](#l10) | ledger | Leios certificate in a later epoch than its announcement | cardano-ledger refuses it (`LeiosCertAnnouncedInPreviousEpoch`); the consensus prototype does not check | Not checked | Not required | conforms | Recorded (model `ledger-leios`) |
 | [L11](#l11) | ledger | Node-to-client CertRB with inlined EB transactions | none | Accepts a certifying block whose endorser-block transactions are inlined, over node-to-client only | CertRB carries no transactions on chain | conforms | Local delivery only; the on-chain body is unchanged |
 | [L13](#l13) | ledger | Conway vote naming an enacted purpose root | Refused, `GovActionsDoNotExist`: votes resolve against the live proposals only | main: accepted when the caller's `GovActionById` returns the root, which the contract allowed and Dingo does; PR: the contract excludes roots | A vote names a proposal in the governance state | does not conform → conforms | Open PR #3155. Dingo's `GovActionById` must stop returning the current root |
+| [L14](#l14) | ledger | Proposed protocol version width in a classic parameter update | Minor is `Word32`; major bounded per era | main: both 16 bits, so a minor above 65,535 is refused; branch: minor 32 bits | Silent on widths | does not conform → conforms | Local branch `fix/ledger-pparam-update-minor-width` |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1016,6 +1017,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Open PR #3155. Model `ledger-governance` `VotesOnlyLive`, `GovLifecycleRootVoteBug.cfg`. Dingo 2fc7975d `ledger/view.go` 2680-2692 returns the root and must drop that exception
 
+### L14
+
+**Proposed protocol version in a classic parameter update** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: `decodeProtVer` reads a `Word32` minor and a major bounded by the era's `ProtVerHigh + 1`. gOuroboros: major and minor both limited to 16 bits, so a minor above 65,535 is refused; branch: minor up to 32 bits. The major bound still differs (gOuroboros 65,535; reference 3 to 9 by era), but the PPUP version-can-follow rule rejects any such proposal, so only the failure class differs.
+- **Spec.** Shelley formal spec `update.tex` (`pvCanFollow`); silent on widths
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/BaseTypes.hs` 212 (`pvMinor :: Word32`), 254-264 (`decodeProtVer`); `eras/shelley/impl/src/Cardano/Ledger/Shelley/PParams.hs` 490-505
+- **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/pparam_update_validation.go` 198-212 (`ValidateProtocolParameterUpdateDomains`)
+- **Verdict.** does not conform → conforms (minor); major: conforms (outcome)
+- **Status.** Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet. Allegra shares Shelley's update type, so an era-exact major bound would need its own type
+
 ## Pipeline
 
 ### P1
@@ -1130,6 +1142,7 @@ No pull request yet (decide whether and how to fix):
 - **L5** Byron transaction with no inputs or no outputs. Fixed on a local branch, no PR yet.
 - **L6** Byron `maxTxSize`. Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`).
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
+- **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
 
 Fixed by an open pull request (decide by reviewing and merging it):
 

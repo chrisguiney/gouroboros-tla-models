@@ -83,7 +83,7 @@ Items are counted per package, so an item that spans two packages counts twice.
 These shape how far the "vectors" and "modelled" verdicts reach.
 
 1. **The Blueprint ledger corpus reaches only Conway rule functions.** ouroboros-mock v0.21.3 `conformance/validation_rules.go` lists 103 `conway.*` rules and no rule from any other era, even for the Shelley, Mary, Alonzo and Babbage titles. Shelley-to-Babbage and Dijkstra `Validate*` rules get no ledger vectors. The corpus has no Byron or Dijkstra vectors at all.
-2. **The corpus checks neither fees nor transaction size.** The same file excludes `UtxoValidateFeeTooSmallUtxo` and `UtxoValidateMaxTxSizeUtxo` (lines 114-148), and `ledger-utxo` models the minimum fee as 1. Min-fee, reference-script fee and size arithmetic are gaps in every era.
+2. **The corpus checks neither fees nor transaction size.** The same file excludes `UtxoValidateFeeTooSmallUtxo` and `UtxoValidateMaxTxSizeUtxo` (lines 114-148), and `ledger-utxo` models the minimum fee as 1. Enabling both rules (by appending them to the mock's exported rule lists in a scratch test) leaves all 2,575 vectors passing, and a rule that always fails makes 2,409 fail, so the rules do run. They still pin nothing: every one of the 2,410 transactions that reaches them overpays the minimum fee by at least 15,825 lovelace, none is near `maxTxSize` (16,384), and the corpus has no FeeTooSmall or MaxTxSize rejection. To make them useful ouroboros-mock needs: the two rules in its lists (its "CBOR encoding differences" reason is stale; `TxSize` uses the received bytes), a `HarnessConfig` hook for extra rules, per-era parameters so pre-Conway titles use their era's fee rule (Babbage has no reference-script fee), and vectors at the fee and size boundaries. The formulas are now pinned by the cardano-ledger golden tests listed under "Closed since the audit".
 3. **Most Conway GOV rules are not pinned by the corpus.** The harness runs its own phase-1 validator before `common.VerifyTransaction`. The `ledger-governance` README records that 15 of the 17 GOV rules can be made to return nil with every vector still passing, so those rules are classed as gaps, not vectors.
 4. **Some model-driven Go tests are not on gOuroboros `main`.** The selection, validation and envelope tables (`consensus`), the witness table (`ledger-witnesses`), the hash-cache tests (`ledger-hash-cache`), the certificate lifecycle test (`ledger-shelley`) and the Leios ledger cells (`ledger-leios`) live on open branches (see [PRS.md](PRS.md)). Those items are still classed *modelled*, because the invariant exists here, but nothing on `main` ties the code to it.
 5. **Reference goldens that ouroboros-mock already ships go unused.** No gOuroboros test reads:
@@ -104,6 +104,15 @@ These shape how far the "vectors" and "modelled" verdicts reach.
 8. **Stale "Not modelled" notes.** `specs/consensus/README.md` still lists Tachys and the Byron delegation map as not modelled; `consensus-tachys` and `ledger-byron/ByronDelegation.tla` now model them. The `pipeline-cbor` note on the retained-CBOR byte budget predates `PipelineLifecycle.tla` `BudgetMatchesActive`.
 9. **`ValidateHeader` is modelled; the production path is not.** Dingo validates headers through `ledger.VerifyBlock` (DRIFT C15). The `consensus-eras` check-order model covers `consensus.ValidateHeader`, so the modelled order and overlay handling are not those of the path in production.
 
+
+### Closed since the audit
+
+| Item | Functions | Now | Test (gOuroboros branch) |
+| --- | ---: | --- | --- |
+| Min fee, tx size and execution-unit fee; pre-Conway `MinFeeTx` / `MinCoinTxOut`; every era's max-size rule | 17 | vectors | `ledger/fee_reference_test.go` on `test/ledger-fee-reference`: cardano-ledger `tx.cbor` and `pparams.json` goldens for Shelley-Conway, expectations derived from `sizeTxF`, `alonzoMinFeeTx`, `txscriptfee`, `utxoEntrySize`, `babbageMinUTxOValue` and the Allegra pointwise output rule; `tierRefScriptFee` replayed from the reference's own unit-test values |
+| Protocol parameter update keys and application, Shelley-Conway | 10 | vectors | `ledger/pparam_update_keys_test.go` on `test/ledger-pparam-update-reference`: keys 0-40 against each era's `eraPParams` list; each accepted key must change the parameters |
+
+Not closed: `UpdateFromGenesis` in every era, Dijkstra parameters, the reference's era bound on a proposed major version (gOuroboros allows 16 bits; see DRIFT L14), Mary's `scaledMinDeposit` as a number (it is unobservable through the Allegra/Mary pointwise rule, and `mary.MinCoinTxOut` takes no output), and Byron.
 
 ## Ranked gaps
 
