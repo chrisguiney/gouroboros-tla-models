@@ -35,11 +35,18 @@
 (* The validate stage has the same shape as the decode stage (a worker     *)
 (* pool joined, then its output closed); one stage stands for both.        *)
 (*                                                                         *)
-(* Open PR #3161 (branch fix/pipeline-reference-behaviour, 0dbc3775) is   *)
-(* switch PR3161: the forwarder always accepts from resultsQueue and       *)
-(* returns the reservation at once, Stop joins the runner directly and     *)
-(* waits for resultsDone, and WaitForDrain during Stop waits for the       *)
-(* runner to exit (waitForApplyRunner).                                    *)
+(* PR #3161 (branch fix/pipeline-reference-behaviour, 0dbc3775; merged   *)
+(* to gOuroboros main as 1559924b) is switch PR3161: the forwarder always  *)
+(* accepts from resultsQueue and returns the reservation at once, Stop     *)
+(* joins the runner directly and waits for resultsDone, and WaitForDrain   *)
+(* during Stop waits for the runner to exit (waitForApplyRunner). Main     *)
+(* from 1559924b is PR3161 with NewStop and CancelCleanup off.             *)
+(*                                                                         *)
+(* PR #3233 (fix/pipeline-lifecycle) folds NewStop and CancelCleanup      *)
+(* together on top of PR3161: Stop(ctx) and the parent-cancel watcher both *)
+(* go through requestStop, which starts the one teardown goroutine; the    *)
+(* watcher only requests and returns, and Stop waits for the teardown and  *)
+(* the watcher. The Main configs check that combination.                   *)
 (*                                                                         *)
 (* No specification source: this is gOuroboros' own Go API. The reference  *)
 (* counterpart, the ChainDB add-block runner (ouroboros-consensus          *)
@@ -97,7 +104,6 @@ CONSTANTS
 ASSUME ApplyMode \in {"returns", "blocks", "callsStop", "callsDrain", "callsStopOther"}
 ASSUME Mutation \in {"None", "CloseBeforeJoin", "SkipRunnerJoin",
                      "NoReleaseActive", "ReleaseTwice", "MarkerForAll", "NoWatchJoin"}
-ASSUME ~(NewStop /\ CancelCleanup)   \* the two fixes are on separate branches
 
 \* In English: the goroutines that may run Stop's steps: the owner, a
 \* second goroutine, ApplyFunc itself ("cb"), the teardown goroutine of
@@ -823,14 +829,23 @@ StopJoinWatch(s) ==
 
 \* In English: [fix/pipeline-cancel-cleanup] the watcher wakes when the
 \* pipeline context is done. If an explicit Stop has begun it exits;
-\* otherwise it runs Stop's teardown itself.
+\* otherwise it runs Stop's teardown itself. With NewStop (PR #3233,
+\* watchParentCancel and requestStop(false)) it never runs the teardown
+\* itself: it starts the teardown goroutine unless an explicit Stop has
+\* begun or the teardown has already started, and exits.
 \* Literally: "WatchWake is defined as: stopPc of "watch" equals
-\*   "watchWait", and canceled is true, and stopPc in the next state equals
-\*   stopPc except that its "watch" entry is (if stopping then "exited" else
-\*   "lockMu"), and every other variable is unchanged."
+\*   "watchWait", and canceled is true, and stopPc in the next state equals:
+\*   if NewStop, then stopPc except that its "watch" entry is "exited" and
+\*   its "td" entry is (if stopping or the old entry does not equal "idle"
+\*   then the old entry else "gate"); else stopPc except that its "watch"
+\*   entry is (if stopping then "exited" else "lockMu"); and every other
+\*   variable is unchanged."
 WatchWake ==
     /\ stopPc["watch"] = "watchWait" /\ canceled
-    /\ stopPc' = [stopPc EXCEPT !["watch"] = IF stopping THEN "exited" ELSE "lockMu"]
+    /\ stopPc' = IF NewStop
+                   THEN [stopPc EXCEPT !["watch"] = "exited",
+                                       !["td"] = IF stopping \/ @ /= "idle" THEN @ ELSE "gate"]
+                   ELSE [stopPc EXCEPT !["watch"] = IF stopping THEN "exited" ELSE "lockMu"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
                    canceled, stopping, stopped, dV, panicked>>
 
@@ -838,8 +853,12 @@ WatchWake ==
 \* cancel, and start the one teardown goroutine if it has not started. A
 \* caller whose ctx carries this pipeline's ApplyFunc marker returns at
 \* once (it may be the runner itself); any other caller waits.
+\* stopping is published only by the call that starts the teardown
+\* (requestStop returns before it once teardownStarted is set), so after
+\* the watcher has started it, a later Stop leaves stopping false.
 \* Literally: "StopSignal of s is defined as: stopPc of s equals "signal",
-\*   and stopping in the next state equals TRUE, and canceled in the next
+\*   and stopping in the next state equals (stopping, or stopPc of "td"
+\*   equals "idle"), and canceled in the next
 \*   state equals TRUE, and stopPc in the next state equals stopPc except
 \*   that its s entry is (if (s equals "cb" and CbMarked) or Mutation
 \*   equals "MarkerForAll" then "requested" else "waitTd"), and its "td"
@@ -847,7 +866,7 @@ WatchWake ==
 \*   entry), and every other variable is unchanged."
 StopSignal(s) ==
     /\ stopPc[s] = "signal"
-    /\ stopping' = TRUE /\ canceled' = TRUE
+    /\ stopping' = (stopping \/ stopPc["td"] = "idle") /\ canceled' = TRUE
     /\ stopPc' = [stopPc EXCEPT
                     ![s] = IF (s = "cb" /\ CbMarked) \/ Mutation = "MarkerForAll"
                              THEN "requested" ELSE "waitTd",
@@ -858,14 +877,20 @@ StopSignal(s) ==
 \* In English: [fix/pipeline-callback-stop] a waiting Stop(ctx) returns nil
 \* once the teardown goroutine has finished, or ctx.Err() once its ctx
 \* ends (with StopTimeout).
+\* With CancelCleanup (PR #3233) it also waits for the watcher, as Stop
+\* waits for watcherDone after teardownDone; NoWatchJoin does not.
 \* Literally: "StopWaitTd of s is defined as: stopPc of s equals "waitTd",
-\*   and either (stopPc of "td" equals "returned" and stopPc in the next
-\*   state equals stopPc except that its s entry is "returned") or
+\*   and either (stopPc of "td" equals "returned", and (stopPc of "watch"
+\*   is a member of the set containing "idle", "exited" and "returned", or
+\*   Mutation equals "NoWatchJoin"), and stopPc in the next state equals
+\*   stopPc except that its s entry is "returned") or
 \*   (StopTimeout and stopPc in the next state equals stopPc except that
 \*   its s entry is "timedOut"); and every other variable is unchanged."
 StopWaitTd(s) ==
     /\ stopPc[s] = "waitTd"
-    /\ \/ stopPc["td"] = "returned" /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
+    /\ \/ /\ stopPc["td"] = "returned"
+          /\ stopPc["watch"] \in {"idle", "exited", "returned"} \/ Mutation = "NoWatchJoin"
+          /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
        \/ StopTimeout /\ stopPc' = [stopPc EXCEPT ![s] = "timedOut"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
                    canceled, stopping, stopped, dV, panicked>>
@@ -1061,18 +1086,29 @@ StopReturned ==
 AllReleasedAfterStop ==
     StopReturned => (active = {} /\ budget = IF subHeld THEN 1 ELSE 0)
 
+\* In English: a Stop caller, not the teardown goroutine, has returned nil
+\* as a join. The teardown goroutine finishing joins the pipeline's
+\* workers but not the cancel watcher, which the caller joins after it.
+\* Literally: "CallerReturned is defined as: there exists an s in StopIds
+\*   other than "td" such that stopPc of s equals "returned", or s does not
+\*   equal "cb" and stopPc of s equals "requested"."
+CallerReturned ==
+    \E s \in StopIds \ {"td"} :
+        stopPc[s] = "returned" \/ (s /= "cb" /\ stopPc[s] = "requested")
+
 \* In English: once Stop has returned nil, every goroutine Start or Stop
-\* started has exited (the join), the cancel watcher included.
-\* Literally: "JoinedAfterStop is defined as: if StopReturned, then wPc
+\* started has exited (the join), and once a Stop caller has returned, the
+\* cancel watcher has exited too.
+\* Literally: "JoinedAfterStop is defined as: (if StopReturned, then wPc
 \*   equals "exited", and rPc equals "exited", and fPc equals "exited", and
-\*   metricsPc equals "exited", and waiterPc does not equal "waiting", and
-\*   stopPc of "watch" is a member of the set containing "idle", "exited"
-\*   and "returned"."
+\*   metricsPc equals "exited", and waiterPc does not equal "waiting"), and
+\*   (if CallerReturned, then stopPc of "watch" is a member of the set
+\*   containing "idle", "exited" and "returned")."
 JoinedAfterStop ==
-    StopReturned =>
-        /\ wPc = "exited" /\ rPc = "exited" /\ fPc = "exited"
-        /\ metricsPc = "exited" /\ waiterPc /= "waiting"
-        /\ stopPc["watch"] \in {"idle", "exited", "returned"}
+    /\ StopReturned =>
+          /\ wPc = "exited" /\ rPc = "exited" /\ fPc = "exited"
+          /\ metricsPc = "exited" /\ waiterPc /= "waiting"
+    /\ CallerReturned => stopPc["watch"] \in {"idle", "exited", "returned"}
 
 \* In English: after a successful WaitForDrain, no block below its boundary
 \* is committed.
