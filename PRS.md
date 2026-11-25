@@ -45,6 +45,8 @@ closes. A PR can draw on more than one model.
 | `ledger-byron` | #3174 (empty transactions, heavyweight delegation activation) | #3171, #3172 | open |
 | `ledger-leios` | #3192 (committee smaller than the parameter) | #3177, #3178 | open |
 | `ledger-leios` (`LeiosVoting`) | local branch `test/leios-voting-model` (`eb73b151`; certificates formed by the reference vote collection over reference-seated committees, mutated aggregation, quorum boundary vectors), not yet published | | local |
+| `ledger-leios` (`LeiosVoting`) | local branch `fix/leios-voting-key-age` (`93c3df5d`; certificates refuse aged-out voting keys, required key-age method, breaking), not yet published | | local |
+| `ledger-leios` | local branch `fix/leios-vote-shape` (`eb4c2421`; CIP-0164 vote encoding, rc-2026w41 golden vote, breaking), not yet published | | local |
 | `consensus-nonce` | reviewed and approved jtranq's #3053 (rolling nonce derivation; it reproduced the model's 15 mainnet vectors) | #3052 | merged |
 | `consensus-eras` | #3201 (header check order, KES before the opcert start, TPraos overlay and envelope inputs) | #3198, #3199, #3200 | open |
 | `consensus-eras` | #3205 (empty era history, Byron slot-to-epoch, era table tests) | #3202, #3203, #3204 | open |
