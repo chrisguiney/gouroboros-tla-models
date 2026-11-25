@@ -246,3 +246,4 @@ behaviour, so no model state or config covers it.
 - #3323: rules-only conformance test reads `byFamily[f]` with an ok check. NilAway fix in a test.
 - #3321: fee, size and min-coin golden helpers check component counts before indexing. NilAway fix in a test.
 - #3319: localstatequery era-summary golden checks the item count with `t.Fatalf` before indexing. NilAway fix in a test.
+- #3336, #3334, #3333: failed jobs re-run, no code change. The only failure was the main-side `TestReceiveMatchesModel/server/*/Oversized` timing flake that #3316 fixes.
