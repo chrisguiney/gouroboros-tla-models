@@ -18,6 +18,10 @@
 (*        is written the same way.                                         *)
 (*   [R2] Data.hs 185-198 encodeBs: a byte string longer than 64 bytes is  *)
 (*        written as an indefinite byte string of 64-byte chunks.          *)
+(*   [R4] Data.hs 147-166 encodeData Map: a definite map (encodeMapLen),   *)
+(*        its pairs in the Data value's list order, each key and value     *)
+(*        written by encodeData, so long byte strings are chunked and      *)
+(*        lists indefinite inside a map as anywhere else.                  *)
 (*   [R3] plutus-core/plutus-core/test/CBOR/DataStability.hs: the vectors  *)
 (*        auction_1-1 and future-increase-margin-5 (second encodings).     *)
 (*                                                                         *)
@@ -33,7 +37,14 @@
 (*   [G3] fix/cbor-constructor-indefinite-fields 3d91ad2f: every list at   *)
 (*        any depth (slice, array or IndefLengthList) is 0x80 when empty   *)
 (*        and indefinite otherwise; byte strings over 64 bytes are written *)
-(*        as an indefinite string of 64-byte chunks.                       *)
+(*        as an indefinite string of 64-byte chunks. Maps are written as   *)
+(*        given: a Go map definite with its members unconverted, an        *)
+(*        IndefLengthMap indefinite.                                       *)
+(*   [G4] 635905f9 on that branch: a Go map, cbor.Map or                   *)
+(*        IndefLengthMap item is a definite map whose keys and values are  *)
+(*        converted like any item. A Go map has no order, so its pairs are *)
+(*        written in the order of their encoded keys, the order the        *)
+(*        encoder already used; that is the plutus Map with that list.     *)
 (* Checked in Go on ad7a4f25: [2]uint64{1,2} gives d879820102;             *)
 (* []any{[]any{1}} gives d8799f8101ff; a 65-byte field gives a definite    *)
 (* 5841 string; IndefLengthList{} gives d8799fff. On the parent nil gives *)
@@ -46,7 +57,7 @@
 CONSTANTS
     Containers, \* Go values tried as fields, a subset of AllContainers
     ItemKinds,  \* item kinds tried inside them, a subset of AllItems
-    GoRule      \* "main" [G1], "fix" [G2] or "plutus" [G3]
+    GoRule      \* "main" [G1], "fix" [G2], "plutus" [G3] or "plutusMap" [G4]
 
 VARIABLE input  \* the one constructor this behaviour encodes
 
@@ -61,7 +72,15 @@ AllContainers == {"nil", "emptySlice", "slice", "goArray", "indefList"}
 \*   a []any, and one given as an IndefLengthList."
 \* Literally: "AllItems is defined as the set containing "int",
 \*   "shortBytes", "longBytes", "nestedSlice" and "nestedIndef"."
-AllItems == {"int", "shortBytes", "longBytes", "nestedSlice", "nestedIndef"}
+AllItems == {"int", "shortBytes", "longBytes", "nestedSlice", "nestedIndef",
+             "mapShort", "mapLongBytes", "mapNestedSlice", "indefMapShort"}
+
+\* In English: "The map item kinds: a Go map with short members, one with
+\*   a byte string over 64 bytes as a key or value, one with a []any list
+\*   as a value, and an IndefLengthMap with short members."
+\* Literally: "MapItems is defined as the set containing "mapShort",
+\*   "mapLongBytes", "mapNestedSlice" and "indefMapShort"."
+MapItems == {"mapShort", "mapLongBytes", "mapNestedSlice", "indefMapShort"}
 
 \* In English: "Every family, container and set of item kinds; nil and an
 \*   empty slice hold no items."
@@ -85,7 +104,10 @@ RefHead(i) == IF i.items = {} THEN "empty" ELSE "indef"
 \*   if k is "shortBytes" then "bytes", else if k is "longBytes" then
 \*   "chunkedBytes", else "indefList"."
 RefItem(k) ==
-    IF k = "int" THEN "int"
+    IF k \in {"mapShort", "indefMapShort"} THEN "defMap"
+    ELSE IF k = "mapLongBytes" THEN "defMapChunkedBytes"
+    ELSE IF k = "mapNestedSlice" THEN "defMapIndefList"
+    ELSE IF k = "int" THEN "int"
     ELSE IF k = "shortBytes" THEN "bytes"
     ELSE IF k = "longBytes" THEN "chunkedBytes"
     ELSE "indefList"
@@ -97,7 +119,11 @@ RefItem(k) ==
 \*   "definiteBytes", else if k is "nestedSlice" then "defList", else
 \*   "indefList"."
 GoItem(k) ==
-    IF k = "int" THEN "int"
+    IF k = "mapShort" THEN "defMap"
+    ELSE IF k = "mapLongBytes" THEN "defMapDefiniteBytes"
+    ELSE IF k = "mapNestedSlice" THEN "defMapDefList"
+    ELSE IF k = "indefMapShort" THEN "indefMap"
+    ELSE IF k = "int" THEN "int"
     ELSE IF k = "shortBytes" THEN "bytes"
     ELSE IF k = "longBytes" THEN "definiteBytes"
     ELSE IF k = "nestedSlice" THEN "defList"
@@ -131,7 +157,7 @@ GoFixHead(i) ==
     ELSE IF i.container = "goArray" THEN "def"
     ELSE "indef"
 
-\* In English: "3d91ad2f's field list: plutusList writes 0x80 for no items
+\* In English: "3d91ad2f's field list (and [G4]'s): plutusList writes 0x80 for no items
 \*   and an indefinite list otherwise, whatever the container." [G3]
 \* Literally: "GoPlutusHead of i is defined as: if the items of i is the
 \*   empty set then "empty", else "indef"."
@@ -143,10 +169,23 @@ GoPlutusHead(i) == IF i.items = {} THEN "empty" ELSE "indef"
 \*   else if k is "shortBytes" then "bytes", else if k is "longBytes" then
 \*   "chunkedBytes", else "indefList"."
 GoPlutusItem(k) ==
-    IF k = "int" THEN "int"
+    IF k \in MapItems THEN GoItem(k)
+    ELSE IF k = "int" THEN "int"
     ELSE IF k = "shortBytes" THEN "bytes"
     ELSE IF k = "longBytes" THEN "chunkedBytes"
     ELSE "indefList"
+
+\* In English: "How [G4] writes each kind of item: as 3d91ad2f does, and
+\*   every map definite with its keys and values converted." [G4]
+\* Literally: "GoPlutusMapItem of k is defined as: if k is "mapShort" or
+\*   "indefMapShort" then "defMap", else if k is "mapLongBytes" then
+\*   "defMapChunkedBytes", else if k is "mapNestedSlice" then
+\*   "defMapIndefList", else GoPlutusItem of k."
+GoPlutusMapItem(k) ==
+    IF k \in {"mapShort", "indefMapShort"} THEN "defMap"
+    ELSE IF k = "mapLongBytes" THEN "defMapChunkedBytes"
+    ELSE IF k = "mapNestedSlice" THEN "defMapIndefList"
+    ELSE GoPlutusItem(k)
 
 \* In English: "The shape of plutus's bytes for this constructor."
 \* Literally: "RefBytes of i is defined as the record whose head is
@@ -164,8 +203,9 @@ GoBytes(i) ==
     [head |-> CASE GoRule = "main" -> GoMainHead(i)
                 [] GoRule = "fix"  -> GoFixHead(i)
                 [] OTHER           -> GoPlutusHead(i),
-     items |-> IF GoRule = "plutus" THEN {GoPlutusItem(k) : k \in i.items}
-               ELSE {GoItem(k) : k \in i.items}]
+     items |-> CASE GoRule = "plutus"    -> {GoPlutusItem(k) : k \in i.items}
+                 [] GoRule = "plutusMap" -> {GoPlutusMapItem(k) : k \in i.items}
+                 [] OTHER                -> {GoItem(k) : k \in i.items}]
 
 \* In English: "Pick any one input."
 \* Literally: "Init is defined as: input is a member of Inputs."
