@@ -63,8 +63,15 @@ CONSTANTS
                             \* marker) or "other" (another client's). Only
                             \* "own" makes Stop return without waiting for
                             \* recvLoop, joining or draining.
-    JoinWatchers            \* TRUE: a waiting Stop also waits for the shutdown
+    JoinWatchers,           \* TRUE: a waiting Stop also waits for the shutdown
                             \* and deadline watchers to exit
+    RestartDuringStop,      \* TRUE: while a running Stop waits with
+                            \* lifecycleMutex released, Start installs a new
+                            \* protocol instance and request 4 is queued on it
+    ScopedStopDrain         \* TRUE: the running Stop's drain takes only its
+                            \* own instance's requests
+                            \* (failOutstandingAfterDelivery(proto)), as the
+                            \* watchers and the not-running branch do
 
 VARIABLES
     st,     \* the shared state, one record (fields below)
@@ -79,9 +86,10 @@ vars == <<st, stk, cbHeld>>
 \*   "snd"."
 G == {"s1", "s2", "recv", "dl", "sw", "snd"}
 
-\* In English: "Requests 1 and 2 are outstanding at the start; 3 is snd's."
-\* Literally: "R is defined as the set of 1, 2 and 3."
-R == {1, 2, 3}
+\* In English: "Requests 1 and 2 are outstanding at the start; 3 is snd's;
+\* 4 is queued on the instance a Start installs during a Stop."
+\* Literally: "R is defined as the set of 1, 2, 3 and 4."
+R == {1, 2, 3, 4}
 
 \* In English: "A lock is held by a goroutine, or by nobody."
 \* Literally: "Owner is defined as G union the set containing "none"."
@@ -209,7 +217,8 @@ Init ==
              wire |-> <<<<"blk", 1>>, <<"done", 1>>, <<"blk", 2>>, <<"done", 2>>>>,
              once |-> [r \in R |-> "none"], cbRuns |-> [r \in R |-> 0],
              sending |-> [r \in R |-> FALSE], deferred |-> [r \in R |-> FALSE],
-             sendOk |-> FALSE]
+             sendOk |-> FALSE,
+             restarted |-> FALSE, newGen |-> {}, badDrain |-> FALSE]
     /\ stk = [g \in G |->
                 << Frame(CASE g \in {"s1", "s2"} -> IF g \in Stoppers THEN "stop" ELSE "done"
                            [] g = "recv" -> "rv_idle"
@@ -229,7 +238,11 @@ Init ==
 \*   Goto of g and "stop_branch", and cbHeld is unchanged."
 StopLock(g) ==
     /\ Pc(g) = "stop" /\ st.L = "none"
-    /\ st' = [st EXCEPT !.L = g]
+    /\ st' = [st EXCEPT !.L = g,
+                        \* A Stop begun after the restart stops the new
+                        \* instance, request 4's.
+                        !.newGen = IF st.restarted /\ Len(stk[g]) = 1
+                                      THEN @ \cup {g} ELSE @]
     /\ Goto(g, "stop_branch") /\ UNCHANGED cbHeld
 
 \* In English: "The switch on lifecycleState (:477). Running: go on to the
@@ -349,8 +362,21 @@ DrLockQ(g) ==
     /\ st' = [st EXCEPT !.Q = g]
     /\ Goto(g, "dr_take") /\ UNCHANGED cbHeld
 
-\* In English: "drainLocked plus resolvableLocked: empty the queue, keep the
-\* requests not still sending, and mark the sending ones deferred."
+\* In English: "The requests goroutine g's drain leaves in the queue: request
+\* 4 belongs to the new instance, so a drain of the old one that is scoped
+\* to its protocol (the watchers always, the running Stop under
+\* ScopedStopDrain, the not-running branch when Fixed) leaves it."
+\* Literally: "Kept of g is defined as: if g is not in st.newGen and (g is
+\*   "sw" or ScopedStopDrain or (Fixed and the ret of Top of g is
+\*   "stop_end")), then the set containing 4, else the empty set."
+Kept(g) ==
+    IF g \notin st.newGen
+       /\ (g = "sw" \/ ScopedStopDrain \/ (Fixed /\ Top(g).ret = "stop_end"))
+    THEN {4} ELSE {}
+
+\* In English: "drainLocked plus resolvableLocked: empty the queue of all
+\* but Kept, keep the requests not still sending, and mark the sending ones
+\* deferred. A drain of the old instance that takes request 4 is badDrain."
 \* Literally: "DrTake of g is defined as: Pc of g equals "dr_take", and st in
 \*   the next state equals st except queue is empty and deferred of r is
 \*   (deferred of r, or r is in the queue and sending), and SetTop of g with
@@ -358,11 +384,13 @@ DrLockQ(g) ==
 \*   ResolveUnderQueue else "dr_unlockq", and cbHeld is unchanged."
 DrTake(g) ==
     /\ Pc(g) = "dr_take"
-    /\ st' = [st EXCEPT !.queue = <<>>,
-                        !.deferred = [r \in R |-> @[r] \/
-                                       (r \in Elems(st.queue) /\ st.sending[r])]]
-    /\ SetTop(g, [Top(g) EXCEPT !.pend = SelectSeq(st.queue, LAMBDA r : ~st.sending[r]),
-                               !.pc = IF ResolveUnderQueue THEN "dr_next" ELSE "dr_unlockq"])
+    /\ LET taken == SelectSeq(st.queue, LAMBDA r : r \notin Kept(g)) IN
+       /\ st' = [st EXCEPT !.queue = SelectSeq(@, LAMBDA r : r \in Kept(g)),
+                           !.deferred = [r \in R |-> @[r] \/
+                                          (r \in Elems(taken) /\ st.sending[r])],
+                           !.badDrain = @ \/ (g \notin st.newGen /\ 4 \in Elems(taken))]
+       /\ SetTop(g, [Top(g) EXCEPT !.pend = SelectSeq(taken, LAMBDA r : ~st.sending[r]),
+                                  !.pc = IF ResolveUnderQueue THEN "dr_next" ELSE "dr_unlockq"])
     /\ UNCHANGED cbHeld
 
 \* In English: "c.queueMutex.Unlock() before any callback."
@@ -709,11 +737,14 @@ DlTake(g) ==
     /\ Pc(g) = "dl_take"
     /\ IF 1 \in Elems(st.queue)
          THEN /\ st' = [st EXCEPT !.Q = "none",
-                          !.queue = IF DeadlineResolvesQueued THEN @ ELSE <<>>,
+                          !.queue = IF DeadlineResolvesQueued THEN @
+                                    ELSE SelectSeq(@, LAMBDA r : r = 4),
                           !.deferred = [r \in R |-> @[r] \/
-                                         (r \in Elems(st.queue) /\ st.sending[r])]]
+                                         (r \in Elems(st.queue) /\ r /= 4
+                                          /\ st.sending[r])]]
               /\ SetTop(g, [Top(g) EXCEPT
-                              !.pend = SelectSeq(st.queue, LAMBDA r : ~st.sending[r]),
+                              !.pend = SelectSeq(st.queue,
+                                                 LAMBDA r : r /= 4 /\ ~st.sending[r]),
                               !.pc = "dl_senderr"])
          ELSE /\ st' = [st EXCEPT !.Q = "none"]
               /\ Goto(g, "done")
@@ -748,7 +779,7 @@ DlQ2(g) ==
 \*   and 3, and Goto of g and "done", and cbHeld is unchanged."
 DlRm(g) ==
     /\ Pc(g) = "dl_rm"
-    /\ st' = [st EXCEPT !.Q = "none", !.queue = Without(@, R)]
+    /\ st' = [st EXCEPT !.Q = "none", !.queue = Without(@, {1, 2, 3})]
     /\ Goto(g, "done") /\ UNCHANGED cbHeld
 
 -----------------------------------------------------------------------------
@@ -870,6 +901,22 @@ Step(g) ==
     \/ SnTok(g) \/ SnQ(g) \/ SnApp(g) \/ SnSend(g) \/ SnQ2(g) \/ SnFin(g)
     \/ SnUnTok(g)
 
+\* In English: "Start, between a running Stop's Unlock and its Relock:
+\* lifecycleMutex is free and the client stopped, so Start installs a new
+\* protocol instance and request 4 is queued on it."
+\* Literally: "Restart is defined as: RestartDuringStop, and st.restarted
+\*   is not true, and st.L equals "none", and st.lstate equals "stopped",
+\*   and some g in s1, s2 has Pc of g in stop_wait, stop_join, and st in
+\*   the next state is st except restarted is TRUE, lstate is "running"
+\*   and the queue has 4 appended, and stk and cbHeld are unchanged."
+Restart ==
+    /\ RestartDuringStop /\ ~st.restarted
+    /\ st.L = "none" /\ st.lstate = "stopped"
+    /\ \E g \in {"s1", "s2"} : Pc(g) \in {"stop_wait", "stop_join"}
+    /\ st' = [st EXCEPT !.restarted = TRUE, !.lstate = "running",
+                        !.queue = Append(@, 4)]
+    /\ UNCHANGED <<stk, cbHeld>>
+
 \* In English: "Every goroutine has finished."
 \* Literally: "AllDone is defined as: for all g in G, Pc of g equals
 \*   "done"."
@@ -879,7 +926,7 @@ AllDone == \A g \in G : Pc(g) = "done"
 \* changes (so a finished run is not reported as a deadlock)."
 \* Literally: "Next is defined as: there exists g in G such that Step of g,
 \*   or AllDone and vars is unchanged."
-Next == (\E g \in G : Step(g)) \/ (AllDone /\ UNCHANGED vars)
+Next == (\E g \in G : Step(g)) \/ Restart \/ (AllDone /\ UNCHANGED vars)
 
 \* Literally: "Spec is defined as Init and always [Next] over vars."
 Spec == Init /\ [][Next]_vars
@@ -997,14 +1044,16 @@ NoResolveDuringDelivery ==
 \*   at most 1."
 RangeDoneOnce == \A r \in R : st.cbRuns[r] <= 1
 
-\* In English: "When everything has finished, the queue is empty and every
+\* In English: "When everything has finished, the queue holds at most the
+\* new instance's request 4 (nothing in the model stops that instance), and
+\* every
 \* request whose id was handed out (1 and 2, and 3 if its send succeeded)
 \* got its RangeDoneFunc."
-\* Literally: "AllResolvedAtEnd is defined as: AllDone implies the queue is
-\*   empty and for all r in 1, 2, and 3 if sendOk, cbRuns of r is at least
-\*   1."
+\* Literally: "AllResolvedAtEnd is defined as: AllDone implies the queue's
+\*   elements are a subset of the set containing 4, and for all r in 1, 2,
+\*   and 3 if sendOk, cbRuns of r is at least 1."
 AllResolvedAtEnd ==
-    AllDone => /\ st.queue = <<>>
+    AllDone => /\ Elems(st.queue) \subseteq {4}
                /\ \A r \in {1, 2} \cup (IF st.sendOk THEN {3} ELSE {}) :
                     st.cbRuns[r] >= 1
 
@@ -1037,4 +1086,9 @@ ProbeNoDeferredResolve == st.once[3] /= "snd"
 \*   equal "dl"."
 ProbeNoDeadlineCallback == st.once[1] /= "dl"
 
+\* In English: "A Stop of the old instance never fails the new instance's
+\* request: only a Stop begun after the restart may take request 4."
+\* Literally: "OldStopKeepsNewRequest is defined as: st.badDrain is not
+\*   true."
+OldStopKeepsNewRequest == ~st.badDrain
 =============================================================================

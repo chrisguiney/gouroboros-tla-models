@@ -258,6 +258,8 @@ including a goroutine re-taking a lock it holds.
 | `BlockFetchBusyDeliveryNoOnceAlone.cfg`: `resolveOnce` removed | 22,569 | passes `RangeDoneOnce` |
 | `BlockFetchBusyDeliveryRecvStop.cfg`: the fix; `recvLoop` callbacks stop the client with `StopContext` and their own context | 37,484 | passes all eight |
 | `BlockFetchBusyDeliveryJoin.cfg`: the same and `JoinWatchers`, two `Stop`s, every callback may stop the client | 56,947 | passes all eight and `StopJoinsWatcher` |
+| `BlockFetchBusyDeliveryRestartDuringStopBug.cfg`: `BlockFetchBusyDeliveryJoin.cfg` with a `Start` between the running `Stop`'s Unlock and Relock, queueing request 4 on a new instance | | `OldStopKeepsNewRequest` violated: the unscoped drain after the join resolves request 4 |
+| `BlockFetchBusyDeliveryRestartDuringStop.cfg`: the same with `ScopedStopDrain` (the running `Stop` drains only its own instance's requests) | 77,595+ | passes all nine and `OldStopKeepsNewRequest` |
 | `...StopLockBug.cfg` (main, two `Stop`s) | | **fails** `NoCallbackUnderLifecycle`: B1 |
 | `...OrderBug.cfg` (main, two `Stop`s) | | **fails** `NoResolveDuringDelivery`: new |
 | `...ReenterBug.cfg` (main, callback calls `Stop`) | | **fails** `NoWaitCycle`: B1 deadlocks |
