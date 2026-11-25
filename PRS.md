@@ -46,7 +46,8 @@ closes. A PR can draw on more than one model.
 | `ledger-leios` | #3192 (committee smaller than the parameter) | #3177, #3178 | merged |
 | `ledger-leios` (`LeiosVoting`) | local branch `test/leios-voting-model` (`eb73b151`; certificates formed by the reference vote collection over reference-seated committees, mutated aggregation, quorum boundary vectors), not yet published | | local |
 | `ledger-leios` (`LeiosVoting`) | local branch `fix/leios-voting-key-age` (`93c3df5d`; certificates refuse aged-out voting keys, required key-age method, breaking), not yet published | | local |
-| `ledger-leios` | local branch `fix/leios-vote-shape` (`eb4c2421`; CIP-0164 vote encoding, rc-2026w41 golden vote, breaking), not yet published | | local |
+| `ledger-leios` (`LeiosVoteShape`) | local branch `fix/leios-vote-shape` (`eb4c2421`; CIP-0164 vote encoding, rc-2026w41 golden vote, breaking), not yet published | | local |
+| `dmq` (`MessageValidity`, `MessageIngress`, `MessagePayloadBytes`) | local branches `fix/dmq-kes-claimed-period`, `fix/dmq-ttl-reference-bounds`, `fix/dmq-message-body-size`, `fix/dmq-commit-recheck-every-counter`, `fix/dmq-payload-preserved-bytes`, `fix/dmq-drop-chain-counter-check`, `fix/dmq-sig-rate-limit`, `fix/messagesubmission-reference-receipt` (DRIFT N52-N58), not yet published | | local |
 | `consensus-nonce` | reviewed and approved jtranq's #3053 (rolling nonce derivation; it reproduced the model's 15 mainnet vectors) | #3052 | merged |
 | `consensus-eras` | #3201 (header check order, KES before the opcert start, TPraos overlay and envelope inputs) | #3198, #3199, #3200 | merged |
 | `consensus-eras` | #3205 (empty era history, Byron slot-to-epoch, era table tests) | #3202, #3203, #3204 | merged |
@@ -61,27 +62,27 @@ closes. A PR can draw on more than one model.
 | `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | merged |
 | `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | merged |
 | `dmq` (`LocalMessageSubmissionOwnAnswer`) | #3231 (`SubmitMessage` returns its own answer; breaking; merge 1 of 12) | #3225 | open |
-| none (goleak, CONCURRENCY C8) | #3232 (a finished range's delivery stops when its caller leaves; merge 2 of 12) | #3226 | open |
+| `leios-peras` (`LeiosFetchRangeDelivery`; CONCURRENCY C8) | #3232 (a finished range's delivery stops when its caller leaves; merge 2 of 12) | #3226 | open |
 | `pipeline-cbor` (`PipelineLifecycle`) | #3233 (`Stop(ctx)`, ApplyFunc may stop or drain, parent-cancel teardown; folds `fix/pipeline-callback-stop`, `fix/pipeline-cancel-cleanup`, `test/pipeline-lifecycle-model`; breaking; merge 3 of 12; #3161 first; main merged in at `5cb98604`, model `PipelineLifecycleMain*.cfg`) | #3227, #3228 | open |
 | `connection` (`ConnectionTeardown`, `ConnectionCloseConcurrent`), `engine` (`EngineLifecycle`) | #3239 (teardown during Dial, late forwarder, Close before setup, protocol-loop join; merge 5 of 12; review at `f60a0213`: concurrent `CloseContext` mutual wait and conn left open with no muxer, fixed at `c321f708`, models `ConnectionCloseConcurrent*.cfg`, `ConnectionTeardownCloseOpenConnBug.cfg`) | #3236, #3237, #3238 | open |
 | `connection` (`ConnectionTeardown`, Muxer.Stop join) | ouroboros-mock #370 (Stop and Close with either signature; released before merge 6) | ouroboros-mock #369 | open |
 | `ledger-hash-cache` | #3234 (scoped-memo panic retried; folds `test/ledger-hash-cache-model`; merge 4 of 12) | #3229 | open |
 | `connection` (`ConnectionTeardown`, `MuxerStop*`), `engine` (`EngineLifecycle`, `Ctx` RunLoop join) | #3253 (`fix/protocol-callback-context` `e49dd6a8`; `Stop(ctx) error` everywhere, `Close(ctx)`, `Muxer.Stop(ctx)` + `CallbackContext`, chainsync stop watcher joined; mock v0.21.4; breaking; merge 6 of 12) | #3187 | open |
 | `blockfetch` (`BlockFetchBusyDelivery`) | #3254 (`fix/blockfetch-stop-callbacks-context` `be33b326`; Stop's callbacks unlocked, client goroutines joined; merge 7 of 12) | #3247 | open |
-| none (race detector, B4) | #3264 (`fix/blockfetch-client-protocol-race` `36aa9c31`; fetches read the instance under `protocolMu`; merge 8 of 12) | #3248 | open |
+| `blockfetch` (`BlockFetchClientReader`; CONCURRENCY B4) | #3264 (`fix/blockfetch-client-protocol-race` `36aa9c31`; fetches read the instance under `protocolMu`; merge 8 of 12) | #3248 | open |
 | `keepalive` (`KeepAliveLifecycle` reader: `KeepAliveLifecycleReader.cfg`, `KeepAliveLifecycleReaderUnlockedBug.cfg`) | #3272 (`fix/server-restart-protocol-race` `242cd282`; twelve restarting servers stop embedding the instance, including messagesubmission, localmessagesubmission, localmessagenotification, localtxsubmission, localtxmonitor and perasvotes; breaking; merge 9 of 12) | #3249 | open |
 | `keepalive` (`KeepAliveLifecycle` reader); CONCURRENCY C9, C12, C20 | #3273 (`fix/leios-server-protocol-race` `250fecf8`; three leios servers; breaking; merge 10 of 12) | #3250 | open |
-| none (A9) | #3274 (`fix/protocol-send-before-start` `ffd6c838`; a message sent before `Start` is queued; merge 11 of 12) | #3251 | open |
-| none (C13, C14, C15) | #3276 (`fix/perasvotes-op-lock-and-await-panic` `39f34f8a`; `Sync` honours callers' contexts, `VoteFunc` re-entry fails, await panics contained; merge 12 of 12) | #3252 | open |
+| `engine` (`EngineSendBeforeStart`; CONCURRENCY A9) | #3274 (`fix/protocol-send-before-start` `ffd6c838`; a message sent before `Start` is queued; merge 11 of 12) | #3251 | open |
+| `leios-peras` (`PerasClientOpMu`; CONCURRENCY C13, C14, C15) | #3276 (`fix/perasvotes-op-lock-and-await-panic` `39f34f8a`; `Sync` honours callers' contexts, `VoteFunc` re-entry fails, await panics contained; merge 12 of 12) | #3252 | open |
 | `ledger-rewards` | local branch `fix/ledger-rewards-reference` (`9675856a`, `bdba9c8b`, `203f3624`; reward pots and pool split as cardano-ledger; pledge owners as a set), not yet published | | local |
 | `ledger-governance` | local branch `test/conway-gov-reference` (`7c2f2013`; ledger vectors replayed through gOuroboros rules alone, network-id and return-address tables), not yet published | | local |
 | `ledger-rewards` (`RewardPots`) | #3275 (reward pots and pool split as cardano-ledger; pledge owners as a set; breaking: `DesiredPools` required) | #3255, #3256 | open |
 | `ledger-block-overlay` (`GovOverlay`) | #3285 (in-block committee proposals count as potential members; governance sequence walk) | #3257 | open |
 | `ledger-block-overlay` (`VerifyBlockIssuer`) | #3277 (VerifyBlock applies the TPraos overlay; breaking: `VerifyConfig.TPraosOverlay`) | #3258 | open |
-| coverage gaps 2, 7, 8 (parameter updates) | #3278 (32-bit protocol minor in updates) | #3259 | open |
-| coverage gaps `cbor`, `ledger/common` | #3279 (bignum multiasset quantities), #3280 (Alonzo PlutusV2 cost model), #3282 (one tag 30), #3283 (constructor fields a list), #3284 (tag 258 set members in Value), #3289 (pre-Conway tag 258 refused), #3290 (ConstructorEncoder indefinite fields; datum bytes change) | #3260, #3261, #3263, #3265, #3266, #3270, #3271 | open |
-| script context (gap 1) | #3281 (zero ada kept in output Plutus data; TxInfo translation goldens) | #3262 | open |
-| localstatequery goldens (gaps 9, 10) | #3286 (era filter set encoding), #3287 (GetAccountState in every Shelley era), #3288 (GetFuturePParams decoded) | #3267, #3268, #3269 | open |
+| `ledger-codec` (`ProtVerWidth`; coverage gaps 2, 7, 8) | #3278 (32-bit protocol minor in updates) | #3259 | open |
+| `cbor-codec` (L25-L28, L31), `ledger-codec` (`CostModelLanguages`, `PreConwaySetTag`); coverage gaps `cbor`, `ledger/common` | #3279 (bignum multiasset quantities), #3280 (Alonzo PlutusV2 cost model), #3282 (one tag 30), #3283 (constructor fields a list), #3284 (tag 258 set members in Value), #3289 (pre-Conway tag 258 refused), #3290 (ConstructorEncoder indefinite fields; datum bytes change) | #3260, #3261, #3263, #3265, #3266, #3270, #3271 | open |
+| `ledger-codec` (`TxOutValueData`; script context gap 1) | #3281 (zero ada kept in output Plutus data; TxInfo translation goldens) | #3262 | open |
+| `localstatequery` (`LocalStateQueryCodec`; goldens, gaps 9, 10) | #3286 (era filter set encoding), #3287 (GetAccountState in every Shelley era), #3288 (GetFuturePParams decoded) | #3267, #3268, #3269 | open |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 

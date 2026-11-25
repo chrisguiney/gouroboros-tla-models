@@ -2247,6 +2247,18 @@ find D3 unreachable from any caller, and add two hazards: an `ApplyFunc` that
 calls `Stop` deadlocks, and with PR #3161 one that calls `WaitForDrain` during
 `Stop` deadlocks.
 
+Status of the published fixes with no model before (2026-11-24): each now has
+a configuration that reproduces `main` and one that passes with the fix.
+`LeiosFetchRangeDelivery` (C8, #3232) and `PerasClientOpMu` (C13, C14, C15,
+#3276) are in `specs/leios-peras`, `EngineSendBeforeStart` (A9, #3274) in
+`specs/engine`, and `BlockFetchClientReader` (B4, #3264) in
+`specs/blockfetch`. B4's model also shows a fetch on `main` waiting on the
+stopped instance's done channel while its request runs on the new one
+(`BlockFetchClientReaderOtherInstanceBug`). C9, C12 and C20 (#3273) are the
+restart of `KeepAliveLifecycleReader`; their loop joins are #3253's
+`EngineLifecycleCtxRunLoopUnjoinedBug`. DRIFT.md lists every concurrency pull
+request with its configurations.
+
 ### Proposed models
 
 Granularity for all of them: **one step is one lock acquire, one lock

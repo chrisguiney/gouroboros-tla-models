@@ -154,6 +154,13 @@ Plain-language definitions, with a Go comparison where one helps.
 : A step where nothing changes. TLA+ always allows it; that is what the
   `[...]_vars` in `Spec` means.
 
+**Table model**
+: A model whose only state is one abstract input, such as a protocol
+  version and an encoding shape. TLC checks every input once against an
+  invariant that names the reference's rule, so the model is a decision
+  table checked by machine. Used for codec rules, in `specs/cbor-codec` and
+  `specs/ledger-codec`.
+
 **TLC**
 : The TLA+ model checker. `bin/tlc`.
 

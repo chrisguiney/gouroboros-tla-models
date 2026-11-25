@@ -25,10 +25,10 @@ It was done by static reading. No Go test and no TLC run was made for the audit,
 
 | Class | Items | Functions | README notes |
 | --- | ---: | ---: | ---: |
-| modelled | 88 | 435 | 34 |
+| modelled | 88 | 435 | 36 |
 | vectors | 90 | 731 | 14 |
 | caller contract | 8 | 39 | 29 |
-| gap | 119 | 490 | 103 |
+| gap | 119 | 490 | 101 |
 | **total** | **305** | **1695** | **180** |
 
 Items are counted per package, so an item that spans two packages counts twice.
@@ -134,6 +134,8 @@ Not closed for GOV: `UtxoValidateProposalDeposit`, `UtxoValidateProposalNetworkI
 Not closed for the script context: `BuildScriptPurpose` (an exported variant the TxInfo builders do not call), `NewCachedTxInfo`, `ValidatePlutusV3ReferenceInputs` (the reference's PV11 disjointness check; the golden's random inputs never overlap), Dijkstra `translations.cbor` (PlutusV4), and the Byron, Shelley and Mary output encoders (no golden spends such an output; L15's fix is covered only by a hand-derived test).
 
 Not closed: `UpdateFromGenesis` in every era, Dijkstra parameters, the reference's era bound on a proposed major version (gOuroboros allows 16 bits; see DRIFT L14), Mary's `scaledMinDeposit` as a number (it is unobservable through the Allegra/Mary pointwise rule, and `mary.MinCoinTxOut` takes no output), and Byron.
+
+Model coverage added to items already closed by vectors (their class is unchanged): `specs/cbor-codec` (tag 30 rationals, constructor field lists, tag 258 set members in `Value`, MultiAsset quantity widths, `ConstructorEncoder` bytes; DRIFT L25-L28, L31), `specs/ledger-codec` (proposed protocol minor width, cost-model languages, pre-Conway tag 258, the TxInfo output's ada entry; L14, L29, L30, L15), `specs/localstatequery/LocalStateQueryCodec.tla` (N48-N50), `specs/dmq/MessagePayloadBytes.tla` (N57) and `specs/ledger-leios/LeiosVoteShape.tla` (L22). Each has a configuration with `main`'s rule that fails and one with the fix that passes; the residual differences they find are listed in DRIFT.md.
 
 ## Ranked gaps
 
@@ -248,7 +250,7 @@ Behaviour-bearing gaps come first: a wrong answer there changes chain, ledger or
 | 105 | behaviour | 3 | `specs/handshake (note)` | - | Connection-wide handshake timeout in connection.go | CONCURRENCY.md A4 (FinishedFunc after timeout) unmodelled | model or Go test per note |
 | 106 | behaviour | 3 | `specs/chainsync (note)` | - | GetCurrentTip worker and busyMutex (B6), Stop's 5 s TryLock, drain goroutine (B7) | CONCURRENCY.md rank 9 ChainSyncTipWorker not written | model or Go test per note |
 | 107 | behaviour | 3 | `specs/txsubmission (note)` | - | Server restart race after MsgDone | CONCURRENCY.md TxSubmissionServerLocks (rank 10) | model or Go test per note |
-| 108 | behaviour | 3 | `specs/leios-peras (note)` | - | LeiosFetch range streams beyond one reply (C8) | CONCURRENCY.md rank 7 LeiosFetchRangeDelivery; LeiosFetchAbandonFreesBug.cfg covers abandon only | model or Go test per note |
+| 108 | behaviour | 3 | `specs/leios-peras (note)` | - | LeiosFetch range streams beyond one reply (C8) | CONCURRENCY.md rank 7 LeiosFetchRangeDelivery; LeiosFetchAbandonFreesBug.cfg covers abandon only | model or Go test per note — closed by LeiosFetchRangeDelivery.tla (DeliveryEndsWhenCallerLeaves) |
 | 109 | behaviour | 3 | `specs/localtx (note)` | - | MsgGetMeasures not implemented | DRIFT N28 does not conform | model or Go test per note |
 | 110 | behaviour | 3 | `specs/dmq (note)` | - | Replay caches (Config-wide lock C22, cleaner C23) | CONCURRENCY.md rank 16 DmqReplayShared/LmsReplayTokens | model or Go test per note |
 | 111 | behaviour | 3 | `specs/pipeline-cbor (note)` | - | Panics in stages | unmodelled | model or Go test per note |
@@ -298,7 +300,7 @@ Behaviour-bearing gaps come first: a wrong answer there changes chain, ledger or
 | 155 | behaviour | 4 | `specs/leios-peras (note)` | - | Timeouts beyond the table | DRIFT N45, N47 | model or Go test per note |
 | 156 | behaviour | 4 | `specs/leios-peras (note)` | - | LeiosNotify ResponseSentFunc and late notifications | unmodelled | model or Go test per note |
 | 157 | behaviour | 4 | `specs/leios-peras (note)` | - | Peras non-blocking requests and certificates | DRIFT N47; certificates not decoded against reference | model or Go test per note |
-| 158 | behaviour | 4 | `specs/leios-peras (note)` | - | perasvotes opMu reentrancy/panic (C13-C15) | CONCURRENCY.md rank 11 PerasClientOpMu | model or Go test per note |
+| 158 | behaviour | 4 | `specs/leios-peras (note)` | - | perasvotes opMu reentrancy/panic (C13-C15) | CONCURRENCY.md rank 11 PerasClientOpMu | model or Go test per note — closed by PerasClientOpMu.tla |
 | 159 | behaviour | 4 | `specs/localtx (note)` | - | Size limits (none in spec) and CBOR decoding limits | MaxUntrustedNestedLevels 1,024 not checked against reference limits | model or Go test per note |
 | 160 | behaviour | 4 | `specs/localtx (note)` | - | Server transaction-ID cache | unmodelled | model or Go test per note |
 | 161 | behaviour | 4 | `specs/localtx (note)` | - | API misuse: Release() from Idle | sends MsgRelease and fails; no guard test against model | model or Go test per note |
@@ -983,10 +985,10 @@ Counts (items are per package): modelled 29 items / 158 functions, vectors 31 it
 | leios-peras | Byte and count limits | gap | DRIFT N45 |
 | leios-peras | Message validation: LeiosFetch reply binding, vote decoding | gap | see LeiosFetch/PerasVotes codec items |
 | leios-peras | Timeouts beyond the table | gap | DRIFT N45, N47 |
-| leios-peras | LeiosFetch range streams beyond one reply (C8) | gap | CONCURRENCY.md rank 7 LeiosFetchRangeDelivery; LeiosFetchAbandonFreesBug.cfg covers abandon only |
+| leios-peras | LeiosFetch range streams beyond one reply (C8) | modelled | specs/leios-peras/LeiosFetchRangeDelivery.tla: DeliveryEndsWhenCallerLeaves, OwnDeliveryOnly |
 | leios-peras | LeiosNotify ResponseSentFunc and late notifications | gap | unmodelled |
 | leios-peras | Peras non-blocking requests and certificates | gap | DRIFT N47; certificates not decoded against reference |
-| leios-peras | perasvotes opMu reentrancy/panic (C13-C15) | gap | CONCURRENCY.md rank 11 PerasClientOpMu |
+| leios-peras | perasvotes opMu reentrancy/panic (C13-C15) | modelled | specs/leios-peras/PerasClientOpMu.tla: VoteFuncCallReturns, CancelledDoneReturns, NoProcessCrash, StopJoinsAwait |
 | localtx | Transaction validity | caller-contract | Dingo validates mempool transactions; LocalTxSubmission server callback godoc |
 | localtx | Reject reasons and MsgReplyNextTx order within a snapshot | gap | see LocalTxSubmission/LocalTxMonitor codec items |
 | localtx | Size limits (none in spec) and CBOR decoding limits | gap | MaxUntrustedNestedLevels 1,024 not checked against reference limits |

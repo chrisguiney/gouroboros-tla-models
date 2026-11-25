@@ -116,6 +116,12 @@ protocol.
 - [The Leios ledger side](specs/ledger-leios/README.md):
   certification, endorser-block application, rollback and the
   certificate's committee.
+- [CBOR codec rules](specs/cbor-codec/README.md): the tag 30 rational,
+  Plutus Data constructor fields, tag 258 set members in a generic
+  `Value`, MultiAsset quantity widths and `ConstructorEncoder`'s bytes.
+- [Ledger encodings](specs/ledger-codec/README.md): the proposed protocol
+  version's width, cost-model languages by version, tag 258 before Conway
+  and the ada entry of a TxInfo output.
 
 ### Block pipeline
 
