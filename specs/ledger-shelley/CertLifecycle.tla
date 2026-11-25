@@ -43,6 +43,9 @@
 (*   [R5] Shelley/AdaPots.hs 51-93: total ada = treasury + reserves +     *)
 (*        rewards + utxo + fees + deposits (obligations).                 *)
 (*   [R6] Shelley/Rules/Epoch.hs 157-164: SNAP, then POOLREAP.            *)
+(*   [R11] eras/conway/impl/src/Cardano/Ledger/Conway/Rules/Gov.hs 473,   *)
+(*        596-604: a stake-pool voter must be in psStakePools, else       *)
+(*        VotersDoNotExist. A pending retirement does not remove it.      *)
 (*                                                                         *)
 (* The gOuroboros code it is compared with (commit 61046085):              *)
 (*   [G1] ledger/shelley/rules.go UtxoValidateDelegation 757-864           *)
@@ -54,6 +57,11 @@
 (*        applyPoolCertificate 520-535, PoolCurrentState 702-723,          *)
 (*        IsPoolRegistered 747-753                                          *)
 (*   [G5] ledger/common/state.go PoolState 103-125 (the provider contract) *)
+(*   [G7] PR #3129: ledger/common/pool_deposit.go PoolRegistered (one     *)
+(*        epoch-aware predicate for DELEG, POOL, the voter check and      *)
+(*        BlockLedgerState); ledger/conway/rules.go UtxoValidateUnknown-  *)
+(*        Voters; ledger/dijkstra/rules.go dijkstraCommitteeCredential-   *)
+(*        View, the state the Dijkstra voter check reads.                 *)
 (*                                                                         *)
 (* HOW TO READ THE SYMBOLS: see specs/keepalive/KeepAlive.tla. New here:*)
 (*   Cardinality(S)   "how many things are in the set S" (FiniteSets)      *)
@@ -83,6 +91,13 @@ CONSTANTS
     GoFixed,        \* TRUE: applyPoolRegistration decides "new pool" with
                     \*  IsPoolRegistered, as on fix/ledger-shelley-reregister-
                     \*  reaped-pool. FALSE: with PoolCurrentState, as today.
+    EpochAware,     \* TRUE: every pool check and the "new pool" decision use
+                    \*  PoolRegistered [G7]: PoolCurrentState plus the epoch.
+                    \*  Overrides GoFixed. FALSE: IsPoolRegistered, as main.
+    VoterSeesEpoch, \* TRUE: the state the voter check reads answers the
+                    \*  epoch. FALSE: it hides it, as the Dijkstra committee
+                    \*  view did before it let capability lookups through, so
+                    \*  a pool with a pending retirement cannot be decided.
     Mutation        \* "none", or one deliberate mistake (see Mutations below)
 
 \* The one pool in the model, and "no pool" for an undelegated credential.
@@ -92,16 +107,20 @@ Pool == "p"
 NoPool == "none"
 
 \* A certificate is a record. Kind says which; cred and epoch are used only by
-\* the kinds that carry them.
+\* the kinds that carry them. "PoolVote" is not a certificate but a Conway
+\* voting procedure by the pool [R11]; it is checked against the same state.
+\* In English: "The certificates: a key registration, deregistration or
+\*   delegation for each credential; a pool registration; a pool vote; and a
+\*   pool retirement for each epoch."
 \* Literally: "Certs is defined as the union of: the set of records whose field
 \*   kind is a member of the set containing "RegKey", "DeregKey" and "Deleg" and
 \*   whose field cred is a member of Creds; the set of records whose field kind
-\*   is a member of the set containing "RegPool"; and the set of records whose
-\*   field kind is a member of the set containing "RetirePool" and whose field
-\*   epoch is a member of 0 through (MaxEpoch plus EMax plus 1)."
+\*   is a member of the set containing "RegPool" and "PoolVote"; and the set of
+\*   records whose field kind is a member of the set containing "RetirePool" and
+\*   whose field epoch is a member of 0 through (MaxEpoch plus EMax plus 1)."
 Certs ==
     [kind : {"RegKey", "DeregKey", "Deleg"}, cred : Creds]
-    \cup [kind : {"RegPool"}]
+    \cup [kind : {"RegPool", "PoolVote"}]
     \cup [kind : {"RetirePool"}, epoch : 0..(MaxEpoch + EMax + 1)]
 
 \* The total ada in the model. Nothing creates or destroys ada, so every pot
@@ -195,6 +214,32 @@ GoCurRet == IF ovRetKnown THEN ovRet ELSE baseRet
 \* Literally: "GoIsReg is defined as: ovReg or baseIsReg."
 GoIsReg  == ovReg \/ baseIsReg
 
+\* In English: PoolRegistered [G7] read through BlockLedgerState: the pool has
+\* a registration and no retirement, or a retirement whose epoch is still
+\* ahead. Deciding the second case needs the epoch; when the state read does
+\* not answer it (sees is FALSE) PoolRegistered fails, which refuses the
+\* transaction.
+\* Literally: "GoPoolRegistered of sees is defined as: GoCurReg, and (GoCurRet
+\*   equals 0, or (sees and epoch is less than GoCurRet))."
+GoPoolRegistered(sees) ==
+    /\ GoCurReg                                  \* PoolCurrentState has a registration
+    /\ \/ GoCurRet = 0                            \* ... and no retirement
+       \/ sees /\ epoch < GoCurRet                 \* ... or one still ahead; else unavailable or reaped
+
+\* In English: whether gOuroboros' DELEG and POOL checks find the pool
+\* registered: PoolRegistered with the epoch when EpochAware, otherwise the
+\* caller's IsPoolRegistered.
+\* Literally: "GoReg is defined as: if EpochAware then GoPoolRegistered of TRUE,
+\*   else GoIsReg."
+GoReg == IF EpochAware THEN GoPoolRegistered(TRUE) ELSE GoIsReg
+
+\* In English: whether gOuroboros' voter check finds the pool registered:
+\* as GoReg, but through the state the voter check reads, which may hide the
+\* epoch.
+\* Literally: "GoVoterReg is defined as: if EpochAware then GoPoolRegistered of
+\*   VoterSeesEpoch, else GoIsReg."
+GoVoterReg == IF EpochAware THEN GoPoolRegistered(VoterSeesEpoch) ELSE GoIsReg
+
 -----------------------------------------------------------------------------
 (* The ledger's rules: which certificates are allowed, and their deposits. *)
 
@@ -204,15 +249,17 @@ GoIsReg  == ovReg \/ baseIsReg
 \*   equals "DeregKey", c's cred is a member of registered and balance of c's
 \*   cred equals 0; in the case c's kind equals "Deleg", c's cred is a member of
 \*   registered and poolReg; in the case c's kind equals "RegPool", TRUE; in the
-\*   case c's kind equals "RetirePool", poolReg and epoch is less than c's epoch
-\*   and c's epoch is less than or equal to epoch plus EMax plus (if Mutation
-\*   equals "RetireLate" then 1, else 0)."
+\*   case c's kind equals "PoolVote", poolReg; in the case c's kind equals
+\*   "RetirePool", poolReg and epoch is less than c's epoch and c's epoch is
+\*   less than or equal to epoch plus EMax plus (if Mutation equals
+\*   "RetireLate" then 1, else 0)."
 SpecAccepts(c) ==
     CASE c.kind = "RegKey"     -> c.cred \notin registered               \* [S1] Deleg-Reg
       [] c.kind = "DeregKey"   -> c.cred \in registered                  \* [S1] Deleg-Dereg
                                   /\ balance[c.cred] = 0                 \*  ... only an empty account
       [] c.kind = "Deleg"      -> c.cred \in registered /\ poolReg       \* [S1] Deleg-Deleg, [S2]/[R1]
       [] c.kind = "RegPool"    -> TRUE                                   \* [S3] Pool-Reg or Pool-reReg
+      [] c.kind = "PoolVote"   -> poolReg                                \* [R11] a member of psStakePools
       [] c.kind = "RetirePool" -> poolReg                                \* [S3] Pool-Retire
                                   /\ epoch < c.epoch
                                   /\ c.epoch <= epoch + EMax
@@ -238,21 +285,24 @@ SpecDeposit(c) ==
 \* In English: gOuroboros accepts certificate c. Credentials are read
 \* through the same view and BlockLedgerState keeps them exactly
 \* (block_state.go 346-364, 655-697), so the credential checks match the
-\* ledger's; the pool checks read the pool through GoIsReg [G1][G2].
+\* ledger's; the pool checks read the pool through GoReg [G1][G2], and the
+\* voter check through GoVoterReg [G7].
 \* Literally: "GoAccepts of c is defined as: in the case c's kind equals
 \*   "RegKey", c's cred is not a member of registered; in the case c's kind
 \*   equals "DeregKey", c's cred is a member of registered and balance of c's
 \*   cred equals 0; in the case c's kind equals "Deleg", c's cred is a member of
-\*   registered and GoIsReg; in the case c's kind equals "RegPool", TRUE; in the
-\*   case c's kind equals "RetirePool", GoIsReg and epoch is less than c's epoch
-\*   and c's epoch is less than or equal to epoch plus EMax."
+\*   registered and GoReg; in the case c's kind equals "RegPool", TRUE; in the
+\*   case c's kind equals "PoolVote", GoVoterReg; in the case c's kind equals
+\*   "RetirePool", GoReg and epoch is less than c's epoch and c's epoch is less
+\*   than or equal to epoch plus EMax."
 GoAccepts(c) ==
     CASE c.kind = "RegKey"     -> c.cred \notin registered               \* StakeKeyAlreadyRegisteredError
       [] c.kind = "DeregKey"   -> c.cred \in registered                  \* StakeKeyNotRegisteredError
                                   /\ balance[c.cred] = 0                 \* StakeKeyNonZeroAccountBalanceError
-      [] c.kind = "Deleg"      -> c.cred \in registered /\ GoIsReg       \* DelegateToUnregisteredPoolError [G1]
+      [] c.kind = "Deleg"      -> c.cred \in registered /\ GoReg         \* DelegateToUnregisteredPoolError [G1]
       [] c.kind = "RegPool"    -> TRUE                                   \* cost, network, metadata: not modelled
-      [] c.kind = "RetirePool" -> GoIsReg                                \* StakePoolNotRegisteredOnKeyError [G2]
+      [] c.kind = "PoolVote"   -> GoVoterReg                             \* UnknownVoterError [G7]
+      [] c.kind = "RetirePool" -> GoReg                                  \* StakePoolNotRegisteredOnKeyError [G2]
                                   /\ epoch < c.epoch
                                   /\ c.epoch <= epoch + EMax
 
@@ -273,13 +323,15 @@ GoDeposit(c) ==
 
 \* In English: how BlockLedgerState records a pool certificate [G4].
 \* A registration is "new" when PoolCurrentState returns none (today), or
-\* also when IsPoolRegistered is FALSE (GoFixed). New: the pool's record is
+\* also when IsPoolRegistered is FALSE (GoFixed), or, when EpochAware, when
+\* PoolRegistered says it is not registered [G7]. New: the pool's record is
 \* set and any retirement cleared. Otherwise only the retirement is cleared
 \* (the parameters wait for the epoch boundary). A retirement records its
 \* epoch.
 \* Literally: "GoApply of c is defined as: in the case c's kind equals
-\*   "RegPool", letting isNew be (GoCurReg is not true, or GoFixed and GoIsReg
-\*   is not true): ovReg in the next state equals (ovReg or isNew), and
+\*   "RegPool", letting isNew be (if EpochAware then GoPoolRegistered of TRUE is
+\*   not true, else (GoCurReg is not true, or GoFixed and GoIsReg is not
+\*   true)): ovReg in the next state equals (ovReg or isNew), and
 \*   ovRetKnown in the next state equals TRUE, and ovRet in the next state
 \*   equals 0; in the case c's kind equals "RetirePool", ovReg in the next state
 \*   equals ovReg, and ovRetKnown in the next state equals TRUE, and ovRet in
@@ -287,7 +339,8 @@ GoDeposit(c) ==
 \*   ovRet are unchanged."
 GoApply(c) ==
     CASE c.kind = "RegPool" ->
-            LET isNew == ~GoCurReg \/ (GoFixed /\ ~GoIsReg)
+            LET isNew == IF EpochAware THEN ~GoPoolRegistered(TRUE)  \* registered (block_state.go poolRegistered)
+                         ELSE ~GoCurReg \/ (GoFixed /\ ~GoIsReg)
             IN /\ ovReg' = (ovReg \/ isNew)        \* new: pool.registration = cert
                /\ ovRetKnown' = TRUE                 \* retirementEpoch = nil
                /\ ovRet' = 0
@@ -357,7 +410,9 @@ Init ==
 \*   poolReg and retiring does not equal 0 then the set containing
 \*   "reRegCancelsRetirement", else the empty set), and (if c's kind equals
 \*   "RegPool" and poolReg is not true and reapedAt does not equal 0 then the
-\*   set containing "reaped pool registered again", else the empty set); and
+\*   set containing "reaped pool registered again", else the empty set), and
+\*   (if c's kind equals "PoolVote" and poolReg and retiring does not equal 0
+\*   then the set containing "retiring pool votes", else the empty set); and
 \*   GoApply of c, and epoch, balance, treasury, reserves, reapedAt, baseReg,
 \*   baseRet and baseIsReg are unchanged."
 Tx(c) ==
@@ -383,6 +438,8 @@ Tx(c) ==
                 THEN {"reRegCancelsRetirement"} ELSE {})
                \cup (IF c.kind = "RegPool" /\ ~poolReg /\ reapedAt # 0
                      THEN {"reaped pool registered again"} ELSE {})
+               \cup (IF c.kind = "PoolVote" /\ poolReg /\ retiring # 0  \* a vote by a pool still registered
+                     THEN {"retiring pool votes"} ELSE {})              \* ... with a retirement pending
     /\ GoApply(c)
     /\ UNCHANGED <<epoch, balance, treasury, reserves, reapedAt,
                    baseReg, baseRet, baseIsReg>>
@@ -627,4 +684,8 @@ ProbeReRegNeverCancels            == "reRegCancelsRetirement" \notin seen
 \* Literally: "ProbeReapedPoolNeverRegistered is defined as: "reaped pool
 \*   registered again" is not a member of seen."
 ProbeReapedPoolNeverRegistered    == "reaped pool registered again" \notin seen
+\* In English: "A pool with a pending retirement never votes."
+\* Literally: "ProbeRetiringPoolNeverVotes is defined as: "retiring pool votes"
+\*   is not a member of seen."
+ProbeRetiringPoolNeverVotes       == "retiring pool votes" \notin seen
 =============================================================================
