@@ -16,6 +16,7 @@ closes. A PR can draw on more than one model.
 | `engine` | #3159 (time only the receiver; no default node-to-client timeouts) | #3145, #3146 | merged |
 | `connection` (`ConnectionTeardown`), `engine` (`EngineLifecycle`) | local branch `fix/connection-teardown-joins` (`c164be91`; supersedes `fix/connection-close-during-dial` and `fix/connection-late-forwarder`), not yet published | | local |
 | `engine` (`EngineLifecycle`) | local branch `test/protocol-lifecycle` (`c5ab084c`), not yet published | | local |
+| `engine` (`EngineRoundTripVerdict`) | local branch `fix/protocol-readloop-roundtrip-flake`, not yet published (test flake: error read before the handler ran, and a second request admitted after a full round trip) | | local |
 | `chainsync` | #3092 (close the connection when Stop cannot send MsgDone) | #3091 | merged |
 | `chainsync` | #3094 (GetCurrentTip waits for its own answer) | #3093 | merged |
 | `chainsync` | #3112 (MustReply timeout, node-to-node message size, state map tests) | #3096, #3097, #3101 | merged |

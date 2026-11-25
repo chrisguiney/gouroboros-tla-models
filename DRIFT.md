@@ -182,6 +182,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 - **Verdict.** conforms (stricter)
 - **Status.** Recorded, no change planned (models `keepalive`, `txsubmission`, `peersharing`, `localtx`, `localstatequery`)
 
+Flake note (model `engine` slice 7, `EngineRoundTripVerdict.tla`): because gOuroboros snapshots the state when the second request starts, a second request coalesced behind a first is refused only if that snapshot precedes the reply; after a full round trip it is admitted, as the reference would. A test asserting refusal must therefore hold the first handler's reply until it has read the refusal (`EngineRoundTripVerdictAdmittedBug.cfg`, `EngineRoundTripVerdictEarlyBug.cfg`). Not a drift: both outcomes follow from the verdict above.
+
 Only a misbehaving peer sends early. The reference sometimes answers such a peer (two `MsgKeepAlive` in a row both get answered); gOuroboros closes the connection at once.
 
 ### N2
