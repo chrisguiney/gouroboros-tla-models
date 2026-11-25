@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-107 entries. On `main`: does not conform 60; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+110 entries. On `main`: does not conform 63; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -156,6 +156,9 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L27](#l27) | cbor | Generic `Value` decode of a tag 258 set of maps with composite keys | Not applicable (typed decoders); RFC 8949 allows any item as a map key | main: `Value` and `LazyValue.Decode` fail, including on the cardano-ledger Conway and Dijkstra golden transactions (proposal procedures) | RFC 8949 section 3.1 | does not conform → conforms | Fixed on local branch `fix/cbor-value-set-members` (`3a442a45`), no PR yet |
 | [L28](#l28) | ledger | Bignum MultiAsset quantity | Refused: output quantities use `decodeWord64`, mint quantities `decodeIntegerBounded64` | main: a tag 2/3 bignum quantity is accepted in outputs and mint at every version | CDDL `positive_coin`/`nonZeroInt64` are plain integers | does not conform → conforms | Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet |
 | [L29](#l29) | ledger | PlutusV2 cost model in an Alonzo parameter update | Accepted: the pre-Conway cost-model decoder takes PlutusV1 and PlutusV2 (exact parameter counts) in every era | main: Alonzo refuses language 1 (only Babbage accepts it) | Silent on the decoder; the Alonzo spec lists PlutusV1 only | does not conform → conforms | Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet |
+| [L30](#l30) | ledger | Tag 258 on a pre-Conway set-shaped field | Refused before version 9: `decodeSet` (versions 2-8) and the witness decoders' `decodeList` take no tag | main: accepted on pool owners, Alonzo/Babbage collateral, required signers, reference inputs and every Shelley-Babbage witness list | Silent (the CDDL's `set<a>` allows the tag from Conway) | does not conform → conforms | Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), no PR yet |
+| [L31](#l31) | cbor | `ConstructorEncoder` field list encoding | Non-empty fields as an indefinite list, empty as `0x80` (`encodeData` with the Serialise list instance) | main: a definite list; nil fields as null | Plutus Data CDDL allows either | does not conform → conforms | Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), no PR yet; changes the bytes and hashes of Data built with it |
+| [L32](#l32) | cbor | Map entry order in Value's Plutus Data JSON | Wire order (`plutusDataToJson` over the entry list) | main: entries sorted by their JSON key; Value holds maps as Go maps, so wire order is gone | Silent | does not conform | Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1339,6 +1342,39 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet. `TestAlonzoCostModelUpdateLanguagesAsReference` fails on the parent with "unknown cost model language 1" at pv 5. `classic_ppup_rules_test.go` asserted the old refusal and is updated; conformance vectors pass. Where spec and reference differ, gOuroboros follows the reference
 
+### L30
+
+**Tag 258 on a pre-Conway set-shaped field** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: before protocol version 9, `decodeSet` is `decodeCollection decodeListLenOrIndef` ("set tag 258 is not permitted") and the Shelley and Alonzo witness decoders use `decodeList`, so Shelley to Babbage transactions with a tag on these fields do not decode. gOuroboros main accepted the tag everywhere except transaction inputs.
+- **Spec.** Silent (the CDDL's `set<a>` allows the tag from Conway)
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Decoding/Decoder.hs` 935-953; `eras/shelley/impl/src/Cardano/Ledger/Shelley/TxWits.hs` 261-273; `eras/alonzo/impl/src/Cardano/Ledger/Alonzo/TxWits.hs` 347-357, 569-580, 660-700, 721-730
+- **gOuroboros.** gOuroboros `0fa7a0df` `ledger/common/certs.go` `PoolRegistrationCertificate.UnmarshalCBOR`, `ValidatePreConwayCertificateTypes`; Alonzo and Babbage body and witness-set decoders, Shelley witness set
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), no PR yet. `TestPreConwaySetFieldsRefuseTag258` (26 fields across Shelley-Babbage, each with an untagged control) fails all 26 on the parent. Existing tests that asserted tagged owner sets decode pre-Conway, and that tagged duplicate collateral is refused as a duplicate, now expect the tag refusal. Conformance vectors pass. Only tag 258 heads trigger the re-read, so another tag on these fields is still accepted
+
+### L31
+
+**`ConstructorEncoder` field list encoding** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: plutus `encodeData` writes a constructor's fields with the Serialise list instance. gOuroboros main encoded the Go slice as a definite list.
+- **Spec.** Plutus Data CDDL allows either
+- **Reference.** plutus `bdc12f105a98` `plutus-core/plutus-core/src/PlutusCore/Data.hs` 147-160; vectors from `plutus-core/plutus-core/test/CBOR/DataStability.hs`
+- **gOuroboros.** gOuroboros `0fa7a0df` `cbor/constructor.go` `ConstructorEncoder.MarshalCBOR`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), no PR yet; changes the bytes and hashes of Data built with it. `TestConstructorEncoderAsPlutusDataStability` (two DataStability vectors) and `TestConstructorEncoderFieldListsAsPlutus` fail on the parent. No gOuroboros caller builds datums with it; outside callers are bluefin (`internal/tx`, `internal/miner`), cardano-models (`tuna.go`, `cdns.go`), merkle-patricia-forestry (`proof.go`), shai (`internal/spectrum/models.go`) and vpn-indexer (`internal/txbuilder`), whose built Data and any hashes of it change; their tests that pin bytes need updating. Plain `[]any` List values inside the fields are still definite
+
+### L32
+
+**Map entry order in Value's Plutus Data JSON** (kind 1: differs from the reference)
+
+- **What differs.** Reference: `plutusDataToJson` renders `Map kvs` in list order. gOuroboros sorts.
+- **Spec.** Silent
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/Plutus/Data.hs` 144-150
+- **gOuroboros.** gOuroboros `0fa7a0df` `cbor/value.go` `appendAstJsonMap`
+- **Verdict.** does not conform
+- **Status.** Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus. Recorded by `TestValueJSONAsReferencePlutusDataToJson`, whose maps are in sorted order
+
 ## Pipeline
 
 ### P1
@@ -1464,8 +1500,10 @@ No pull request yet (decide whether and how to fix):
 - **L28** Bignum MultiAsset quantity. Fixed on local branch `fix/ledger-multiasset-bignum-quantity` (`4ae0d4f9`), no PR yet.
 - **L29** PlutusV2 cost model in an Alonzo parameter update. Fixed on local branch `fix/ledger-alonzo-v2-cost-model-update` (`283f75cb`), no PR yet.
 
-- Recorded, not changed: `ConstructorEncoder` writes a constructor's fields as given, so a `[]any` becomes a definite list; plutus `encodeData` writes a non-empty field list indefinite (`Data.hs` 147-160). Datum and redeemer hashes use the bytes carried in the transaction, so this only matters to callers that build and hash Data; passing `IndefLengthList` gives the reference bytes. `IndefLengthByteString` does not check that its chunks are definite byte strings (RFC 8949 F.1).
-- Decision needed: before version 9, `decodeSet` refuses tag 258 (Decoder.hs 943-953), so a pre-Conway pool registration whose owners carry the tag does not decode in the reference; gOuroboros accepts it in every era. Babbage and Alonzo bodies also call the tag-only `CheckForDuplicates` on collateral, required signers and reference inputs, refusing tagged duplicates the pre-9 reference would refuse for the tag itself and silently deduplicate untagged.
+- **L30** Tag 258 on a pre-Conway set-shaped field. Fixed on local branch `fix/ledger-pre-conway-set-tag` (`e9dd7145`), no PR yet.
+- **L31** `ConstructorEncoder` field list encoding. Fixed on local branch `fix/cbor-constructor-indefinite-fields` (`ad7a4f25`), no PR yet; changes the bytes and hashes of Data built with it.
+- **L32** Map entry order in Value's Plutus Data JSON. Open, no branch: needs Value to keep map order (an API change); Value's JSON is used for error and diagnostic output, not consensus.
+- `IndefLengthByteString` does not check that its chunks are definite byte strings (RFC 8949 F.1); recorded, not changed.
 - **L23** Dijkstra committee certificate for a member an earlier level proposed. Fixed on local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`), no PR yet.
 - **L19** Committee certificate after an in-block UpdateCommittee proposal. Fixed on local branch `fix/ledger-block-state-proposed-committee` (`458e502c`), no PR yet.
 - **L20** `VerifyBlock` issuer in a TPraos overlay slot. Fixed on local branch `fix/ledger-verify-block-tpraos-overlay` (`ddc16a74`), no PR yet; breaking for callers that validate TPraos issuers.
