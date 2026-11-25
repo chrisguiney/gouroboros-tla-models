@@ -457,6 +457,8 @@ and compared.
 - `DelayHeld`: no two acceptances are closer than the delay.
 - `DuplicateNotFatal`: a local submission that lost a race to the same
   message is not refused.
+- `OtherPoolKept`: a prepared batch's message from another pool is not
+  refused at commit because this pool's message fails the rate re-check.
 
 ### The answer
 
@@ -469,7 +471,7 @@ and compared.
 | `MessageIngressNoRateLimitBug.cfg` | no rate limit | `SigTooFrequent`, fatal for node-to-node |
 | `MessageIngressSizeAfterExpiryBug.cfg` | (the first body-size fix) checks the body in the authenticator, after expiry, so an expired message with a bad body is dropped | the decoder refuses the body first (`Codec.hs` 193-202): the whole reply fails and the connection closes |
 
-With the fixes `MessageIngress.cfg` (148,820 states) passes every question.
+With the fixes `MessageIngress.cfg` (1,389,288 states) passes every question.
 Mutations: `RateOnDuplicateBug` (the limit applied to an accepted message, so
 relaying it fails), `NoRateRecheckBug` (commit without re-checking the limit
 accepts two concurrent submissions), `DupRaceFatalBug` (a submission that lost
@@ -479,7 +481,10 @@ and refuses the negative gap; `LimitOff.cfg` is the fixed run, and adds the
 question `OffNeverRefused`), `CounterOnDuplicateBug` (a held message
 re-verified against the opcert counter is refused once its pool's counter
 has moved past it, which `Rotate` models; the reference drops a held
-message before validating it). Probes: `ProbeKeepValidBug` (a reply
+message before validating it), `CommitAllOrNothingBug` (a batch judged per
+message when prepared still returns one error at commit, so another pool's
+message is refused with the one that fails the rate re-check; a prepared
+batch may hold another pool's valid message, `other` in `Prepare`). Probes: `ProbeKeepValidBug` (a reply
 both accepts a message and disconnects, as in the reference),
 `ProbeTooFrequentBug` (a message with no other failure is refused as too
 frequent).

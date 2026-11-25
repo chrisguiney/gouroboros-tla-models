@@ -27,6 +27,8 @@
 (*                message is not refused.                                  *)
 (*   OffNeverRefused  with the limit off (Delay 0), a valid local          *)
 (*                submission is never refused at commit.                   *)
+(*   OtherPoolKept  a prepared batch's message from another pool is not   *)
+(*                refused at commit because this pool's message is.        *)
 (*                                                                         *)
 (* Sources:                                                                *)
 (*   Reference, IntersectMBO/dmq-node a267003c14e9, dmq-node/:             *)
@@ -56,6 +58,10 @@
 (*   [G2] protocol/common/authentication.go verifyMessageInternal: order  *)
 (*        id, stake, opcert, KES (window and signature), counter; no rate  *)
 (*        limit.                                                           *)
+(*   [G3] protocol/common/authentication.go prepare (fix/dmq-sig-rate-limit *)
+(*        ef4ecf20): PrepareEach judges each message, but its commit       *)
+(*        re-checks the rate limit for every prepared message and returns  *)
+(*        one error for the batch, so no message of it is recorded.        *)
 (***************************************************************************)
 EXTENDS Integers, Sequences, FiniteSets
 
@@ -265,18 +271,22 @@ Rotate ==
     /\ ctrAhead' = TRUE
     /\ UNCHANGED <<now, fails, accepted, lastT, history, pending, out>>
 
-\* In English: "A local submission of id is prepared on worker w against
-\* the current state, without changing it."
-\* Literally: "Prepare of w and id is defined as: pending of w is Idle, and
-\*   pending of w in the next state is the record of kind "prepared", id,
-\*   now, whether id is a member of accepted, and ok (FirstFail of id,
-\*   GoOrder, lastT and TRUE equals "ok"); everything else unchanged."
-Prepare(w, id) ==
+\* In English: "A submission of id is prepared on worker w against the
+\* current state, without changing it. With other TRUE it is a batch that
+\* also holds a valid message of another pool, as a node-to-node reply
+\* judged message by message (PrepareEach) may [G3]."
+\* Literally: "Prepare of w, id and other is defined as: pending of w is
+\*   Idle, and pending of w in the next state is the record of kind
+\*   "prepared", id, now, whether id is a member of accepted, ok (FirstFail
+\*   of id, GoOrder, lastT and TRUE equals "ok") and other; everything else
+\*   unchanged."
+Prepare(w, id, other) ==
     /\ pending[w] = Idle
     /\ pending' = [pending EXCEPT ![w] =
           [kind |-> "prepared", id |-> id, at |-> now,
            dup |-> id \in accepted,
-           ok |-> id \in accepted \/ FirstFail(id, GoOrder, lastT, TRUE) = "ok"]]
+           ok |-> id \in accepted \/ FirstFail(id, GoOrder, lastT, TRUE) = "ok",
+           other |-> other]]
     /\ UNCHANGED <<now, fails, accepted, lastT, history, out, ctrAhead>>
 
 \* In English: "Worker w commits: a message held by now (another
@@ -286,15 +296,21 @@ Prepare(w, id) ==
 \* recorded. A Delay of 0 turns the limit off, as a vcMinSigDelay of zero
 \* does [R2]; the prepared time q.at may precede lastT (another
 \* acceptance landed after the prepare), so "RecheckWhenOff" (the first
-\* rate-limit branch) still compares, and refuses a negative gap."
+\* rate-limit branch) still compares, and refuses a negative gap. The
+\* other pool's message, if the batch holds
+\* one, is judged on its own, as the reference judges each message under
+\* its mempool lock [R5]; "CommitAllOrNothing" refuses it too when this
+\* pool's message fails the re-check [G3]."
 \* Literally: "Commit of w is defined as: pending of w is not Idle; letting
-\*   q be pending of w, held be whether q.id is a member of accepted, and
-\*   ok be q.ok and (if held then Mutation is not "DupRaceFatal" otherwise
+\*   q be pending of w, held be whether q.id is a member of accepted, ok be
+\*   q.ok and (if held then Mutation is not "DupRaceFatal" otherwise
 \*   ((Delay is 0 and Mutation is not "RecheckWhenOff") or Mutation is
-\*   "NoRateRecheck" or q.at minus lastT is at least Delay)):
+\*   "NoRateRecheck" or q.at minus lastT is at least Delay)), and otherOk
+\*   be: Mutation is not "CommitAllOrNothing", or ok, or not q.ok:
 \*   if ok and not held, accepted gains q.id, lastT becomes q.at and q.at is
 \*   appended to history, otherwise they are unchanged; pending of w becomes
-\*   Idle; out becomes the record of kind "commit", held and ok."
+\*   Idle; out becomes the record of kind "commit", held, ok, q.other and
+\*   otherOk."
 Commit(w) ==
     /\ pending[w] # Idle
     /\ LET q == pending[w]
@@ -303,6 +319,9 @@ Commit(w) ==
                          ELSE \/ Delay = 0 /\ Mutation # "RecheckWhenOff" \* limit off [R2]
                               \/ Mutation = "NoRateRecheck"
                               \/ q.at - lastT >= Delay
+           \* A message refused when prepared is not in the batch's records,
+           \* so only a refusal at commit takes the rest with it [G3].
+           otherOk == Mutation # "CommitAllOrNothing" \/ ok \/ ~q.ok
        IN /\ IF ok /\ ~held
                THEN /\ accepted' = accepted \cup {q.id}
                     /\ lastT' = q.at
@@ -310,17 +329,18 @@ Commit(w) ==
                ELSE UNCHANGED <<accepted, lastT, history>>
           /\ pending' = [pending EXCEPT ![w] = Idle]
           /\ out' = [kind |-> "commit", dup |-> held,
-                     valid |-> q.ok, ok |-> ok]
+                     valid |-> q.ok, ok |-> ok,
+                     other |-> q.other, otherOk |-> otherOk]
     /\ UNCHANGED <<now, fails, ctrAhead>>
 
 \* Literally: "Next is defined as: Tick, or a Reply of some b in Replies, or
-\*   a Reverify of some id in Ids, or a Prepare of some w and id, or a Commit
-\*   of some w, or Rotate."
+\*   a Reverify of some id in Ids, or a Prepare of some w, id and other, or a
+\*   Commit of some w, or Rotate."
 Next ==
     \/ Tick
     \/ \E b \in Replies : Reply(b)
     \/ \E id \in Ids : Reverify(id)
-    \/ \E w \in Workers, id \in Ids : Prepare(w, id)
+    \/ \E w \in Workers, id \in Ids, other \in BOOLEAN : Prepare(w, id, other)
     \/ \E w \in Workers : Commit(w)
     \/ Rotate
 
@@ -357,6 +377,12 @@ DuplicateNotFatal ==
 \*   "commit" and out.valid, then out.ok."
 OffNeverRefused ==
     (Delay = 0 /\ out.kind = "commit" /\ out.valid) => out.ok
+
+\* In English: "A batch's message from another pool is not refused at
+\* commit because this pool's message is."
+\* Literally: "OtherPoolKept is defined as: if out.kind is "commit" and
+\*   out.other, then out.otherOk."
+OtherPoolKept == (out.kind = "commit" /\ out.other) => out.otherOk
 
 \* In English: "No reply both accepts a message and disconnects." Violated:
 \* as in the reference, the valid messages of a reply are kept even when
