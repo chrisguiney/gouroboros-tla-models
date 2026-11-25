@@ -18,8 +18,7 @@
 (*   NoAcceptBeyondReference  gOuroboros never accepts a message the       *)
 (*                    reference would reject at the same moment.           *)
 (*   AcceptAsReference        gOuroboros accepts every message the         *)
-(*                    reference accepts, except where one of its own       *)
-(*                    stricter checks (GoExtras) refuses it.               *)
+(*                    reference accepts.                                   *)
 (*   SeenMonotone     a pool's recorded counter never goes down.           *)
 (*   RejectKeepsSeen  a rejected batch records nothing.                    *)
 (*                                                                         *)
@@ -174,16 +173,20 @@ GoNow(nowT) == IF Mutation = "TruncateNow" THEN 2 * (nowT \div 2) ELSE nowT
 GoEvo(m, per) == IF Mutation = "KesAtCurrent" THEN per - m.cert
                  ELSE m.kp - m.cert
 
-\* In English: "Checks gOuroboros makes that the reference does not: the
-\* counter is not below the one in its chain state, and the opcert has
-\* started and not ended at the node's own current period."
-\* Literally: "GoExtras of m and per is defined as: m.ctr is at least
+\* In English: "Checks gOuroboros main makes that the reference does not
+\* ("Extras"): the counter is not below the one in its chain state, and the
+\* opcert has started and not ended at the node's own current period. The
+\* fixes drop both, so otherwise there are none."
+\* Literally: "GoExtras of m and per is defined as: if Mutation is a member
+\*   of the set of "Extras" and "KesAtCurrent", then m.ctr is at least
 \*   ChainFloor, and per is at least m.cert, and per minus m.cert is less
-\*   than MaxEvo."
+\*   than MaxEvo; otherwise TRUE."
 GoExtras(m, per) ==
-    /\ m.ctr >= ChainFloor                  \* chain-state counter [G1]
-    /\ per >= m.cert                        \* opcert started by now [G2]
-    /\ per - m.cert < MaxEvo                \* opcert not ended by now [G2]
+    IF Mutation \in {"Extras", "KesAtCurrent"}
+    THEN /\ m.ctr >= ChainFloor             \* chain-state counter [G1]
+         /\ per >= m.cert                   \* opcert started by now [G2]
+         /\ per - m.cert < MaxEvo           \* opcert not ended by now [G2]
+    ELSE TRUE
 
 \* In English: "gOuroboros accepts m at clock nowT, current period per,
 \* counters s, when every check it makes passes."
@@ -367,15 +370,13 @@ NoAcceptBeyondReference ==
         => RefBatchOK(last.batch, last.now, last.seen)
 
 \* In English: "Whatever the reference would accept, gOuroboros accepted
-\* too, unless one of its own stricter checks refused it."
-\* Literally: "AcceptAsReference is defined as: if last.kind is not "none",
-\*   and RefBatchOK of last.batch, last.now and last.seen, and for every i in
-\*   the domain of last.batch, GoExtras of last.batch of i and last.period,
-\*   then last.accepted."
+\* too."
+\* Literally: "AcceptAsReference is defined as: if last.kind is not "none"
+\*   and RefBatchOK of last.batch, last.now and last.seen, then
+\*   last.accepted."
 AcceptAsReference ==
     (/\ last.kind # "none"
-     /\ RefBatchOK(last.batch, last.now, last.seen)
-     /\ \A i \in DOMAIN last.batch : GoExtras(last.batch[i], last.period))
+     /\ RefBatchOK(last.batch, last.now, last.seen))
         => last.accepted
 
 \* In English: "A pool's recorded counter never goes down."
@@ -402,16 +403,6 @@ RejectKeepsSeen ==
 \*   greater than last.batch of 1's kp."
 ProbeNoCrossPeriodAccept ==
     ~(last.kind # "none" /\ last.accepted /\ last.period > last.batch[1].kp)
-
-\* In English: "gOuroboros never refuses a message the reference accepts."
-\* Violated where gOuroboros's own stricter checks refuse one.
-\* Literally: "ProbeNeverStricter is defined as: it is not the case that
-\*   last.kind equals "prepare" and RefBatchOK of last.batch, last.now and
-\*   last.seen and not last.accepted."
-ProbeNeverStricter ==
-    ~(/\ last.kind = "prepare"
-      /\ RefBatchOK(last.batch, last.now, last.seen)
-      /\ ~last.accepted)
 
 \* In English: "No batch is ever accepted." Violated: acceptance happens.
 \* Literally: "ProbeNoAccept is defined as: it is not the case that

@@ -9,7 +9,7 @@ carries no transactions of its own.
 
 The network side (LeiosNotify, LeiosFetch, LeiosVotes) is in
 [Model `leios-peras`](../leios-peras/README.md). This model covers what happens
-once the blocks have arrived. It has three parts:
+once the blocks have arrived. It has four parts:
 
 - `LeiosLedger.tla`: announcement, certification, EB application and
   rollback across a short chain.
@@ -17,6 +17,7 @@ once the blocks have arrived. It has three parts:
   committee.
 - `LeiosVoting.tla`: seating the committee, collecting votes and forming
   certificates.
+- `LeiosVoteTiming.tla`: vote deadlines, pruning and announcement limits.
 
 Leios is a draft. Where the CIP, the reference ledger, and the prototype
 node disagree, the model records each and says which one gOuroboros
@@ -256,7 +257,8 @@ announcements, `a` and `b` (an equivocating pair). A vote is a voter id
 (including ids past the committee), an announcement and a good or bad
 signature; votes arrive in any order, any number of times. `GoExactNc`
 selects gOuroboros main's committee-size check (DRIFT L9);
-`CallerDropsAgedKeys` says whether the caller withholds aged-out keys.
+`CallerDropsAgedKeys` says whether the caller withholds aged-out keys, and
+`GoChecksKeyAge` whether gOuroboros judges key age itself (the L21 fix).
 
 ### The answers
 
@@ -270,12 +272,13 @@ selects gOuroboros main's committee-size check (DRIFT L9);
 | `CertsVerify` | every formed certificate passes `verifyLeiosCert` | yes |
 | `AtMostOneCert` | with tau > 1/2, at most one announcement per election is certified | yes |
 | `GoAcceptsCerts` | gOuroboros accepts every formed certificate | yes, except with fewer pools than `Nc` on main (L9) |
-| `GoAgrees` | over every signer set, gOuroboros accepts exactly what the reference does | yes if the caller withholds aged-out keys; **no** otherwise (L21) |
+| `GoAgrees` | over every signer set, gOuroboros accepts exactly what the reference does | main: only if the caller withholds aged-out keys (L21); `fix/leios-voting-key-age`: yes (`LeiosVotingAgedKeyFixed`) |
 
 Two rules are invisible to a certificate and so to gOuroboros: one vote per
 seat per election (break it and both announcements of an election are
-certified, each certificate valid on its own), and key age (an aged-out key
-verifies like any other). Both are the caller's.
+certified, each certificate valid on its own), and, on main, key age (an
+aged-out key verifies like any other). One vote per seat stays the
+caller's; key age is gOuroboros's on `fix/leios-voting-key-age`.
 
 ### Checking the checks
 
@@ -296,7 +299,10 @@ verifies like any other). Both are the caller's.
 | `LeiosVotingStrictTallyBug` | aggregator waits for more than quorum | `CertAtQuorum` |
 | `LeiosVotingStrictQuorumBug` | gOuroboros demands more than quorum | `GoAcceptsCerts` |
 | `LeiosVotingGoExactNcBug` | gOuroboros main, fewer pools than `Nc` (L9) | `GoAcceptsCerts` |
-| `LeiosVotingAgedKeyCallerBug` | caller hands over an aged-out key (L21) | `GoAgrees` |
+| `LeiosVotingAgedKeyCallerBug` | caller hands over an aged-out key, gOuroboros main (L21) | `GoAgrees` |
+
+`LeiosVotingAgedKeyFixed` is the same caller against the fix: every
+invariant holds.
 
 Probes (expected to be violated): `LeiosVotingProbeCertBug`,
 `...ProbeEquivocationBug`, `...ProbeDuplicateBug`, `...ProbeKeylessBug`,
@@ -304,7 +310,7 @@ Probes (expected to be violated): `LeiosVotingProbeCertBug`,
 (both announcements hold votes).
 
 State counts: `LeiosVoting` 264, `LeiosVotingWide` 690, `LeiosVotingFew`
-72, `LeiosVotingAged` 164 distinct states.
+72, `LeiosVotingAged` 164, `LeiosVotingAgedKeyFixed` 164 distinct states.
 
 ### Go tests (gOuroboros)
 
@@ -338,11 +344,96 @@ has a badly proven key and fails its proof first), aggregate signature
 unchecked (`AcceptBadSig`, `AggregateAllSeats`), invalid proof ignored
 (`AcceptKeyless` on `ties`, `EverySignerSet`).
 
+Branch `fix/leios-voting-key-age` (`93c3df5d`, L21): `MaxKeyAgeEpochs`
+(the reference's `kesMaxKeyAgeEpochs`) with 7 vectors derived from its
+formula (mainnet 21, one-day epochs 95, exact and inexact division, 64-bit
+overflow); `TestVerifyDijkstraCertificateKeyAge` (registration epoch, last
+honoured epoch, first unhonoured, registered later, near `2^64`, missing
+epoch length, an aged key that did not sign); and the CertRB block path at
+epochs 20 and 21. With the age check disabled, the unhonoured cells fail.
+
+Branch `fix/leios-vote-shape` (`eb4c2421`, L22): `LeiosVote` in the CIP
+shape, pinned to the vote captured from the rc-2026w41 prototype (decode
+and byte-exact re-encode; fails to decode on main), the reference's 16-bit
+voter id bound, and the earlier draft's shape refused (kept as
+`LeiosLegacyVote` for LeiosNotify offers).
+
 No BLS aggregation golden vectors exist at the pinned revisions:
 `cardano-crypto-leios`'s tests are properties over generated keys, and
 cardano-crypto-class's `bls12-381-test-vectors` cover the augmented
 scheme, not proof-of-possession aggregation. The rc-2026w41 certificate
 (Part 2) remains the only captured aggregate.
+
+## Part 4: vote timing, pruning and announcement limits (`LeiosVoteTiming.tla`)
+
+### What the reference does
+
+ouroboros-consensus `ec239d57f618`:
+
+- **Deadline.** A vote's window runs from `3 L_hdr` to
+  `3 L_hdr + L_vote + L_diff` after its election slot began
+  (`LeiosNotify/Client/State.hs` 432-446 `leiosVoteWindow`). `addVote`
+  drops a vote received after the deadline (`ArrivedTooLate`), one for an
+  announcement the node did not accept (`NotAnnounced`), and one of a seat
+  it already has a vote of in the election (`AlreadyKnown`), in that order,
+  then verifies the signature outside any transaction (`VoteState.hs`
+  224-301).
+- **Pruning.** `pruneVotes t` forgets every election whose deadline is
+  before `t` and records `t` (405-431). Because verifying takes time,
+  `recordVote` refuses a vote whose deadline is before the last pruning
+  (348-399), so a seat's vote in an election is never recorded twice, even
+  after the election was forgotten (the reference's `prop_keepsUnexpired`).
+- **Certificates** are kept until the immutable tip's slot passes their
+  election (`pruneCertificates`, 458-464).
+- **Announcements.** At most two per election (the second proves
+  equivocation), none repeated, none of an election before the immutable
+  tip (`AnnounceState.hs` 94-151).
+
+gOuroboros has none of this. Its LeiosNotify and LeiosVotes clients hand
+announcements and votes to callbacks; nothing in it keeps votes,
+announcements or certificates. So there is no Go table to walk: these are
+the caller's obligations, stated by the invariants below.
+
+### Caller contract
+
+A node using gOuroboros for Leios must:
+
+1. Drop a vote received after `3 L_hdr + L_vote + L_diff` from its
+   election slot's start (`NoLateVote`).
+2. Keep a vote only for an announcement it accepted (`OnlyAnnouncedVotes`).
+3. Accept at most two announcements per election
+   (`AtMostTwoAnnouncements`).
+4. Refuse, after verifying a vote, one whose election it pruned meanwhile,
+   so no seat's vote in an election is recorded twice
+   (`NeverRecordedTwice`).
+5. Prune only elections whose deadline is before the pruning time
+   (`KeepsUnexpired`).
+6. Keep each certificate until the immutable tip passes its election slot
+   (`CertsKeptUntilImmutable`).
+
+### What the model contains
+
+Elections in slots 0 and 1, deadlines one tick later, two seats, three
+announcing blocks (votes for two of them), time 0-3, at most two votes
+being verified at once. The quorum is every seat voting for one
+announcement. Steps: time passes, an announcement arrives, a vote arrives,
+a verified vote is recorded, the votes are pruned, the immutable tip
+advances.
+
+| Config | Mutation | Fails |
+| --- | --- | --- |
+| `LeiosVoteTiming` | none | passes (13,654,558 distinct states, about 25 s) |
+| `LeiosVoteTimingNoDeadlineBug` | late votes kept | `NoLateVote` |
+| `LeiosVoteTimingNoAnnounceCheckBug` | votes for unaccepted announcements kept | `OnlyAnnouncedVotes` |
+| `LeiosVoteTimingThirdAnnouncementBug` | a third announcement accepted | `AtMostTwoAnnouncements` |
+| `LeiosVoteTimingNoPrunedCheckBug` | `recordVote` without the pruning check | `NeverRecordedTwice` |
+| `LeiosVoteTimingPruneEarlyBug` | pruning forgets elections due now | `KeepsUnexpired` |
+| `LeiosVoteTimingPruneCertsEarlyBug` | certificates of the tip's slot forgotten | `CertsKeptUntilImmutable` |
+
+Probes: `LeiosVoteTimingProbeLateBug`, `...ProbePrunedRaceBug` (a verified
+vote refused because its election was pruned meanwhile),
+`...ProbeUnannouncedBug`, `...ProbeSecondAnnouncementBug`,
+`...ProbeCertBug`, `...ProbeCertPrunedBug`.
 
 ## Go tests and mutations (gOuroboros)
 
@@ -388,11 +479,12 @@ got 1") and pass after it.
 | Keyless signer | ineligible | `SignerWithoutKey` (invalid proofs seated keyless) | `ErrKeylessSigner`; invalid proof `ErrInvalidProof` (both reject) |
 | Seating (Part 3; CIP `db48da14bff1`) | top `Nc` by active stake, ties by ascending pool id | same (`selectLeiosCommittee`) | caller's |
 | Persistent/non-persistent voters | dropped: wFA^LS is a recorded alternative only | wFA^LS exists in consensus `ec239d57f618` but only Peras uses it | none |
-| Key age | keys rotate with a time-to-live | keyless after `ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2` epochs | caller's; not in `DijkstraLeiosCertificateState`'s contract (L21) |
+| Key age | keys rotate with a time-to-live | keyless after `ceil(maxKESEvo * slotsPerKESPeriod / epochLength) + 2` epochs | main: not checked, not in the contract; `fix/leios-voting-key-age`: checked (L21) |
 | Vote weight | the pool's active stake | stake / total active stake | stake, compared with the total by cross-multiplying (same) |
 | Quorum | prose "exceeds"; formula `>=` | `>=` | `>=` |
 | One vote per seat per election | "at most one vote per committee member per slot" forwarded | first vote kept, later ones dropped unverified, any announcement | caller's (a certificate cannot show it) |
-| Vote shape | `[announcing_rb_hash, voter_id, signature]` | same, `voter_id` a `Word16` | `LeiosPrototypeVote` same (`uint64` id); `LeiosVote` (LeiosFetch) `[slot, eb_hash, voter_id, signature]` (L22) |
+| Vote shape | `[announcing_rb_hash, voter_id, signature]` | same, `voter_id` a `Word16` | main: `LeiosVote` (LeiosVotes, LeiosFetch) `[slot, eb_hash, voter_id, signature]`; `fix/leios-vote-shape`: the CIP shape, `uint16` id (L22) |
+| Vote deadline, pruning, two announcements per election (Part 4) | votes relayed for a bounded time; at most one per member per slot | `VoteState`, `AnnounceState` | caller's |
 
 ## Sources
 
@@ -448,11 +540,10 @@ got 1") and pass after it.
 
 ## Not modelled
 
-- Vote timing: voting windows, late votes, pruning and the deadline (the
-  wire side is in Model `leios-peras`); `LeiosVoting.tla` has one open
-  election.
-- Which announcements a node relays (at most two per election, OCIN), and
-  the reference's thread race between recording a vote and aggregating.
+- The vote window's opening (votes arriving early within the clock skew
+  wait), the late-vote grace before a peer is disconnected, announcement
+  age limits and stale operational certificates.
+- The reference's thread race between recording a vote and aggregating.
 - BLS cryptography: a certificate's signature is valid exactly when it
   aggregates the signers' keys. The Go table test exercises the real
   curve.
@@ -475,4 +566,4 @@ make ledger-leios
 cd specs/ledger-leios && ../../bin/tlc -config LeiosLedgerGo.cfg LeiosLedger.tla
 ```
 
-The whole directory (56 configs) runs in about 40 seconds.
+The whole directory (70 configs) runs in about 75 seconds.

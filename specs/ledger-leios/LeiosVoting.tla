@@ -80,6 +80,7 @@ CONSTANTS
     TauDen,
     GoExactNc,  \* TRUE: gOuroboros checks the committee against Nc (main)
     CallerDropsAgedKeys, \* TRUE: the caller withholds aged-out keys
+    GoChecksKeyAge, \* TRUE: gOuroboros judges key age itself (the L21 fix)
     Mutation    \* "none", or one deliberate break (see README)
 
 VARIABLES
@@ -252,17 +253,21 @@ Keyed == {i \in Seats : Honoured(SeatPool(i))}
 \*   KeyOf of SeatPool of i equals "valid"."
 RefKeyed == {i \in Seats : KeyOf(SeatPool(i)) = "valid"}
 
-\* In English: "The seats whose key gOuroboros is handed: valid keys, and
-\* aged-out ones unless the caller withholds them [G2]. A badly proven key
-\* is handed over too, but gOuroboros checks the proof and rejects a signer
-\* that holds one, so it counts as keyless here."
+\* In English: "The seats gOuroboros treats as keyed: valid keys, and
+\* aged-out ones when the caller hands them over and gOuroboros does not
+\* judge age itself [G2]. A badly proven key is handed over too, but
+\* gOuroboros checks the proof and rejects a signer that holds one, so it
+\* counts as keyless here."
 \* Literally: "GoKeyed is defined as the set of every i in Seats such that
 \*   KeyOf of SeatPool of i equals "valid", or (CallerDropsAgedKeys is not
-\*   true and KeyOf of SeatPool of i equals "aged")."
+\*   true and GoChecksKeyAge is not true and KeyOf of SeatPool of i equals
+\*   "aged")."
 GoKeyed ==
     {i \in Seats :
         \/ KeyOf(SeatPool(i)) = "valid"
-        \/ ~CallerDropsAgedKeys /\ KeyOf(SeatPool(i)) = "aged"}
+        \/ /\ ~CallerDropsAgedKeys
+           /\ ~GoChecksKeyAge
+           /\ KeyOf(SeatPool(i)) = "aged"}
 
 (***************************************************************************)
 (* The quorum [C4][R3][G1]: the weight reaches tau of the total stake.    *)
