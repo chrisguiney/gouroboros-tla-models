@@ -75,6 +75,13 @@ closes. A PR can draw on more than one model.
 | none (C13, C14, C15) | #3276 (`fix/perasvotes-op-lock-and-await-panic` `39f34f8a`; `Sync` honours callers' contexts, `VoteFunc` re-entry fails, await panics contained; merge 12 of 12) | #3252 | open |
 | `ledger-rewards` | local branch `fix/ledger-rewards-reference` (`9675856a`, `bdba9c8b`, `203f3624`; reward pots and pool split as cardano-ledger; pledge owners as a set), not yet published | | local |
 | `ledger-governance` | local branch `test/conway-gov-reference` (`7c2f2013`; ledger vectors replayed through gOuroboros rules alone, network-id and return-address tables), not yet published | | local |
+| `ledger-rewards` (`RewardPots`) | #3275 (reward pots and pool split as cardano-ledger; pledge owners as a set; breaking: `DesiredPools` required) | #3255, #3256 | open |
+| `ledger-block-overlay` (`GovOverlay`) | #3285 (in-block committee proposals count as potential members; governance sequence walk) | #3257 | open |
+| `ledger-block-overlay` (`VerifyBlockIssuer`) | #3277 (VerifyBlock applies the TPraos overlay; breaking: `VerifyConfig.TPraosOverlay`) | #3258 | open |
+| coverage gaps 2, 7, 8 (parameter updates) | #3278 (32-bit protocol minor in updates) | #3259 | open |
+| coverage gaps `cbor`, `ledger/common` | #3279 (bignum multiasset quantities), #3280 (Alonzo PlutusV2 cost model), #3282 (one tag 30), #3283 (constructor fields a list), #3284 (tag 258 set members in Value), #3289 (pre-Conway tag 258 refused), #3290 (ConstructorEncoder indefinite fields; datum bytes change) | #3260, #3261, #3263, #3265, #3266, #3270, #3271 | open |
+| script context (gap 1) | #3281 (zero ada kept in output Plutus data; TxInfo translation goldens) | #3262 | open |
+| localstatequery goldens (gaps 9, 10) | #3286 (era filter set encoding), #3287 (GetAccountState in every Shelley era), #3288 (GetFuturePParams decoded) | #3267, #3268, #3269 | open |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 
