@@ -122,6 +122,8 @@ protocol.
 - [Ledger encodings](specs/ledger-codec/README.md): the proposed protocol
   version's width, cost-model languages by version, tag 258 before Conway
   and the ada entry of a TxInfo output.
+- [Transaction body id](specs/ledger-txid/README.md): the id of a body
+  built in code, as the hash of its encoding.
 
 ### Block pipeline
 

@@ -60,8 +60,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N3](#n3) | network | Bytes that arrive after a client's `MsgDone` | Kept on the mini-protocol's queue for a later run | Refused (no agency in `Done`); never replayed into a new run | Silent | conforms | Recorded (model `keepalive`); no visible effect while gOuroboros clients never restart a finished run |
 | [N4](#n4) | network | Keep-alive client wait for the server's reply | 60 s, with a `TODO` asking for 10 s | 10 s by default (`WithTimeout` changes it) | 60 s in `StServer` | conforms (stricter) | Recorded; deliberate |
 | [N5](#n5) | network | Clients that never send `MsgDone` | Keep-alive, peer-sharing and local-state-query clients send `MsgDone` when told to terminate | No API sends it; `Stop` unregisters and the connection closes later | The client may terminate; it is not required to | conforms | Recorded (models `keepalive`, `peersharing`, `localstatequery`). A node holds an acquired local state until the connection closes |
-| [N6](#n6) | network | Chain-sync `StMustReply` timeout | Random 601-911 s | main: random 135-269 s; PR: 601-911 s | Random 601-911 s | conforms (stricter) → conforms | Open PR #3112 |
-| [N7](#n7) | network | Chain-sync node-to-node message size limit | 65,535 bytes in every state | main: 462,000 bytes (the ingress queue size); PR: 65,535, with 462,000 kept as the pending-receive budget | 65,535 bytes in every state | does not conform → conforms | Open PR #3112 |
+| [N6](#n6) | network | Chain-sync `StMustReply` timeout | Random 601-911 s | main: random 135-269 s; PR: 601-911 s | Random 601-911 s | conforms (stricter) → conforms | Open PR #3112 (model `chainsync` `ChainSyncLimits`) |
+| [N7](#n7) | network | Chain-sync node-to-node message size limit | 65,535 bytes in every state | main: 462,000 bytes (the ingress queue size); PR: 65,535, with 462,000 kept as the pending-receive budget | 65,535 bytes in every state | does not conform → conforms | Open PR #3112 (model `chainsync` `ChainSyncLimits`) |
 | [N8](#n8) | network | Chain-sync `StMustReply` timeout for a trusted peer | Never times out a trustable peer | Always applies the timeout; has no notion of a trusted peer | Timeout only for peers that are not trustable | conforms (stricter) | Recorded, not changed; whether a peer is trusted is the caller's knowledge |
 | [N9](#n9) | network | Chain-sync `GetCurrentTip` answer routing | Each request's continuation receives its own answer | main: whichever caller is registered on a shared channel, so a roll's older tip can answer the call; PR: only the call's own answer | Answers come back in request order to the requester | conforms | Open PR #3094. A library defect: the wire is unaffected |
 | [N10](#n10) | network | Handshake query answered before negotiation | Query reply only when the proposal is acceptable and the agreed data asks for it | main: any decodable proposed version that asks for a query gets one, even with no common version or the wrong network magic; PR: after negotiation | Query sends back the supported versions; negotiation fails on a magic mismatch | conforms (implementation choice) → conforms | Open PR #3127 |
@@ -71,7 +71,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N14](#n14) | network | Handshake version keys out of order | Recognised keys must ascend, else a decode failure; unrecognised keys skipped | Accepts any order; rejects duplicates | Keys must be unique and ascending | does not conform | Fixed on local branch `fix/handshake-version-key-order` (model `handshake` `UnorderedMapsRejected`, `UnknownKeysTolerated`), merged as #3194; checks recognised keys only, as the reference does |
 | [N15](#n15) | network | Block-fetch `Stop` with ranges outstanding | Collects every answer, then sends `MsgClientDone`; a demotion that times out closes the connection | main: gives up after 250 ms without `MsgClientDone` and allows `Start`, so a late reply reaches the new run; PR: abandons only when owed, latches, stops the muxer | `MsgClientDone` only from `StIdle` | does not conform → conforms | Open PR #3114 (chain-sync's identical defect was fixed by merged #3092) |
 | [N16](#n16) | network | Block-fetch `RangeDoneFunc` for a request that was never sent | A request's receiver exists only once the request is sent | main: the shutdown drain calls `RangeDoneFunc` for a request whose `RequestRange` returned an error; PR: not | Silent (library API) | conforms | Open PR #3114. Library defect; Dingo works around it |
-| [N17](#n17) | network | Block-fetch `StBusy` timeout default | 60 s | main: `NewConfig` sets `BatchStartTimeout` 5 s; PR: 60 s | 60 s | conforms (stricter) → conforms | Open PR #3114 (Dingo already sets 60 s) |
+| [N17](#n17) | network | Block-fetch `StBusy` timeout default | 60 s | main: `NewConfig` sets `BatchStartTimeout` 5 s; PR: 60 s | 60 s | conforms (stricter) → conforms | Open PR #3114 (Dingo already sets 60 s) (model `blockfetch` `BlockFetchLimits`) |
 | [N18](#n18) | network | Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client) | 65,535 bytes | 2,500,000 bytes, because a `MsgBlock` that arrives early is judged against `StBusy` | 65,535 bytes | does not conform | Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives |
 | [N19](#n19) | network | Block-fetch `RangeTimeout` | None | A whole range must finish within about 36 hours by default | Silent | conforms (implementation choice) | gOuroboros addition. Local only: it ends the caller's wait and sends nothing |
 | [N20](#n20) | network | Tx-submission blocking and non-blocking request rules | Client throws `ProtocolErrorRequestBlocking`, `RequestNonBlocking`, `RequestedNothing`; server picks the style from its FIFO | main: the client does not check; `Server.RequestTxIds` lets the caller pick either style; PR: both enforced | Blocking iff nothing stays unacknowledged; ack or request non-zero | does not conform → conforms | Open PR #3128 (Dingo always sends blocking requests for at least one id) |
@@ -90,7 +90,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N33](#n33) | network | Local-state-query `Release` with nothing acquired | Impossible by types | main: sends `MsgRelease` from `Idle`, which tears the connection down; PR: returns `ErrNotAcquired` | `MsgRelease` only from `StAcquired` | does not conform → conforms | Open PR #3113 |
 | [N34](#n34) | network | Local-state-query immutable-tip acquire below version 16 | Refuses to encode it | main: sends it; PR: `ErrAcquireImmutableTipUnsupportedVersion` | Silent | conforms | Open PR #3113 (interoperability defect against old nodes) |
 | [N35](#n35) | network | Local-state-query implicit acquire | No implicit acquire | main: a query on an idle client acquires the volatile tip and never releases it, so later queries answer from a stale state; PR: released when the call returns | Silent (the wire sequence is legal either way) | conforms | Open PR #3113. Library defect (stale answers) |
-| [N36](#n36) | network | Local-state-query server: `MsgRelease` without a `ReleaseFunc` | Accepted | main: an error that tears down a client that released; PR: accepted | `MsgRelease` is legal from `StAcquired` | does not conform → conforms | Open PR #3113 |
+| [N36](#n36) | network | Local-state-query server: `MsgRelease` without a `ReleaseFunc` | Accepted | main: an error that tears down a client that released; PR: accepted | `MsgRelease` is legal from `StAcquired` | does not conform → conforms | Open PR #3113 (model `localstatequery` `LocalStateQueryServerRelease`) |
 | [N37](#n37) | network | DMQ message submission wire format | dmq-node: V1 uses tx-submission's tags (Init = 6); V2 tags 1-6 with `MsgReplyNoSigIds` = 3; indefinite-length lists; in V2 the initiator runs the inbound side | main: the CIP's tags, no `MsgReplyNoSigIds`, definite lists, V2 initiator is the outbound side (both sides wait); PR: dmq-node's | CIP-0137 (Proposed): V1 tags 0-5, V2 tags 1-5, inbound has agency in V2 `StIdle` | conforms → does not conform (to the CIP text) | Open PR #3130 moves from the CIP to dmq-node, the only implementation; main cannot talk to dmq-node at all |
 | [N38](#n38) | network | DMQ: the same message body requested twice | V2 refuses a repeat across requests; V1 only within one request | main: served twice; PR: refused as the reference does per version | Silent | conforms | Open PR #3130 |
 | [N39](#n39) | network | DMQ time limits | V1: blocking none, non-blocking and bodies 10 s; V2: blocking 20 s; local servers run without limits | Message submission: `StIdle` 300 s, blocking 30 s, non-blocking none, bodies 30 s; local submission: server drops a client idle 300 s | Silent | conforms (implementation choice) | Recorded (model `dmq`) |
@@ -129,10 +129,10 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [C14](#c14) | consensus | A neutral epoch nonce in the VRF input | Appends nothing for a neutral η0 | main: `MkInputVrf` and `MkSeedTPraos` need 32 bytes, so a neutral η0 is passed as 32 zero bytes; branch: `MkInputVrfFromNonce`, `MkSeedTPraosFromNonce` and `ComputeVRFInputFromNonce` take `common.Nonce` and append nothing for `NonceTypeNeutral`, and the `[]byte` builders are deprecated | `slotToSeed slot ⭒ η0`, with `0_seed` neutral | does not conform → conforms | Fixed additively on local branch `fix/nonce-neutral-epoch-and-vrf-input` (`da43d778`), no PR yet; model `consensus-nonce` `EpochNonceNewNeutral` passes, `EpochNonceVrfInputBug` still reproduces the deprecated builders. gOuroboros' exported `[]byte` callers (leader election, header validation, `VerifyBlock`) still cannot express a neutral η0. Only a chain with a neutral initial nonce reaches it, in its first epoch |
 | [C15](#c15) | consensus | TPraos overlay schedule (d > 0) | A non-active overlay slot is rejected; an active one belongs to a genesis delegate, checked against its delegation with no stake | main: `ValidateHeaderInput` cannot carry d or the genesis delegations, so a valid genesis-delegate header is rejected (no stake, no pool VRF key) and a pool header in a non-active slot is accepted; branch: required `Overlay`, `ErrNotActiveSlot`, `ErrWrongGenesisColdKey`, `ErrWrongGenesisVRFKey` | OVERLAY rule: Active-OBFT and Decentralized | does not conform → conforms | Fixed on local branch `fix/consensus-tpraos-overlay` (`78f2f391`), merged as #3201 (model `consensus-eras`, `OverlayGenesisBug`, `OverlayNonActiveBug`). No production caller: Dingo validates with `VerifyBlock` and its own overlay check |
 | [C16](#c16) | consensus | Header envelope: ObsoleteNode, header size, body size | Checked before the protocol rules | main: not in `ValidateHeader`; branch: required `Envelope`, `ErrObsoleteNode`, `ErrHeaderSizeTooLarge`, `ErrBlockSizeTooLarge`; a missing input is the only error (`ErrMissingHeaderInput`) | `chainChecks` | does not conform → conforms | Fixed on the same branch (model `consensus-eras`, `ExtrasBug`, `MissingInputBug`) , merged as #3201|
-| [C17](#c17) | consensus | Byron slot to epoch past Byron | The era history (`Summary`) converts every slot | main: `ByronConfig.SlotToEpoch` divides any slot by the Byron epoch length (mainnet slot 4514400 gives 209, not 208); branch: `EndSlot` and `SlotToEpochChecked` (`ErrSlotAfterByron`) | Conversions use each era's own epoch size | does not conform → conforms | Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet (model `consensus-eras`, `GoByronSoundBug`). Only tests call it |
+| [C17](#c17) | consensus | Byron slot to epoch past Byron | The era history (`Summary`) converts every slot | main: `ByronConfig.SlotToEpoch` divides any slot by the Byron epoch length (mainnet slot 4514400 gives 209, not 208); branch: `EndSlot` and `SlotToEpochChecked` (`ErrSlotAfterByron`) | Conversions use each era's own epoch size | does not conform → conforms | Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet (model `consensus-eras`, `GoByronSoundBug`). Only tests call it (model `consensus-eras` `EraHistoryDecode` for the era history decode) |
 | [L1](#l1) | ledger | Pool registration when the caller's view is stale | Registered means present in `psStakePools`, which POOLREAP clears at the epoch boundary | main: trusts the caller's `IsPoolRegistered`, so a stale view lets a delegation to (or retirement of) a reaped pool through, and treats re-registering a reaped pool as a re-registration; PR: one epoch-aware predicate | Delegation needs a registered pool; a reaped pool is gone | does not conform → conforms | Open PR #3129 (head `e7b4261d`, main merged in). Dingo's view already satisfies the contract |
-| [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: a pure function, covered by Go tests |
-| [L3](#l3) | ledger | Conway CC vote with a nil voter key | Not representable | main: `UtxoValidateCCVotingRestrictions` panics; PR: skips it as the sibling rules do | n/a (unreachable from decoded CBOR) | conforms | Open PR #3155. Library defect, hand-built transactions only |
+| [L2](#l2) | ledger | Transaction id of a body without stored CBOR | A body always carries its serialization; the encoder omits an empty CIP-159 map | main: hashes empty input, the same id for every such body; PR: hashes the body's encoding, omitting empty Dijkstra maps, and gives a body with no valid encoding the zero id | The id is the hash of the body's CBOR | does not conform → conforms | Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. Modelled as a table in `ledger-txid` (model `ledger-txid`) |
+| [L3](#l3) | ledger | Conway CC vote with a nil voter key | Not representable | main: `UtxoValidateCCVotingRestrictions` panics; PR: skips it as the sibling rules do | n/a (unreachable from decoded CBOR) | conforms | Open PR #3155. Library defect, hand-built transactions only (model `ledger-governance` `GovVoterNil`) |
 | [L4](#l4) | ledger | BadInputs covers only spent inputs | Alonzo: spent and collateral inputs; Babbage: reference inputs too | main: spent inputs only; missing collateral and reference inputs are caught by the witness rules instead; PR: the reference's set, with BadInputs first in each rule list | All of them must exist | conforms | Open PR #3193 at `efd0b081` (model `ledger-utxo` `GoBadInputsComplete`, `GoMissingInputIsBadInputs`) |
 | [L5](#l5) | ledger | Byron transaction with no inputs or no outputs | Cannot be decoded (`NonEmpty`) | main: accepted; a no-input, zero-output transaction pays no fee (it counts as redeem-only) | Inputs and outputs non-empty | does not conform | Fixed on a local branch, no PR yet |
 | [L6](#l6) | ledger | Byron `maxTxSize` | `TxValidationTxTooLarge` | No check anywhere | `txSize tx ≤ maxTxSize` | does not conform | Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`) |
@@ -240,7 +240,7 @@ A shorter wait stays inside the spec's bound, but a server that answers between 
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/ChainSync/Codec.hs` 57, 63 (`minChainSyncTimeout = 601`, `maxChainSyncTimeout = 911`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/chainsync/chainsync.go` 251-252; PR #3112 head `4032512e4` same file 267-268
 - **Verdict.** conforms (stricter) → conforms
-- **Status.** Open PR #3112
+- **Status.** Open PR #3112. Model `chainsync` `ChainSyncLimitsMainTimeoutBug.cfg` (main) / `ChainSyncLimits.cfg` (merged #3112).
 
 `StMustReply` is where a client waits for the next block. On main a quiet but honest server is dropped after as little as 135 s.
 
@@ -253,7 +253,7 @@ A shorter wait stays inside the spec's bound, but a server that answers between 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/ChainSync/Codec.hs` 43-49 (`smallByteLimit` per state); `ouroboros-network/api/lib/Ouroboros/Network/Protocol/Limits.hs` 110-111
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/chainsync/chainsync.go` 233, 116-146; PR #3112 head `4032512e4` same file 245-247 (`SmallMaxPendingMessageBytes = 65535`)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3112
+- **Status.** Open PR #3112. Model `chainsync` `ChainSyncLimitsMainBug.cfg` (main) / `ChainSyncLimits.cfg` (merged #3112).
 
 Main accepts a message up to seven times larger than the spec allows instead of tearing the connection down.
 
@@ -371,7 +371,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/BlockFetch/Codec.hs` 54; `.../Protocol/Limits.hs` 116-117 (`longWait = Just 60`)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/blockfetch/blockfetch.go` 282; PR #3114 head `395b9c2e7` same file 229, 287
 - **Verdict.** conforms (stricter) → conforms
-- **Status.** Open PR #3114 (Dingo already sets 60 s)
+- **Status.** Open PR #3114 (Dingo already sets 60 s). Model `blockfetch` `BlockFetchLimitsMainBug.cfg` (main) / `BlockFetchLimits.cfg` (merged #3114).
 
 ### N18
 
@@ -582,7 +582,7 @@ A node holds `MsgSubmitTx` while its mempool is full, and a state query can be s
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/LocalStateQuery/Type.hs` (messages)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localstatequery/server.go` 345-351; PR #3113 head `566b18c0e` same file 388-392
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3113
+- **Status.** Open PR #3113. Model `localstatequery` `LocalStateQueryServerReleaseMainBug.cfg` (main) / `LocalStateQueryServerRelease.cfg` (merged #3113).
 
 ### N37
 
@@ -1018,7 +1018,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/HardFork/History/Qry.hs` 366-378, 496-523
 - **gOuroboros.** gOuroboros `f9ba2d3c` `consensus/byron/byron.go` (`SlotToEpoch`); branch `70d83369` same file (`SlotToEpochChecked`)
 - **Verdict.** does not conform → conforms
-- **Status.** Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet. Only tests call it
+- **Status.** Fixed on local branch `fix/consensus-byron-slot-epoch` (`70d83369`), no PR yet. Only tests call it. The empty era history decode fixed in the same PR #3205: model `consensus-eras` `EraHistoryDecodeMainBug.cfg` (main) / `EraHistoryDecode.cfg`; a tagged one-era reply still decodes, which the reference refuses (`EraHistoryDecodeTaggedFixBug.cfg`; harmless with a reference peer).
 
 ## Ledger
 
@@ -1043,7 +1043,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** cardano-ledger `1210d37fe6bd` `eras/dijkstra/impl/src/Cardano/Ledger/Dijkstra/TxBody.hs` 518-552 (`encodeTxBodyRaw`: `Omit` on an empty map at keys 24 to 27; the decoder refuses one, 449-452). Otherwise n/a: the reference keeps a decoded or built body's bytes with it, so this state cannot arise
 - **gOuroboros.** gOuroboros `d0b95845` `ledger/common/tx.go` 719-721; PR #3141 head `236fdccd` same file 734 (`TransactionBodyId`), `ledger/dijkstra/dijkstra.go` (`validateDijkstra*ForEncoding`)
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: the id is a pure function of the body, with no state or interleaving to model, so Go tests cover it (`TestTransactionBodyIdHashesBodyEncoding`, `TestDijkstraBodyIdOmitsEmptyMaps`, `TestDijkstraSubTransactionBodyIdOmitsEmptyMaps`, `TestTransactionBodyIdOfUnencodableBodyIsZero`). The `AGENTS.md` and `CLAUDE.md` wording fix in the same PR cannot affect any model
+- **Status.** Open PR #3141. Decoded bodies were always right; bodies built in code were wrong. No TLA+ model: the id is a pure function of the body, with no state or interleaving to model, so Go tests cover it (`TestTransactionBodyIdHashesBodyEncoding`, `TestDijkstraBodyIdOmitsEmptyMaps`, `TestDijkstraSubTransactionBodyIdOmitsEmptyMaps`, `TestTransactionBodyIdOfUnencodableBodyIsZero`). The `AGENTS.md` and `CLAUDE.md` wording fix in the same PR cannot affect any model. Model `ledger-txid` `TxBodyIdMainBug.cfg` (main) and `TxBodyIdDraftBug.cfg` (the first draft) / `TxBodyId.cfg` (merged #3141).
 
 ### L3
 
@@ -1054,7 +1054,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** n/a
 - **gOuroboros.** gOuroboros `d0b95845` `ledger/conway/rules.go` 4663-4666; PR #3155 head `b5294771` same file 4666
 - **Verdict.** conforms
-- **Status.** Open PR #3155. Library defect, hand-built transactions only
+- **Status.** Open PR #3155. Library defect, hand-built transactions only. Model `ledger-governance` `GovVoterNilMainBug.cfg` (main) / `GovVoterNil.cfg` (merged #3155).
 
 ### L4
 
@@ -1558,6 +1558,7 @@ Found by the model in a published fix (route each to its pull request; the fix p
 - **L28** (#3279): the coin of a Mary `[coin, multiasset]` pair still accepts a bignum (`cbor-codec` `MultiAssetQuantityCoinInPairFixBug.cfg`).
 - **L30** (#3289): a tag other than 258 on a pre-Conway witness-set field still decodes (`ledger-codec` `PreConwaySetTagOtherTagBug.cfg`).
 - **L31** (#3290): Go arrays, empty `IndefLengthList`, byte strings over 64 bytes and nested lists are not encoded as plutus `encodeData` does (`cbor-codec` `ConstructorEncoding*FixBug.cfg`).
+- **#3205** (merged): a tagged one-era era-history reply still decodes; the reference refuses it (`consensus-eras` `EraHistoryDecodeTaggedFixBug.cfg`).
 - **L14** (#3278): the reference's `Word32` wraparound of the next minor from `maxBound` (`ledger-codec` `ProtVerWidthWrapBug.cfg`); reachable only from a minor already at `maxBound`.
 
 Also needing a decision, though it conforms: **N37**, because PR #3130 follows dmq-node and so departs from the CIP-0137 text. **L4** is decided by PR #3193: BadInputs checks the reference's set and runs first.
