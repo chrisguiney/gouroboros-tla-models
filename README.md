@@ -108,6 +108,9 @@ protocol.
 - [Parameter updates and MIR](specs/ledger-ppup-mir/README.md):
   Shelley-to-Babbage update proposals and their adoption, and move
   instantaneous rewards from the reserves and the treasury.
+- [Reward pots](specs/ledger-rewards/README.md): the reward update
+  across an epoch boundary: reserves, treasury, fees and one pool's
+  leader and member split.
 - [Conway governance](specs/ledger-governance/README.md):
   proposals, voting, ratification, enactment and refunds.
 - [The Leios ledger side](specs/ledger-leios/README.md):
