@@ -89,11 +89,19 @@ CONSTANTS
                        \* loops and rl until they exit or ctx ends, and a
                        \* Stop carrying the caller's own marker waits for
                        \* nothing
+    RestartCarry,      \* "wait": stop(true) waits on readDoneChan, then
+                       \* suspends the role with readLoop's unread data
+                       \* (gOuroboros 5c4f31c1); "deferred": stop(true)
+                       \* suspends the role at once with the carry pending,
+                       \* readLoop hands the carry over as it exits, and the
+                       \* next instance's TakeCarriedIngress waits for it
     Mutation           \* "none", or one deliberate break of the code:
                        \* "watcherRecvOnly", "startIgnoresStopped",
                        \* "noOnces", "noWaitRead", "waitReadUnderLock",
                        \* "closeSkipsJoin", "noMarker" (a loop's Stop joins
-                       \* too), "runLoopUnjoined" (Stop(ctx) leaves rl out)
+                       \* too), "runLoopUnjoined" (Stop(ctx) leaves rl out),
+                       \* "noCarryWait" (under "deferred", the next instance
+                       \* starts without waiting for the carry)
 
 ASSUME Role \in {"client", "server"}
 ASSUME RestartOn \in {"terminal", "anyMessage"}
@@ -101,9 +109,11 @@ ASSUME StopJoins \in {"none", "loops", "close", "ctx"}
 ASSUME RunLoopCallbacks \subseteq {"returns", "callsStop", "waitsForStopChan",
                                    "ignoresStop"}
 ASSUME CtxMayEnd \in BOOLEAN
+ASSUME RestartCarry \in {"wait", "deferred"}
 ASSUME Mutation \in {"none", "watcherRecvOnly", "startIgnoresStopped",
                      "noOnces", "noWaitRead", "waitReadUnderLock",
-                     "closeSkipsJoin", "noMarker", "runLoopUnjoined"}
+                     "closeSkipsJoin", "noMarker", "runLoopUnjoined",
+                     "noCarryWait"}
 
 (* The peer's message sequences the configs choose from (a .cfg file cannot
    write a sequence, so it names one of these with Msgs <- Name). *)
@@ -176,7 +186,7 @@ Over(g) == pc[g] \in {"notStarted", "exited"}
 \* Literally: "Blocking is defined as the set of these step names."
 Blocking == {"s_onceWait", "s_waitRead", "s_join", "cbWait", "hWait",
              "hWaitCaller", "wait", "queue", "req", "reply", "select",
-             "w1", "w2", "rlWait", "rlHeld"}
+             "w1", "w2", "rlWait", "rlHeld", "restart"}
 
 \* In English: "Every goroutine starts at its first step; the loops have not
 \* been started; every channel is open; nothing has happened."
@@ -413,7 +423,8 @@ StopUnlock(p) ==
     /\ UNCHANGED <<started, stopped, once, startedAfterStop, chans, data>>
 
 \* In English: "Close stopChan; if the loops never started, close doneChan
-\* too. A restart of a started protocol then waits for readLoop."
+\* too. A restart of a started protocol then waits for readLoop, unless
+\* RestartCarry is "deferred", where readLoop hands its carry over itself."
 \* Literally: "StopClose of p is defined as: pc of p equals "s_close", and
 \*   stopChan in the next state equals TRUE, and (if saw of p is not true
 \*   then CloseDone else doneChan and doneCloses are unchanged), and pc in
@@ -424,7 +435,9 @@ StopClose(p) ==
     /\ pc[p] = "s_close"
     /\ stopChan' = TRUE
     /\ IF ~saw[p] THEN CloseDone ELSE UNCHANGED <<doneChan, doneCloses>>
-    /\ pc' = [pc EXCEPT ![p] = IF smode[p] /\ saw[p] /\ Mutation /= "noWaitRead"
+    /\ pc' = [pc EXCEPT ![p] = IF /\ smode[p] /\ saw[p]
+                                  /\ Mutation /= "noWaitRead"
+                                  /\ RestartCarry = "wait"
                                THEN "s_waitRead" ELSE "s_unreg"]
     /\ UNCHANGED <<ret, smode, saw, ctxDone, life, readDone, recvDone, sendDone,
                    muxDone, data>>
@@ -439,7 +452,8 @@ StopWaitRead(p) ==
     /\ UNCHANGED <<life, chans, data>>
 
 \* In English: "Suspend (restart) or unregister the role, and leave the
-\* Once body. A suspend while readLoop still reads loses its unread data.
+\* Once body. Under "wait", a suspend while readLoop still reads loses its
+\* unread data; under "deferred" the suspend leaves the carry pending.
 \* Under the "loops" fix, a Stop from outside the engine then waits for
 \* every loop."
 \* Literally: "StopUnreg of p is defined as: pc of p equals "s_unreg", and
@@ -451,7 +465,8 @@ StopWaitRead(p) ==
 StopUnreg(p) ==
     /\ pc[p] = "s_unreg"
     /\ once' = "done"
-    /\ badCarry' = (badCarry \/ (smode[p] /\ saw[p] /\ ~readDone))
+    /\ badCarry' = (badCarry \/ (RestartCarry = "wait" /\ smode[p] /\ saw[p]
+                                   /\ ~readDone))
     /\ lifeMu' = IF Mutation = "waitReadUnderLock" THEN "none" ELSE lifeMu
     /\ Goto(p, AfterStop(p))
     /\ UNCHANGED <<started, stopped, startedAfterStop, chans, sent, wire, rq, cur,
@@ -742,16 +757,23 @@ RvHWaitCaller ==
     /\ Goto("rv", "wait")
     /\ UNCHANGED <<life, chans, data>>
 
-\* In English: "The server installs and starts its next instance."
+\* In English: "The server installs and starts its next instance. Under
+\* "deferred", its TakeCarriedIngress waits until readLoop has exited and
+\* handed its unread data over (the noCarryWait mutation does not wait); a
+\* start before then would read the role's queue ahead of that data."
 \* Literally: "RvRestart is defined as: pc of "rv" equals "restart", and
-\*   restarted in the next state equals TRUE, and Goto of "rv" and "wait",
-\*   and the rest is unchanged."
+\*   (RestartCarry equals "wait", or Mutation equals "noCarryWait", or
+\*   readDone is true), and restarted in the next state equals TRUE, and
+\*   badCarry in the next state equals (badCarry is true, or RestartCarry
+\*   equals "deferred" and readDone is not true), and Goto of "rv" and
+\*   "wait", and the rest is unchanged."
 RvRestart ==
     /\ pc["rv"] = "restart"
+    /\ RestartCarry = "wait" \/ Mutation = "noCarryWait" \/ readDone
     /\ restarted' = TRUE
+    /\ badCarry' = (badCarry \/ (RestartCarry = "deferred" /\ ~readDone))
     /\ Goto("rv", "wait")
-    /\ UNCHANGED <<life, chans, sent, wire, rq, cur, hmsg, reply, badCarry,
-                   timerFired>>
+    /\ UNCHANGED <<life, chans, sent, wire, rq, cur, hmsg, reply, timerFired>>
 
 \* In English: "recvLoop's deferred close(recvDoneChan)."
 \* Literally: "RvExit is defined as: pc of "rv" equals "exit", and recvDone
@@ -894,9 +916,9 @@ NoLoopAfterStopStart == ~startedAfterStop
 \*   equal to 1."
 DoneClosedOnce == doneCloses <= 1
 
-\* In English: "A restart suspends the role only after readLoop has stopped
-\* reading, so everything it read and did not process is carried to the
-\* next instance."
+\* In English: "A restart suspends the role, and the next instance starts,
+\* only after readLoop has stopped reading, so everything it read and did
+\* not process is carried to the next instance."
 \* Literally: "CarryCompleteBeforeNewInstance is defined as: badCarry is not
 \*   true."
 CarryCompleteBeforeNewInstance == ~badCarry
