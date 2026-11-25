@@ -435,6 +435,32 @@ vote refused because its election was pruned meanwhile),
 `...ProbeUnannouncedBug`, `...ProbeSecondAnnouncementBug`,
 `...ProbeCertBug`, `...ProbeCertPrunedBug`.
 
+## Part 5: the vote's wire shape (`LeiosVoteShape.tla`)
+
+A table over the message carrying a vote (LeiosVotes `MsgVote`, a
+LeiosFetch votes reply), the vote's shape (the CIP's three elements or an
+earlier draft's four) and its voter id (to one past 16 bits, scaled to 3).
+Sources: CIP-0164 at `db48da14bff1` (`CIP-0164/README.md` 3397-3410, the
+CDDL `leios_vote`; 1541-1542, `MsgLeiosVote`) and ouroboros-consensus
+`ec239d57f618` (`Ouroboros/Consensus/Leios/Types.hs` 254-278,
+`decodeLeiosVote`, voter id a `Word16`). gOuroboros: `ledger/common/leios.go`
+(`LeiosVote`), `protocol/leiosvotes/messages.go`,
+`protocol/leiosfetch/validate.go`.
+
+| Config | Rule | Result |
+| --- | --- | --- |
+| `LeiosVoteShapeMainBug.cfg` | main: `LeiosVote` is `[slot, eb_hash, voter_id, signature]` | **fails** `VoteShapeAsReference`: a CIP vote (voter 0, LeiosVotes) does not decode |
+| `LeiosVoteShape.cfg` | `fix/leios-vote-shape` (`eb4c2421`, L22): the CIP shape, `uint16` voter id | passes (20 states) |
+
+The main counterexample is the input `TestLeiosVotePrototypeGolden` fails on
+main ("cannot decode CBOR array to struct with different number of
+elements"); `TestLeiosVoteVoterIdRange` and
+`TestLeiosVoteRejectsEarlierDraftShape` pin the other two refusals. Not
+modelled: LeiosNotify vote offers, a gOuroboros extension that keeps the
+earlier shape (`LeiosLegacyVote`), and matching a LeiosFetch votes reply to
+its request, which the fix can do by voter only since a vote names its
+announcing block, not its slot.
+
 ## Go tests and mutations (gOuroboros)
 
 Branch `test/leios-ledger-model` (tests only):
@@ -566,4 +592,4 @@ make ledger-leios
 cd specs/ledger-leios && ../../bin/tlc -config LeiosLedgerGo.cfg LeiosLedger.tla
 ```
 
-The whole directory (70 configs) runs in about 75 seconds.
+The whole directory (72 configs) runs in about 75 seconds.
