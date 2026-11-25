@@ -1052,6 +1052,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** conforms (stricter)
 - **Status.** Recorded. The UTXOW extraneous-redeemer rule rejects such a transaction before phase 2, so no block or mempool outcome differs. 98 of the 100 Alonzo golden instances carry such redeemers; the golden test clears them for V1
 
+### L17
+
+**Reward update arithmetic** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: `startStep` takes deltaR1 = floor(min(1, eta) * rho * reserves) with eta = 1 when d >= 0.8 and blocks / floor((1-d) f slots) otherwise, the treasury takes floor(tau * (fees + deltaR1)), and each pool that made blocks earns floor(appPerf * maxPool'), 0 when its pledge exceeds its owners' stake; the leader and non-owner members split it by `calcStakePoolOperatorReward`/`calcStakePoolMemberReward`; before protocol version 7 only registered credentials are computed, from 7 unregistered rewards go to the treasury; deltaR2 returns to the reserves. gOuroboros main: `CalculateRewards` splits the whole pot pro rata by a share formula of its own (no nOpt, no pledge check, no circulation), gives blockless pools perfect performance or equal shares, pays owners as members and gives unregistered members' shares to the operator; `CalculateAdaPots` floors twice, ignores d and the exact rates, and drops any existing rewards pot.
+- **Spec.** Shelley formal spec `rewards.tex` (`createRUpd`, `maxPool`, `r_operator`, `r_member`); not in the pinned tree
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/shelley/impl/src/Cardano/Ledger/Shelley/LedgerState/PulsingReward.hs` 89-282, `libs/cardano-ledger-core/src/Cardano/Ledger/State/SnapShots.hs` 141-165, `eras/shelley/impl/src/Cardano/Ledger/Shelley/Rewards.hs` 61-292, `.../LedgerState/IncrementalStake.hs` 95-128, `.../Shelley/Era.hs` 256-257
+- **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/rewards.go` (`CalculateAdaPots`, `CalculateRewards`)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`9675856a`, cell walk `bdba9c8b`), no PR yet. `TestCalculateAdaPotsReferenceTable` (5 cells) and `TestCalculateRewardsReferenceTable` (2) fail on main. Model `specs/ledger-rewards`. Production impact: Dingo computes rewards in its own `ledger/rewards` package; gOuroboros's calculator is reached through `RewardService`, the ouroboros-mock callback and Dingo's conformance state provider. The fix adds `DesiredPools` (required), `DecentralizationRate` and `RewardSnapshot.TotalStake`; callers that leave `DesiredPools` zero now get an error
+
 ## Pipeline
 
 ### P1

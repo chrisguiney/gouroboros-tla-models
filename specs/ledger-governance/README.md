@@ -156,6 +156,26 @@ well-formedness, bootstrap proposals, unknown voters, unknown actions,
 expired actions, bootstrap votes, SPO and CC restrictions, and unelected
 committee voters are covered only by unit tests.
 
+**Rules-only replay (local branch `test/conway-gov-reference`, `7c2f2013`).**
+`TestRulesOnlyConformanceVectors` replays every vector without the
+harness's validator, running the full Conway rule list less fee and size,
+with purpose roots, the guardrails script, stake-credential deposits and
+proposal contents read from the mock's state. All vectors reach their
+expected outcome except three it cannot judge (a vote at slot 0 on an
+expired action; two vectors whose parsed current epoch is stale). The same
+mutation study then fails at least one vector for ProposalProcedures,
+EmptyTreasuryWithdrawals, GovActionWellFormedness (and
+`UpdateCommitteeGovAction.Validate`'s ConflictingCommitteeUpdate through
+it), GuardrailsScriptHash, HardForkCanFollow, ProposalAncestry,
+ProposalReturnAccounts, UnknownVoters and CCVotingRestrictions; and for
+UnknownGovActionIds and VotingOnExpiredGovAction disabled together. Still
+not pinned by any vector: ProposalDeposit, ProposalNetworkIds (now a 12-cell
+table from Gov.hs 532-546), the return-address shape (5-cell table),
+BootstrapAllowedGovActions and BootstrapVotingRestrictions (no PV9 vectors),
+StakePoolVotingRestrictions, UnelectedCommitteeVoters (PV11 only), and
+ValidateCommitteeTerm, which is a ratification predicate outside the
+transaction rules. These keep their unit tests and the voter table.
+
 Also seen: the mock's `buildLedgerState` sets `ExpirySlot` to
 `ExpiresAfter * 432000`, the first slot of the expiry epoch rather than its
 last, which would refuse votes one epoch early if the vectors reached it.
