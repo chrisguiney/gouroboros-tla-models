@@ -51,6 +51,17 @@
 (*        Ouroboros/Network/Protocol/LocalTxSubmission/Client.hs 46-56:    *)
 (*        SendMsgSubmitTx tx k hands the result to k.                      *)
 (*                                                                         *)
+(* Two later rules, both on the OwnAnswer client:                          *)
+(*   RefuseAfterStop  a call that starts once Stop has queued MsgDone       *)
+(*                    returns ErrProtocolShuttingDown without queueing:     *)
+(*                    in StDone nothing more is sent, so its answer could   *)
+(*                    never arrive [G1].                                    *)
+(*   CallbackOnCaller AcceptMessageFunc and RejectMessageFunc run on the    *)
+(*                    submitting goroutine after the submit lock is         *)
+(*                    released, so a callback may submit again; run on the  *)
+(*                    receive loop under the caller's lock, such a submit   *)
+(*                    waits for a lock only the callback's return frees.    *)
+(*                                                                         *)
 (* Not modelled: validation, authentication and the replay cache (they     *)
 (* only choose accept or reject), timeouts, and the run after MsgDone.     *)
 (*                                                                         *)
@@ -76,7 +87,19 @@ CONSTANTS
     OwnAnswerLock,
     \* Mutation, FALSE normally. TRUE: the send loop sends without waiting
     \* for agency, to prove NoViolation can fail.
-    NoAgencyWait
+    NoAgencyWait,
+    \* Calls that may start at any time, including after Stop; the others
+    \* have all queued before Stop.
+    LateCalls,
+    \* TRUE: a call that starts once MsgDone is queued or sent returns
+    \* ErrProtocolShuttingDown at once [G1]. FALSE: it queues behind MsgDone.
+    RefuseAfterStop,
+    \* The call a callback makes, or None: the first answer to any other call
+    \* runs a callback that submits it.
+    CallbackCall,
+    \* TRUE: callbacks run on the submitting goroutine after the submit lock
+    \* is released. FALSE: on the receive loop before the lock is released.
+    CallbackOnCaller
 
 \* Literally: "None is defined as "none"."
 None == "none"
@@ -93,11 +116,19 @@ VARIABLES
                \* returned, or with OwnAnswer those that registered
     answered,  \* calls the application has matched with an answer
     misrouted, \* TRUE once an answer is attributed to the wrong call
-    violation  \* TRUE once a side receives a message its state forbids
+    violation, \* TRUE once a side receives a message its state forbids
+    loop,      \* the call whose callback the receive loop is running, or None
+    cbFired    \* TRUE once the callback that submits CallbackCall has run
 
-\* Literally: "vars is defined as the tuple of all nine variables."
+\* Literally: "vars is defined as the tuple of all eleven variables."
 vars == <<cpc, lock, sendQ, cs, toClient, pending, answered, misrouted,
-          violation>>
+          violation, loop, cbFired>>
+
+\* In English: "Stop has happened: MsgDone is queued or already sent."
+\* Literally: "Stopped is defined as: cs equals "Done", or "Done" is a member
+\*   of the set of element i of sendQ, for every i in 1 through the length of
+\*   sendQ."
+Stopped == cs = "Done" \/ "Done" \in {sendQ[i] : i \in 1..Len(sendQ)}
 
 \* In English: "Every call is about to start, nobody holds the lock, nothing is
 \* queued, in flight or waiting, the client is in StIdle, and nothing has gone
@@ -113,6 +144,7 @@ Init ==
     /\ sendQ = <<>> /\ cs = "Idle" /\ toClient = <<>>
     /\ pending = <<>> /\ answered = {}
     /\ misrouted = FALSE /\ violation = FALSE
+    /\ loop = None /\ cbFired = FALSE
 
 -----------------------------------------------------------------------------
 (* The application's calls [G1].                                           *)
@@ -129,11 +161,35 @@ Init ==
 CallRegister(c) ==
     /\ OwnAnswer
     /\ cpc[c] = "start"
+    /\ c = CallbackCall => cbFired
     /\ OwnAnswerLock => lock = None
     /\ lock' = IF OwnAnswerLock THEN c ELSE lock
     /\ pending' = Append(pending, c)
     /\ cpc' = [cpc EXCEPT ![c] = "registered"]
-    /\ UNCHANGED <<sendQ, cs, toClient, answered, misrouted, violation>>
+    /\ UNCHANGED <<sendQ, cs, toClient, answered, misrouted, violation,
+                   loop, cbFired>>
+
+\* In English: "With RefuseAfterStop, a registered call that finds Stop has
+\* happened returns at once with ErrProtocolShuttingDown: it queues nothing,
+\* releases the submit lock and stops waiting, and the application counts it
+\* as answered (refused) [G1]."
+\* Literally: "CallRefuse of c is defined as: OwnAnswer and RefuseAfterStop
+\*   are true, and cpc of c equals "registered", and Stopped holds, and cpc in
+\*   the next state equals cpc except that its c entry is "returned", and
+\*   answered in the next state equals the union of answered and the set
+\*   containing c, and pending in the next state equals the subsequence of
+\*   pending made of every x such that x does not equal c, and lock in the
+\*   next state equals (if OwnAnswerLock then None, else lock), and the other
+\*   variables are unchanged."
+CallRefuse(c) ==
+    /\ OwnAnswer /\ RefuseAfterStop
+    /\ cpc[c] = "registered"
+    /\ Stopped
+    /\ cpc' = [cpc EXCEPT ![c] = "returned"]
+    /\ answered' = answered \cup {c}
+    /\ pending' = SelectSeq(pending, LAMBDA x : x /= c)
+    /\ lock' = IF OwnAnswerLock THEN None ELSE lock
+    /\ UNCHANGED <<sendQ, cs, toClient, misrouted, violation, loop, cbFired>>
 
 \* In English: "A call (taking the application's lock if it serialises; with
 \* OwnAnswer, once registered) queues its MsgSubmitMessage [G3]."
@@ -147,10 +203,14 @@ CallRegister(c) ==
 CallQueue(c) ==
     /\ cpc[c] = IF OwnAnswer THEN "registered" ELSE "start"
     /\ (Serialised /\ ~OwnAnswer) => lock = None
+    \* "With RefuseAfterStop the check and the queueing are one step under
+    \* the lock Stop also takes, so a refused call never queues."
+    /\ RefuseAfterStop => ~Stopped
     /\ lock' = IF Serialised /\ ~OwnAnswer THEN c ELSE lock
     /\ sendQ' = Append(sendQ, c)
     /\ cpc' = [cpc EXCEPT ![c] = "queued"]
-    /\ UNCHANGED <<cs, toClient, pending, answered, misrouted, violation>>
+    /\ UNCHANGED <<cs, toClient, pending, answered, misrouted, violation,
+                   loop, cbFired>>
 
 \* In English: "SubmitMessage returns. Without OwnAnswer it returns at once
 \* and the application records the call as waiting for the next answer;
@@ -166,7 +226,12 @@ CallReturn(c) ==
     /\ OwnAnswer => c \in answered
     /\ cpc' = [cpc EXCEPT ![c] = "returned"]
     /\ pending' = IF OwnAnswer THEN pending ELSE Append(pending, c)
-    /\ UNCHANGED <<lock, sendQ, cs, toClient, answered, misrouted, violation>>
+    \* "With CallbackOnCaller, the first call other than CallbackCall to
+    \* return runs the callback, which may now submit CallbackCall."
+    /\ cbFired' = (cbFired \/ (CallbackOnCaller /\ CallbackCall /= None
+                                /\ c /= CallbackCall))
+    /\ UNCHANGED <<lock, sendQ, cs, toClient, answered, misrouted, violation,
+                   loop>>
 
 \* In English: "Once every call has queued its message, Stop queues MsgDone
 \* behind them [G1]. (A call made after Stop is not modelled.)"
@@ -178,12 +243,14 @@ CallReturn(c) ==
 \*   sendQ with "Done" appended, and cpc, lock, cs, toClient, pending,
 \*   answered, misrouted and violation are unchanged."
 Stop ==
-    /\ UseStop /\ \A c \in Calls : cpc[c] \in {"queued", "returned"}
+    /\ UseStop
+    /\ \A c \in Calls \ (LateCalls \cup {CallbackCall}) :
+          cpc[c] \in {"queued", "returned"}
     /\ "Done" \notin {sendQ[i] : i \in 1..Len(sendQ)}
     /\ cs /= "Done"
     /\ sendQ' = Append(sendQ, "Done")
     /\ UNCHANGED <<cpc, lock, cs, toClient, pending, answered, misrouted,
-                   violation>>
+                   violation, loop, cbFired>>
 
 -----------------------------------------------------------------------------
 (* The protocol and the server.                                            *)
@@ -212,7 +279,7 @@ SendNext ==
           ELSE /\ cs' = "Busy" /\ toClient' = <<m>>
     /\ sendQ' = Tail(sendQ)
     /\ violation' = (violation \/ (cs = "Busy" /\ Head(sendQ) /= "Done"))
-    /\ UNCHANGED <<cpc, lock, pending, answered, misrouted>>
+    /\ UNCHANGED <<cpc, lock, pending, answered, misrouted, loop, cbFired>>
 
 \* In English: "The answer arrives. It is legal only in StBusy [S1]. The
 \* callback hands it to the oldest call the application is waiting on;
@@ -240,22 +307,56 @@ SendNext ==
 \*   unchanged."
 Receive ==
     /\ toClient /= <<>>
-    /\ IF cs /= "Busy"
-          THEN /\ violation' = TRUE /\ UNCHANGED <<cs, pending, answered, misrouted>>
-       ELSE IF TaggedAnswers
-          THEN /\ answered' = answered \cup {Head(toClient)}
-               /\ pending' = SelectSeq(pending, LAMBDA x : x /= Head(toClient))
+    /\ loop = None
+    \* "Without CallbackOnCaller, the first answer to a call other than
+    \* CallbackCall runs the submitting callback on the receive loop, before
+    \* the answer reaches the caller and its lock is released."
+    /\ LET inLoopCallback ==
+              /\ OwnAnswer /\ ~CallbackOnCaller /\ CallbackCall /= None
+              /\ ~cbFired /\ cs = "Busy" /\ ~TaggedAnswers
+              /\ pending /= <<>> /\ Head(pending) /= CallbackCall
+       IN IF inLoopCallback
+          THEN /\ loop' = Head(pending)
+               /\ cbFired' = TRUE
                /\ cs' = "Idle"
-               /\ UNCHANGED <<misrouted, violation>>
-       ELSE /\ pending /= <<>>
-            /\ answered' = answered \cup {Head(pending)}
-            /\ misrouted' = (misrouted \/ Head(pending) /= Head(toClient))
-            /\ pending' = Tail(pending)
-            /\ cs' = "Idle"
-            /\ UNCHANGED violation
+               /\ UNCHANGED <<pending, answered, misrouted, violation, lock>>
+       ELSE /\ IF cs /= "Busy"
+                 THEN /\ violation' = TRUE
+                      /\ UNCHANGED <<cs, pending, answered, misrouted>>
+              ELSE IF TaggedAnswers
+                 THEN /\ answered' = answered \cup {Head(toClient)}
+                      /\ pending' = SelectSeq(pending, LAMBDA x : x /= Head(toClient))
+                      /\ cs' = "Idle"
+                      /\ UNCHANGED <<misrouted, violation>>
+              ELSE /\ pending /= <<>>
+                   /\ answered' = answered \cup {Head(pending)}
+                   /\ misrouted' = (misrouted \/ Head(pending) /= Head(toClient))
+                   /\ pending' = Tail(pending)
+                   /\ cs' = "Idle"
+                   /\ UNCHANGED violation
+            /\ lock' = IF Serialised \/ (OwnAnswer /\ OwnAnswerLock) THEN None ELSE lock
+            /\ UNCHANGED <<loop, cbFired>>
     /\ toClient' = <<>>
-    /\ lock' = IF Serialised \/ (OwnAnswer /\ OwnAnswerLock) THEN None ELSE lock
     /\ UNCHANGED <<cpc, sendQ>>
+
+\* In English: "The callback on the receive loop returns once the call it
+\* made has returned; only then does the answer reach the waiting caller and
+\* the submit lock go free."
+\* Literally: "CallbackReturn is defined as: loop does not equal None, and cpc
+\*   of CallbackCall equals "returned", and answered in the next state equals
+\*   the union of answered and the set containing loop, and pending in the
+\*   next state equals the tail of pending, and misrouted in the next state
+\*   equals (misrouted, or the head of pending does not equal loop), and lock
+\*   and loop in the next state equal None, and the other variables are
+\*   unchanged."
+CallbackReturn ==
+    /\ loop /= None
+    /\ cpc[CallbackCall] = "returned"
+    /\ answered' = answered \cup {loop}
+    /\ pending' = Tail(pending)
+    /\ misrouted' = (misrouted \/ Head(pending) /= loop)
+    /\ lock' = None /\ loop' = None
+    /\ UNCHANGED <<cpc, sendQ, cs, toClient, violation, cbFired>>
 
 -----------------------------------------------------------------------------
 
@@ -269,14 +370,16 @@ Quiet ==
     /\ sendQ = <<>> /\ toClient = <<>>
     /\ UNCHANGED vars
 
-\* In English: "A step is a call registering, queueing or returning, Stop,
-\* the send loop sending, an answer arriving, or, once all is done, nothing."
+\* In English: "A step is a call registering, being refused, queueing or
+\* returning, Stop, the send loop sending, an answer arriving, a receive-loop
+\* callback returning, or, once all is done, nothing."
 \* Literally: "Next is defined as: there exists a c in Calls such that
-\*   CallRegister of c or CallQueue of c or CallReturn of c; or Stop, or
-\*   SendNext, or Receive, or Quiet."
+\*   CallRegister of c or CallRefuse of c or CallQueue of c or CallReturn of
+\*   c; or Stop, or SendNext, or Receive, or CallbackReturn, or Quiet."
 Next ==
-    \/ \E c \in Calls : CallRegister(c) \/ CallQueue(c) \/ CallReturn(c)
-    \/ Stop \/ SendNext \/ Receive \/ Quiet
+    \/ \E c \in Calls :
+          CallRegister(c) \/ CallRefuse(c) \/ CallQueue(c) \/ CallReturn(c)
+    \/ Stop \/ SendNext \/ Receive \/ CallbackReturn \/ Quiet
 
 \* In English: "Start in Init, and from then on every step is a Next step."
 \* Literally: "Spec is defined as: Init holds at the start, and always, every
