@@ -54,7 +54,8 @@ closes. A PR can draw on more than one model.
 | `ledger-witnesses` | #3211 (bootstrap witnesses in the genesis-delegate quorum, witness table tests) | #3209, #3210 | open |
 | `ledger-ppup-mir` | #3216 (empty update, phase-2-invalid update and MIR quorum, table tests) | #3212, #3213, #3214, #3215 | open |
 | `ledger-conway-dijkstra` | #3218 (table tests) | #3217 | open |
-| `ledger-conway-dijkstra` (`SubCerts`) | local branch `test/dijkstra-subtx-certs-model` (`b1d3d9db`; sub-transaction certificate, pool deposit and owner-witness cells), not yet published | | local |
+| `ledger-conway-dijkstra` (`SubCerts`) | local branch `test/dijkstra-subtx-certs-model` (`b1d3d9db`, `727e0cd0`, `f8b8a8a9`; certificate, deposit, owner-witness, retirement, multi-certificate, legacy, balance-interval cells), not yet published | | local |
+| `ledger-conway-dijkstra` (`SubGov`) | local branch `test/dijkstra-subtx-certs-model` (`727e0cd0`; governance and DRep/committee cells); local branch `fix/dijkstra-committee-proposed-member` (`0a8bde9f`, DRIFT L23), not yet published | | local |
 | `consensus-tachys` | #3220 (table tests against CIP-0177) | #3219 | open |
 | `consensus-nonce` | #3223 (neutral epoch nonce and VRF input, as new functions) | #3221, #3222 | open |
 | `dmq` (`LocalMessageSubmissionOwnAnswer`) | #3231 (`SubmitMessage` returns its own answer; breaking; merge 1 of 12) | #3225 | open |

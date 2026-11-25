@@ -124,6 +124,31 @@ families):
 - `Spec`: a ledger that applies three valid batches of one sub-transaction
   and a top and checks that the deposit pot equals the deposits of what is
   registered and that value is preserved.
+- `RBatches`: pool registration, retirement and delegation across levels; a
+  retirement needs the pool registered and leaves it registered for the
+  rest of the batch.
+- `MBatches`: a withdrawal and up to two certificates in one level, run in
+  order, with at most one sub-transaction.
+- `LBatches`: legacy mode with certificates: only the sub-transactions'
+  withdrawals count against the original balance; the top's withdrawal
+  must exist in the current accounts and drain the balance the
+  sub-transactions left, before the top's certificate; its account need
+  not exist originally.
+- `IBatches`: account balance intervals (CIP-159): each level's interval
+  against the account as the earlier levels left it, at the level's start;
+  the top's starting interval against the original account.
+
+`SubGov.tla` (Dijkstra batches' governance):
+
+- `GBatches`: each level registers the credential, a DRep, the committee
+  hot key or the pool, proposes an Info action or not, and casts a DRep,
+  committee or pool vote on an existing action or (from the top) on the
+  sub-transaction's proposal. A vote names an action by a transaction id
+  that covers the vote, so a level cannot name its own proposal or a later
+  one. Certificates come before proposals, proposals before votes.
+- `CBatches`: DRep register, deregister and update; committee authorize and
+  resign for a seated member C1 and for C2, whom an earlier level's
+  UpdateCommittee proposal would add; a resigned member can do neither.
 
 ## The questions
 
@@ -148,6 +173,7 @@ families):
 | `SubTxLedger` | `ValuePreserved`, `SpentOnce`, `InvalidKeeps` hold over two batches | 72 |
 | `SubCertsTable` | `GoAgrees` holds: 55,860 entity and 208 deposit batches in each of 6 plain states, 1,168 owner batches in each of 21 | 21 |
 | `SubCertsLedger` | `DepositsMatch`, `ValuePreserved` hold over three batches | 48 |
+| `SubGovTable` | `GoAgrees` holds: 5,740 governance batches in each of 16 states, 8,736 DRep/committee batches in each of 6 | 48 |
 
 gOuroboros agrees with the reference on every modelled cell. No defect was
 found in this area. It has been worked over before: treasury values,
@@ -211,6 +237,13 @@ Observations, none of which changes an accepted transaction:
 | `SubCertsGoOwnBlsCountsBug` | a BLS-only change needs the owners | `GoAgrees` |
 | `SubCertsSpecPoolDepositPerLevelBug` | the ledger charges a pool deposit per level | `DepositsMatch` |
 | `SubCertsSpecDirectDepositFreeBug` | a direct deposit not taken from the UTxO | `ValuePreserved` |
+| `SubCertsGoRetRemovesPoolBug`, `SubCertsGoRetUnthreadedBug` | retirement unregisters at once; pool state not threaded | `GoAgrees` |
+| `SubCertsGoMultiLevelStartBug`, `SubCertsGoMultiFirstOnlyBug` | each certificate against the level's start; only the first certificate carries | `GoAgrees` |
+| `SubCertsGoLegDrainOriginalBug`, `SubCertsGoLegTopOriginalBug` | legacy top drains original less sub withdrawals; top account must exist originally | `GoAgrees` |
+| `SubCertsGoIvAfterWithdrawalBug`, `SubCertsGoIvOriginalBug` | interval after the level's withdrawal; against the original account | `GoAgrees` |
+| `SubGovGoGovUnthreadedBug`, `SubGovGoGovBeforeCertsBug`, `SubGovGoGovAnyPhaseBug` | governance against the original state; before the level's certificates; when invalid | `GoAgrees` |
+| `SubGovGoComMainBug` | gOuroboros main: an earlier level's UpdateCommittee proposal is not a membership (DRIFT L23) | `GoAgrees` |
+| `SubGovGoComUnthreadedBug`, `SubGovGoComResignAgainBug`, `SubGovGoComSameLevelBug` | not threaded; a resigned member resigns again; a level's own proposal counts | `GoAgrees` |
 
 Reachability probes, each failing as required: a key withdrawal refused by
 the delegation rule alone, an invalid Dijkstra transaction refused for its
@@ -222,7 +255,14 @@ batch moving value to the treasury or reward account (`SubTx`); one level
 withdrawing the whole balance then deregistering, a top-level BLS-only
 re-registration without owners after a sub-transaction registered the
 pool, a credential registered in a sub-transaction and deregistered at the
-top, the pool registered at two levels (`SubCerts`).
+top, the pool registered at two levels, a legacy top withdrawing from an
+account its sub-transaction registered, one level deregistering then
+re-registering (`SubCerts`); the top voting on the sub-transaction's
+proposal, the top authorizing a member a sub-transaction proposed
+(`SubGov`).
+
+`SubGov` found one defect: DRIFT L23. The spec and the reference agree in
+this area too.
 
 `SubCerts` found no difference between the formal specification
 (formal-ledger-specifications `60b68036c8b4`, Dijkstra `Ledger`,
@@ -250,6 +290,18 @@ table is under test too.
 | `TestSubTxModelEntities` (`SubCerts` `EBatches`) | 335,160 |
 | `TestSubTxModelPoolDeposit` (`DBatches`) | 416 |
 | `TestSubTxModelPoolOwnerWitnesses` (`OBatches`) | 8,176 |
+| `TestSubTxModelPoolRetirement` (`RBatches`) | 336 |
+| `TestSubTxModelMultiCertificateLevels` (`MBatches`) | 21,672 |
+| `TestSubTxModelLegacyWithdrawalCertificates` (`LBatches`) | 1,872 |
+| `TestSubTxModelBalanceIntervals` (`IBatches`) | 109,800 |
+| `TestSubTxModelGovernance` (`SubGov` `GBatches`, a subtest per state) | 91,840 |
+| `TestSubTxModelDRepCommitteeCertificates` (`CBatches` without proposals) | 7,008 |
+
+Commits `727e0cd0` and `f8b8a8a9` on the same branch add the last six.
+The DRep/committee test leaves out the cells with an UpdateCommittee
+proposal, which fail on main (DRIFT L23); with the fix on
+`fix/dijkstra-committee-proposed-member` (`0a8bde9f`) applied, all 52,416
+`CBatches` cells agree, and 7 fail without it.
 
 The `SubCerts` tests are on branch `test/dijkstra-subtx-certs-model`
 (`ledger/dijkstra/subtx_certs_model_test.go`, commit `b1d3d9db`). The
@@ -290,6 +342,13 @@ Mutations, each killed (first failing cell):
 | owner rule unthreaded (`UtxoValidateRequiredVKeyWitnesses` skips `ApplyPoolCertificates`) | subs register A with and without owners, refused |
 | owners required when invalid | invalid, sub registers A without owners, refused |
 
+| governance view not threaded (`validate(level, ls)`) | sub registers a DRep, top votes as it, refused |
+| committee changes not applied between levels | sub resigns C1, later sub authorizes C1, accepted |
+| pool certificates not threaded in `UtxoValidatePoolCertificates` | subs register then retire the pool, refused |
+| only a level's first certificate applied to the threaded block state | sub registers then deregisters, top registers, refused |
+| direct deposits not applied by `dijkstraApplyAccountLevel` | sub deposits into an unregistered account, accepted |
+| balance intervals against an unthreaded account | sub registers, top's interval refused |
+
 Moving `ApplyCertificateDepositLevel`'s withdrawals after the certificates
 survives: the per-level Conway rule already sees a level's own withdrawal,
 and the threaded state after the level is the same either way.
@@ -313,6 +372,9 @@ and the threaded state after the level is the same either way.
 | Sub-transaction certificates | SUBLEDGERS then ENTITIES; withdraw, CERTS, deposit | `SUBENTITIES`, `SUBCERTS` (Conway DELEG, Dijkstra POOL) | levels in order through `BlockLedgerState` and overlays | agree |
 | Batch pool deposit | `newCertDeposits` over `allDCerts` | `getTotalDepositsTxCerts` over the batch | one per operator over the flattened batch | agree |
 | Legacy-mode deposit | `producedLegacy` with `pools'` | top alone, `postSubsPState` | top alone after applying sub levels | agree |
+| Sub-transaction proposals and votes | SUBLEDGER-V: SUBENTITIES then SUBGOV; LEDGER-V top GOVS after SUBLEDGERS | `SUBGOV` = Conway GOV with the sub's id and post-SUBENTITIES state | `validateDijkstraGovernanceLevels` overlay | agree |
+| Committee certificate for a proposed member | `allColdCreds govState₁` | committee proposals of the current state | wrapped state only | does not conform (L23) |
+| Account balance intervals | SUBENTITIES/ENTITIES `dom ⊆ dom rewards` at level start; starting vs `rewards₀` | same | threaded overlay | agree |
 | Owner witnesses | — | `poolOwnersWitnessRequired`, pre-level `PState`, never when invalid | `PoolOwnersWitnessRequired`, threaded | agree |
 | Removed fields | — | update field, MIR, genesis delegation; Dijkstra tags 0, 1 | decode errors | agree |
 
@@ -328,11 +390,11 @@ Model `ledger-utxo`'s checks (assumed to pass), witnesses and script evaluation,
 governance (model `ledger-governance`), certificate state transitions beyond registration
 (model `ledger-shelley`), account balance intervals and guards, the
 per-block reference-script limit (block bodies), protocol versions above
-12, and sub-transactions' governance procedures (proposals and votes;
-SUBGOV runs the Conway GOV transition per level). `SubCerts` covers one
-credential and one pool: DRep and committee certificates, pool
-retirement, several certificates in one level, and legacy-mode
-withdrawals with certificates are left out.
+12, required top-level guards and guard datums (Utxow.hs; a witness and
+script-context matter for model `ledger-witnesses`), and the Dijkstra-only
+proposal checks (parameter-update validation, committee expiry). `SubGov`
+uses Info proposals only, so ancestry, treasury withdrawals and
+voter/action-type restrictions are Conway's and not re-checked per level.
 
 ## Running it
 
