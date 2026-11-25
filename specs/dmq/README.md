@@ -181,6 +181,10 @@ continuation of that submission.
 | `LocalMessageSubmissionOwnAnswer.cfg`: two concurrent calls, `SubmitMessage` returns its own answer under the submit lock (the fix) | 43 | passes |
 | `LocalMessageSubmissionOwnAnswerNoLockBug.cfg` (mutation: own answer, no submit lock) | | **fails** `AnswerReachesAsker` |
 | `LocalMessageSubmissionOwnAnswerProbeDoneBug.cfg` (probe: `ProbeNeverDone` with the fix) | | **fails** (Stop completes) |
+| `LocalMessageSubmissionOwnAnswerLateCallBug.cfg` (a call after Stop queues behind MsgDone) | 57 | **fails** (deadlock) |
+| `LocalMessageSubmissionOwnAnswerCallbackLoopBug.cfg` (an accept callback on the receive loop submits again) | 9 | **fails** (deadlock) |
+| `LocalMessageSubmissionOwnAnswerStopOnlyCallbackLoopBug.cfg` (refusal after Stop, callback still on the receive loop) | 13 | **fails** (deadlock) |
+| `LocalMessageSubmissionOwnAnswerStopCallback.cfg`: a late call is refused after Stop, callbacks run on the caller after the lock is released | 136 | passes |
 
 `Stop` never abandons a submission: `MsgDone` is queued behind the
 submissions and goes out from `StIdle` after their answers. `Start` runs once
@@ -201,6 +205,17 @@ what keeps registration order equal to queue order; without it
 (`OwnAnswerNoLockBug`) two calls can register in one order and queue in the
 other. `ConcurrentBug` is gOuroboros `origin/main` `5c4f31c1`. Go side:
 `fix/localmessagesubmission-own-answer`.
+
+Two review defects of that branch are modelled with `LateCalls`,
+`RefuseAfterStop`, `CallbackCall` and `CallbackOnCaller`. A call made after
+`Stop` queued its message behind MsgDone; in StDone nothing more is sent, so
+it waited forever holding the submit lock (`OwnAnswerLateCallBug`). An accept
+callback ran on the receive loop while its caller held the submit lock, so a
+callback that submitted again waited for a lock only its own return could free
+(`OwnAnswerCallbackLoopBug`). The fix checks for Stop and queues under one lock
+that `Stop` also takes, refusing a late call with `ErrProtocolShuttingDown`,
+and runs the callbacks on the submitting goroutine after the lock is released
+(`OwnAnswerStopCallback`).
 
 ## Part 3: local message notification (`LocalMessageNotification.tla`)
 
@@ -674,3 +689,12 @@ cd specs/dmq
 
 To run a probe, copy a passing config and replace its `INVARIANT` lines with
 the probe's name.
+
+`PeerPipelines` and `OutAdmitsPipelined` add the reference's pipelined
+requester: while the outbound owes MsgReplyMessages, the inbound already
+sends its next non-blocking request for ids (dmq-node
+DMQ/SigSubmissionV2/Inbound.hs; V1 runs txSubmissionServerPeerPipelined).
+At 4f710823 the outbound's StMessages refused it, closing the connection
+(`MessageSubmissionV{1,2}PipelinedBug`, `HonestNeverRefused` violated). The
+fix holds the request until the reply is sent and then checks it
+(`MessageSubmissionV{1,2}Pipelined`, pass).

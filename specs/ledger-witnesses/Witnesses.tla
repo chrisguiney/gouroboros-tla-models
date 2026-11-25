@@ -155,14 +155,15 @@ KeySources ==
 
 \* In English: a key cell: a source, the key it names (v1 or b), whether
 \* an extra v2 witness with a wrong signature is attached, and whether the
-\* transaction is phase-2 valid (varied only in Dijkstra).
+\* transaction is phase-2 valid (varied from Alonzo on, where IsValid
+\* exists).
 \* Literally: "KeyCells is defined as the set of records whose field src is a
 \*   member of KeySources, field key is a member of the set containing "v1"
 \*   and "b", field bad is a member of BOOLEAN, and field valid is a member
-\*   of (if Era equals "Dijkstra" then BOOLEAN, else the set containing
+\*   of (if AtLeast of "Alonzo" then BOOLEAN, else the set containing
 \*   TRUE)."
 KeyCells == [src : KeySources, key : {"v1", "b"}, bad : BOOLEAN,
-             valid : IF Era = "Dijkstra" THEN BOOLEAN ELSE {TRUE}]
+             valid : IF AtLeast("Alonzo") THEN BOOLEAN ELSE {TRUE}]
 
 \* In English: the keys a cell needs, witsVKeyNeeded [R2][R7][R11]. A
 \* tag-0 registration needs none. A pool registration needs its operator
@@ -190,12 +191,19 @@ SpecKeyAccepts(c) == KeyNeeded(c) \subseteq wits /\ ~c.bad
 
 \* In English: the key hashes gOuroboros counts for a cell. The old code
 \* counted only vkey witnesses towards the MIR quorum and the update
-\* proposal's delegates [G3].
-\* Literally: "GoKeyProvided of c is defined as: if Mutation equals
+\* proposal's delegates [G3]. "GoInvalidPpupVkeyOnly" is 137d618a: the
+\* update proposal of a phase-2-invalid Alonzo or Babbage transaction goes
+\* to ValidateClassicProtocolParameterUpdateWitnesses, which still counted
+\* only vkey witnesses; the reference does not gate validateNeededWitnesses
+\* on IsValid [R1] 423-436.
+\* Literally: "GoKeyProvided of c is defined as: if (Mutation equals
 \*   "GoGenesisVkeyOnly" and c's src is a member of the set containing "mir"
-\*   and "ppup", then the intersection of wits and VKeys, else wits."
+\*   and "ppup") or (Mutation equals "GoInvalidPpupVkeyOnly" and c's src
+\*   equals "ppup" and c's valid is not true), then the intersection of wits
+\*   and VKeys, else wits."
 GoKeyProvided(c) ==
-    IF Mutation = "GoGenesisVkeyOnly" /\ c.src \in {"mir", "ppup"}
+    IF \/ Mutation = "GoGenesisVkeyOnly" /\ c.src \in {"mir", "ppup"}
+       \/ Mutation = "GoInvalidPpupVkeyOnly" /\ c.src = "ppup" /\ ~c.valid
     THEN wits \cap VKeys ELSE wits
 
 \* In English: the keys gOuroboros requires [G1]; the mutation

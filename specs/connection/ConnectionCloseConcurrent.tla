@@ -15,6 +15,10 @@
 (*           (:466), which skips excused loops; close(connClosedChan).     *)
 (*   user    plain Close: requestClose, wait for connClosedChan, then      *)
 (*           WaitProtocolLoopsExcept(nil): every loop.                     *)
+(*   foreign CloseContext with a context that marks no instance of this    *)
+(*           connection (another connection's callback): its owner is not  *)
+(*           nil, but ExcuseProtocolLoops finds no loop, and the doc       *)
+(*           (connection.go:310-312) promises it waits like Close.         *)
 (*                                                                         *)
 (* A loop exits once shutdown has stopped the protocols and its callback   *)
 (* has returned. Every step is monotonic, so every behaviour ends; a state *)
@@ -31,7 +35,9 @@ EXTENDS Naturals, FiniteSets
 CONSTANTS
     Inst,       \* the protocol instances, one loop and one callback each
     UserCloses, \* TRUE: the user also calls plain Close
-    Fix         \* a subset of {"skipClosing", "selfJoin", "userSkipsClosing"}:
+    ForeignCloses, \* TRUE: CloseContext is called with another connection's context
+    Fix         \* a subset of {"skipClosing", "selfJoin", "userSkipsClosing",
+                \* "foreignAsClose"}:
                 \* "skipClosing": after connClosedChan, CloseContext waits
                 \*   only for loops that are not excused (WaitProtocolLoops),
                 \*   so it never waits for another callback that is itself
@@ -41,14 +47,18 @@ CONSTANTS
                 \*   includes the caller's own loop.
                 \* "userSkipsClosing" (mutation, with "skipClosing"): plain
                 \*   Close's wait also skips excused loops.
+                \* "foreignAsClose": a CloseContext whose context excused no
+                \*   loop waits for every loop, as Close does. Without it:
+                \*   c321f708, which branches on the owner being non-nil and
+                \*   so skips every loop excused by another callback.
 
-\* In English: "Fix names only these switches, and UserCloses is a
-\* boolean."
+\* In English: "Fix names only these switches, and UserCloses and
+\* ForeignCloses are booleans."
 \* Literally: "Assume Fix is a subset of the set containing "skipClosing",
-\*   "selfJoin" and "userSkipsClosing", and UserCloses is a member of
-\*   BOOLEAN."
-ASSUME Fix \subseteq {"skipClosing", "selfJoin", "userSkipsClosing"}
-       /\ UserCloses \in BOOLEAN
+\*   "selfJoin", "userSkipsClosing" and "foreignAsClose", and UserCloses
+\*   and ForeignCloses are members of BOOLEAN."
+ASSUME Fix \subseteq {"skipClosing", "selfJoin", "userSkipsClosing", "foreignAsClose"}
+       /\ UserCloses \in BOOLEAN /\ ForeignCloses \in BOOLEAN
 
 VARIABLES
     cb,       \* callback i: "running", "closing" (CloseContext, waiting for
@@ -58,17 +68,18 @@ VARIABLES
     excused,  \* loop i is excused by its callback's CloseContext
     doneChan, \* doneChan is closed
     sd,       \* shutdown: "idle", "join", "done" (connClosedChan closed)
-    user      \* plain Close: "idle", "closing", "joining", "returned"
+    user,     \* plain Close: "idle", "closing", "joining", "returned"
+    foreign   \* the foreign-context CloseContext: same states as user
 
 \* Literally: "vars is defined as the tuple of cb, loop, excused, doneChan,
-\*   sd and user."
-vars == <<cb, loop, excused, doneChan, sd, user>>
+\*   sd, user and foreign."
+vars == <<cb, loop, excused, doneChan, sd, user, foreign>>
 
 \* In English: "Every callback is running on its loop; nothing is closed."
 \* Literally: "Init is defined as: cb maps every i in Inst to "running",
 \*   and loop maps every i in Inst to "running", and excused maps every i
 \*   in Inst to FALSE, and doneChan equals FALSE, and sd equals "idle",
-\*   and user equals "idle"."
+\*   and user and foreign equal "idle"."
 Init ==
     /\ cb = [i \in Inst |-> "running"]
     /\ loop = [i \in Inst |-> "running"]
@@ -76,6 +87,7 @@ Init ==
     /\ doneChan = FALSE
     /\ sd = "idle"
     /\ user = "idle"
+    /\ foreign = "idle"
 
 -----------------------------------------------------------------------------
 (* The waits *)
@@ -121,7 +133,7 @@ UserJoined ==
 CbReturn(i) ==
     /\ cb[i] \in {"running", "closed"}
     /\ cb' = [cb EXCEPT ![i] = "done"]
-    /\ UNCHANGED <<loop, excused, doneChan, sd, user>>
+    /\ UNCHANGED <<loop, excused, doneChan, sd, user, foreign>>
 
 \* In English: "Callback i calls CloseContext with its own context: it
 \* excuses its loop, then closes doneChan (once)."
@@ -134,7 +146,7 @@ CbClose(i) ==
     /\ excused' = [excused EXCEPT ![i] = TRUE]
     /\ doneChan' = TRUE
     /\ cb' = [cb EXCEPT ![i] = "closing"]
-    /\ UNCHANGED <<loop, sd, user>>
+    /\ UNCHANGED <<loop, sd, user, foreign>>
 
 \* In English: "connClosedChan is closed: callback i's CloseContext goes on
 \* to its loop wait."
@@ -144,7 +156,7 @@ CbClose(i) ==
 CbShutdownDone(i) ==
     /\ cb[i] = "closing" /\ sd = "done"
     /\ cb' = [cb EXCEPT ![i] = "joining"]
-    /\ UNCHANGED <<loop, excused, doneChan, sd, user>>
+    /\ UNCHANGED <<loop, excused, doneChan, sd, user, foreign>>
 
 \* In English: "Callback i's loop wait ends and CloseContext returns."
 \* Literally: "CbJoin of i is defined as: cb of i equals "joining", and
@@ -153,7 +165,7 @@ CbShutdownDone(i) ==
 CbJoin(i) ==
     /\ cb[i] = "joining" /\ CloserJoined(i)
     /\ cb' = [cb EXCEPT ![i] = "closed"]
-    /\ UNCHANGED <<loop, excused, doneChan, sd, user>>
+    /\ UNCHANGED <<loop, excused, doneChan, sd, user, foreign>>
 
 \* In English: "Loop i exits once shutdown has stopped the protocols and
 \* its callback has returned."
@@ -164,7 +176,7 @@ CbJoin(i) ==
 LoopExit(i) ==
     /\ loop[i] = "running" /\ sd /= "idle" /\ cb[i] = "done"
     /\ loop' = [loop EXCEPT ![i] = "exited"]
-    /\ UNCHANGED <<cb, excused, doneChan, sd, user>>
+    /\ UNCHANGED <<cb, excused, doneChan, sd, user, foreign>>
 
 -----------------------------------------------------------------------------
 (* Shutdown and the user *)
@@ -177,7 +189,7 @@ LoopExit(i) ==
 SdBegin ==
     /\ sd = "idle" /\ doneChan
     /\ sd' = "join"
-    /\ UNCHANGED <<cb, loop, excused, doneChan, user>>
+    /\ UNCHANGED <<cb, loop, excused, doneChan, user, foreign>>
 
 \* In English: "Shutdown's join waits for every loop not excused, then
 \* closes connClosedChan."
@@ -187,7 +199,7 @@ SdBegin ==
 SdJoin ==
     /\ sd = "join" /\ \A j \in Inst : Gone(j)
     /\ sd' = "done"
-    /\ UNCHANGED <<cb, loop, excused, doneChan, user>>
+    /\ UNCHANGED <<cb, loop, excused, doneChan, user, foreign>>
 
 \* In English: "The user calls plain Close: close doneChan (once)."
 \* Literally: "UserClose is defined as: UserCloses is true, and user
@@ -197,7 +209,7 @@ UserClose ==
     /\ UserCloses /\ user = "idle"
     /\ doneChan' = TRUE
     /\ user' = "closing"
-    /\ UNCHANGED <<cb, loop, excused, sd>>
+    /\ UNCHANGED <<cb, loop, excused, sd, foreign>>
 
 \* In English: "The user's Close sees connClosedChan closed, then its loop
 \* wait ends and it returns."
@@ -208,7 +220,32 @@ UserClose ==
 UserStep ==
     /\ \/ user = "closing" /\ sd = "done" /\ user' = "joining"
        \/ user = "joining" /\ UserJoined /\ user' = "returned"
-    /\ UNCHANGED <<cb, loop, excused, doneChan, sd>>
+    /\ UNCHANGED <<cb, loop, excused, doneChan, sd, foreign>>
+
+\* In English: "CloseContext with a context marking none of this
+\* connection's instances: close doneChan (once); after connClosedChan,
+\* wait for every loop with foreignAsClose, else only for loops that are not
+\* excused."
+\* Literally: "ForeignStep is defined as: ForeignCloses is true, and either
+\*   (foreign equals "idle", and doneChan in the next state equals TRUE, and
+\*   foreign in the next state equals "closing"), or (foreign equals
+\*   "closing", and sd equals "done", and foreign in the next state equals
+\*   "joining", and doneChan is unchanged), or (foreign equals "joining",
+\*   and for every j in Inst, loop of j equals "exited" or ("foreignAsClose"
+\*   is not a member of Fix and excused of j is true), and foreign in the
+\*   next state equals "returned", and doneChan is unchanged); and cb, loop,
+\*   excused, sd and user are unchanged."
+ForeignStep ==
+    /\ ForeignCloses
+    /\ \/ foreign = "idle" /\ doneChan' = TRUE /\ foreign' = "closing"
+       \/ foreign = "closing" /\ sd = "done" /\ foreign' = "joining"
+          /\ UNCHANGED doneChan
+       \/ /\ foreign = "joining"
+          /\ \A j \in Inst :
+                loop[j] = "exited" \/ ("foreignAsClose" \notin Fix /\ excused[j])
+          /\ foreign' = "returned"
+          /\ UNCHANGED doneChan
+    /\ UNCHANGED <<cb, loop, excused, sd, user>>
 
 \* In English: "Nothing is left waiting: every callback has returned, no
 \* Close is pending, and, once doneChan is closed, shutdown is done and
@@ -220,6 +257,7 @@ UserStep ==
 Finished ==
     /\ \A i \in Inst : cb[i] = "done"
     /\ user \in {"idle", "returned"}
+    /\ foreign \in {"idle", "returned"}
     /\ doneChan => (sd = "done" /\ \A i \in Inst : loop[i] = "exited")
 
 \* In English: "One step of any goroutine, or the stutter of a finished
@@ -227,11 +265,11 @@ Finished ==
 \* Literally: "Next is defined as: there exists an i in Inst such that
 \*   CbReturn of i, or CbClose of i, or CbShutdownDone of i, or CbJoin of
 \*   i, or LoopExit of i; or SdBegin, or SdJoin, or UserClose, or
-\*   UserStep, or (Finished and vars is unchanged)."
+\*   UserStep, or ForeignStep, or (Finished and vars is unchanged)."
 Next ==
     \/ \E i \in Inst :
           CbReturn(i) \/ CbClose(i) \/ CbShutdownDone(i) \/ CbJoin(i) \/ LoopExit(i)
-    \/ SdBegin \/ SdJoin \/ UserClose \/ UserStep
+    \/ SdBegin \/ SdJoin \/ UserClose \/ UserStep \/ ForeignStep
     \/ Finished /\ UNCHANGED vars
 
 \* Literally: "Spec is defined as: Init, and always Next or vars is
@@ -247,6 +285,15 @@ Spec == Init /\ [][Next]_vars
 \*   "returned", then for every j in Inst, loop of j equals "exited"."
 CloseWaitsForEveryLoop ==
     user = "returned" => \A j \in Inst : loop[j] = "exited"
+
+\* In English: "When a CloseContext whose context marks none of this
+\* connection's instances returns, every protocol loop has exited, as for
+\* Close."
+\* Literally: "ForeignCloseWaitsForEveryLoop is defined as: if foreign
+\*   equals "returned", then for every j in Inst, loop of j equals
+\*   "exited"."
+ForeignCloseWaitsForEveryLoop ==
+    foreign = "returned" => \A j \in Inst : loop[j] = "exited"
 
 \* In English: "When a callback's CloseContext returns, every other loop
 \* has exited, except one whose own callback is also closing."
@@ -270,4 +317,5 @@ TypeOK ==
     /\ doneChan \in BOOLEAN
     /\ sd \in {"idle", "join", "done"}
     /\ user \in {"idle", "closing", "joining", "returned"}
+    /\ foreign \in {"idle", "closing", "joining", "returned"}
 =============================================================================

@@ -114,6 +114,7 @@ one.
 | Config | Mutation | Fails |
 |---|---|---|
 | `WitnessesGoGenesisVkeyOnlyShelleyBug`, `...BabbageBug` | the code before the fix | `GoAgrees` |
+| `WitnessesGoInvalidPpupVkeyOnly{Alonzo,Babbage}Bug` | 137d618a: a phase-2-invalid update proposal counts only vkey witnesses | `GoAgrees` |
 | `WitnessesGoOwnersAlwaysBug` | Dijkstra owners must always witness | `GoAgrees` |
 | `WitnessesGoNativeCountsBootstrapBug` | a bootstrap witness satisfies a native signature | `GoAgrees` |
 | `WitnessesGoStartAbsentOkBug` | an absent lower bound satisfies a start leaf | `GoAgrees` |

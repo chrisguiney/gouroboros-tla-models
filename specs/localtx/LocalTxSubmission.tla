@@ -64,6 +64,12 @@ CONSTANTS
     SerialCalls,     \* TRUE: SubmitTx calls take busyMutex, so one caller waits at a time
                      \* FALSE: the mutation, with the mutex removed
     ServerRestarts,  \* TRUE: the server restarts after MsgDone [S4]. FALSE: gOuroboros today
+    ReuseAfterClose, \* TRUE: after Stop closed the protocol without MsgDone, a new client
+                     \* may register on the same connection (muxer.RegisterProtocol clears
+                     \* the old registration), while the server still owes its answer
+    CloseConnection, \* TRUE: the fix: a Stop that closes the protocol without MsgDone also
+                     \* closes the connection, so nothing can register on it again.
+                     \* FALSE: ffc14012, which leaves the bearer open
     PrintTable       \* TRUE: print the receive table when TLC starts
 
 \* Literally: "Roles is defined as the set containing "Client" and "Server"."
@@ -214,17 +220,41 @@ Init ==
 \*   and full is true."
 ServerBlocked == view["Server"] = "StBusy" /\ full
 
+\* In English: "With ReuseAfterClose, and unless the cancelled Stop closed the
+\* connection, a new client starts on the same connection after the old one
+\* closed: it believes StIdle, a new run starts, and Stop may be called
+\* again. The server is not told; it still answers the held submission."
+\* Literally: "ClientReregister is defined as: ReuseAfterClose is true, and
+\*   CloseConnection is not true, and view of "Client" equals "Closed", and
+\*   stop equals "done", and runs is less than MaxRuns, and view in the next
+\*   state equals view except that its "Client" entry is "StIdle", and runs in
+\*   the next state equals runs plus 1, and stop in the next state equals
+\*   "no", and cancelled in the next state equals FALSE, and inbox, queued,
+\*   waiting, submits, srvTx, full, flips, misrouted and rogueLeft are
+\*   unchanged."
+ClientReregister ==
+    /\ ReuseAfterClose /\ ~CloseConnection
+    /\ view["Client"] = "Closed" /\ stop = "done"
+    /\ runs < MaxRuns
+    /\ view' = [view EXCEPT !["Client"] = "StIdle"]
+    /\ runs' = runs + 1
+    /\ stop' = "no"
+    /\ cancelled' = FALSE
+    /\ UNCHANGED <<inbox, queued, waiting, submits, srvTx, full, flips, misrouted,
+                   rogueLeft>>
+
 \* In English: "The connection is over when someone has hung up, or the client
-\* closed after Stop, or both sides are done after the last run with nothing
-\* left for the server to read."
+\* closed after Stop (with ReuseAfterClose and no CloseConnection, only once no
+\* new client can register), or both sides are done after the last run with
+\* nothing left for the server to read."
 \* Literally: "Ended is defined as: there exists an r in Roles such that view
 \*   of r is a member of Failures; or view of "Client" equals "Closed" and stop
-\*   equals "done"; or view of "Client" equals "StDone" and runs equals
+\*   equals "done" and ClientReregister is not enabled; or view of "Client" equals "StDone" and runs equals
 \*   MaxRuns, and view of "Server" equals "StDone" and inbox of "Server" equals
 \*   the empty sequence."
 Ended ==
     \/ \E r \in Roles : view[r] \in Failures
-    \/ view["Client"] = "Closed" /\ stop = "done"
+    \/ view["Client"] = "Closed" /\ stop = "done" /\ ~ENABLED ClientReregister
     \/ /\ view["Client"] = "StDone" /\ runs = MaxRuns
        /\ view["Server"] = "StDone" /\ inbox["Server"] = <<>>
 
@@ -481,14 +511,15 @@ Timeout ==
 \* mempool flip, a read, a timeout, a rogue injection, or, once the connection
 \* is over or can only wait, nothing."
 \* Literally: "Next is defined as: ClientSubmit, or ClientSend, or
-\*   ClientRestart, or StopRequest, or StopCancel, or ClientStop, or there
+\*   ClientRestart, or ClientReregister, or StopRequest, or StopCancel, or
+\*   ClientStop, or there
 \*   exists a t in the set containing "MsgAcceptTx" and "MsgRejectTx" such that
 \*   ServerAnswer of t, or MempoolFlip, or there exists an r in Roles such that
 \*   Recv of r, or Timeout, or there exists an r in Roles and an m in Messages
 \*   such that Inject of r and m, or (Ended or WaitsForever) and vars is
 \*   unchanged."
 Next ==
-    \/ ClientSubmit \/ ClientSend \/ ClientRestart
+    \/ ClientSubmit \/ ClientSend \/ ClientRestart \/ ClientReregister
     \/ StopRequest \/ StopCancel \/ ClientStop
     \/ \E t \in {"MsgAcceptTx", "MsgRejectTx"} : ServerAnswer(t)
     \/ MempoolFlip

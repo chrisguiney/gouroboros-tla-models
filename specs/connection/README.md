@@ -398,6 +398,8 @@ The reference tears the mux down once and releases every thread that asked
 | `ConnectionCloseConcurrentMutualWaitBug.cfg` (`f60a0213`, two instances) | | deadlock: both callbacks wait in their post-shutdown wait for the other's loop, and the user's `Close` waits for both |
 | `ConnectionCloseConcurrentSelfJoinBug.cfg` (mutation: the wait includes the caller's own loop) | | deadlock with one closer |
 | `ConnectionCloseConcurrentUserSkipsBug.cfg` (mutation: plain `Close` skips excused loops too) | | `CloseWaitsForEveryLoop` violated |
+| `ConnectionCloseConcurrentForeignContextBug.cfg` (c321f708: `CloseContext` with another connection's context skips a loop excused by a callback's own `CloseContext`) | | `ForeignCloseWaitsForEveryLoop` violated |
+| `ConnectionCloseConcurrentForeignContext.cfg` (the fix: a `CloseContext` that excused no loop waits for every loop, as `Close` does) | 2,336 | passes |
 
 The same review found that a `Close` made after `doneChan` exists and before
 the muxer does returns with the conn open: shutdown sees no muxer, and

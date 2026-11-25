@@ -100,10 +100,15 @@ CONSTANTS
                    \*      releaseRawCborBytes 414-418
                    \*   "MarkerForAll": every Stop(ctx) caller skips the join
                    \*   "NoWatchJoin": Stop does not wait for the cancel watcher
+                   \*   "LateStopUnpublished": with NewStop, only the call that
+                   \*      starts the teardown publishes stopping, so a Stop after
+                   \*      the watcher's teardown leaves it false (requestStop
+                   \*      returning at teardownStarted before p.stopping.Store)
 
 ASSUME ApplyMode \in {"returns", "blocks", "callsStop", "callsDrain", "callsStopOther"}
 ASSUME Mutation \in {"None", "CloseBeforeJoin", "SkipRunnerJoin",
-                     "NoReleaseActive", "ReleaseTwice", "MarkerForAll", "NoWatchJoin"}
+                     "NoReleaseActive", "ReleaseTwice", "MarkerForAll", "NoWatchJoin",
+                     "LateStopUnpublished"}
 
 \* In English: the goroutines that may run Stop's steps: the owner, a
 \* second goroutine, ApplyFunc itself ("cb"), the teardown goroutine of
@@ -853,12 +858,15 @@ WatchWake ==
 \* cancel, and start the one teardown goroutine if it has not started. A
 \* caller whose ctx carries this pipeline's ApplyFunc marker returns at
 \* once (it may be the runner itself); any other caller waits.
-\* stopping is published only by the call that starts the teardown
-\* (requestStop returns before it once teardownStarted is set), so after
-\* the watcher has started it, a later Stop leaves stopping false.
+\* Every explicit Stop publishes stopping, even one that finds the teardown
+\* already started by the watcher, so Start and WaitForDrain see the stop.
+\* LateStopUnpublished publishes it only from the call that starts the
+\* teardown, so after the watcher has started it a later Stop leaves
+\* stopping false.
 \* Literally: "StopSignal of s is defined as: stopPc of s equals "signal",
 \*   and stopping in the next state equals (stopping, or stopPc of "td"
-\*   equals "idle"), and canceled in the next
+\*   equals "idle", or Mutation does not equal "LateStopUnpublished"), and
+\*   canceled in the next
 \*   state equals TRUE, and stopPc in the next state equals stopPc except
 \*   that its s entry is (if (s equals "cb" and CbMarked) or Mutation
 \*   equals "MarkerForAll" then "requested" else "waitTd"), and its "td"
@@ -866,7 +874,9 @@ WatchWake ==
 \*   entry), and every other variable is unchanged."
 StopSignal(s) ==
     /\ stopPc[s] = "signal"
-    /\ stopping' = (stopping \/ stopPc["td"] = "idle") /\ canceled' = TRUE
+    /\ stopping' = (stopping \/ stopPc["td"] = "idle"
+                    \/ Mutation /= "LateStopUnpublished")
+    /\ canceled' = TRUE
     /\ stopPc' = [stopPc EXCEPT
                     ![s] = IF (s = "cb" /\ CbMarked) \/ Mutation = "MarkerForAll"
                              THEN "requested" ELSE "waitTd",
@@ -1147,4 +1157,18 @@ ProbeNoGateWait == ~\E s \in StopIds : stopPc[s] = "gate" /\ gate = "sub"
 \*   "handoff" and Reader is not true."
 ProbeNoStopDrain ==
     ~\E s \in StopIds : stopPc[s] = "drainApply" /\ fPc = "handoff" /\ ~Reader
+
+\* In English: with NewStop, once an explicit Stop has signalled, the
+\* pipeline records that Stop has begun, so a later Start returns
+\* ErrPipelineStopped and WaitForDrain does not report the stop as a
+\* cancellation.
+\* Literally: "StopPublished is defined as: if NewStop, then for all s in the
+\*   set containing "owner", "second" and "cb", if stopPc of s is a member of
+\*   the set containing "waitTd", "requested", "returned" and "timedOut",
+\*   then stopping."
+StopPublished ==
+    NewStop =>
+        \A s \in {"owner", "second", "cb"} :
+            stopPc[s] \in {"waitTd", "requested", "returned", "timedOut"} => stopping
+
 =============================================================================
