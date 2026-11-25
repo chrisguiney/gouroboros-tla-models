@@ -240,6 +240,24 @@ registration, expiry, activity and dormant epochs; committee-member expiry;
 the other four action kinds (each behaves like HF or PP here); the
 hard-fork protocol-version rule.
 
+## Nil voter key (`GovVoterNil.tla`)
+
+A table model, written bug-first for #3155 (L3): every rule that reads a
+transaction's voters, against each voter kind and a nil voter. The
+reference's `Voter` (`Conway/Governance/Procedures.hs` ~351-355) has no
+absent value, so the rule checked is the one the sibling rules already
+follow: skip a nil voter or refuse the transaction, never dereference it.
+
+| Config | Rule | Result | Counterexample, and the Go test it matches |
+| --- | --- | --- | --- |
+| `GovVoterNilMainBug` | main before #3155 | fails `NilVoterSkippedAsSiblings` | `CCVoting`, nil voter: panics (`TestUtxoValidateCCVotingRestrictionsNilVoter`) |
+| `GovVoterNil` | #3155 (`0fd483b3`) | passes, 28 states | |
+
+The other six readers (`UnknownVoters`, `VotingOnExpired`,
+`BootstrapVoting`, `StakePoolVoting`, `UnelectedCommittee`, and
+`common.voterCredential`, which refuses) already handled a nil voter
+before the fix, checked on the parent commit.
+
 ## Running it
 
 ```sh

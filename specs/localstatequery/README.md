@@ -310,6 +310,19 @@ The encoding and results of individual queries, the cached era
 error, like the violations here), and the message size limit
 (`MaxReadBufferSize`).
 
+## Server release without a callback (`LocalStateQueryServerRelease.tla`)
+
+A table model, written bug-first for #3113 (N36): a client message
+(`MsgAcquire`, `MsgReAcquire`, `MsgQuery`, `MsgRelease`) and whether its
+callback is configured. The reference always accepts `MsgRelease` in
+`StAcquired` (`miniprotocols.tex` 2000-2010); the messages that need an
+answer need a callback to produce one, a library contract.
+
+| Config | Rule | Result | Counterexample, and the Go test it matches |
+| --- | --- | --- | --- |
+| `LocalStateQueryServerReleaseMainBug` | main before #3113 (`server.go` 345-351) | fails `ReleaseAcceptedAsStAcquired` | `MsgRelease`, no `ReleaseFunc`: refused (`TestServerAcceptsReleaseWithoutCallback`) |
+| `LocalStateQueryServerRelease` | #3113 (`5c4f31c1`, `server.go` 386-390) | passes, 8 states | |
+
 ## Running it
 
 ```sh

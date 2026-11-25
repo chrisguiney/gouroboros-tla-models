@@ -447,6 +447,28 @@ Branches:
 
 Neither branch has been pushed or opened as a pull request.
 
+## Slice 5: limits as a table (`ChainSyncLimits.tla`)
+
+A table model of the node-to-node size limit and timeout of each state,
+written bug-first for #3112 (N6, N7). An input is a state, a message size
+(one point on each side of 65535 and 462000) and the timeout gOuroboros
+draws there.
+
+| Invariant | Says | Source |
+| --- | --- | --- |
+| `SizeAsByteLimitsChainSync` | a message is accepted exactly when it is at most 65535 bytes | `miniprotocols.tex` 910-924; `ChainSync/Codec.hs` 43-49 |
+| `TimeoutAsTimeLimitsChainSync` | every timeout drawn is one the reference could draw (MustReply 601-911 s) | `miniprotocols.tex` 940-950; `ChainSync/Codec.hs` 54-63 |
+
+| Config | Rule | Result | Counterexample, and the Go check it matches |
+| --- | --- | --- | --- |
+| `ChainSyncLimitsMainBug` | main before #3112 | fails `SizeAsByteLimitsChainSync` | `Idle`, 65536 bytes: main's limit was 462000 (the state-map test asserts 65535) |
+| `ChainSyncLimitsMainTimeoutBug` | main before #3112 | fails `TimeoutAsTimeLimitsChainSync` | `MustReply`, draw 135 s (`protocol/limits_test.go` asserts a 601 s minimum) |
+| `ChainSyncLimits` | #3112 (`4217b6d7`) | passes, 1,565 states | |
+
+Not a deviation: gOuroboros draws from [601, 911) and the reference from
+601 to 911, a subset. The 462000-byte pending-receive budget the fix keeps
+is not a per-message limit, so it is not in the table.
+
 ## Running it
 
 ```sh

@@ -429,6 +429,23 @@ documentation change, which cannot affect the model. The one red job at the
 previous head, `TestReceiveMatchesModel/server/inBusy/Oversized` on Go 1.27
 amd64, passed on the other jobs there and `-race -count=5` here.
 
+## Timeout defaults as a table (`BlockFetchLimits.tla`)
+
+A table model, written bug-first for #3114 (N17): a state (`StBusy`,
+`StStreaming`) and the seconds an honest server takes; the peer is dropped
+when that exceeds the state's timeout. The state map's timeouts are
+replaced by `NewConfig`'s `BatchStartTimeout` and `BlockTimeout`, so the
+defaults are what counts.
+
+| Config | Rule | Result | Counterexample, and the Go check it matches |
+| --- | --- | --- | --- |
+| `BlockFetchLimitsMainBug` | main before #3114: `BatchStartTimeout` 5 s | fails `DropsAsTimeLimitsBlockFetch` | `Busy`, reply after 6 s: dropped, the reference waits 60 s (`TestNewConfigTimeoutsMatchReference`) |
+| `BlockFetchLimits` | #3114 (`5a2a11c3`): 60 s in both | passes, 124 states | |
+
+Sources: `miniprotocols.tex` 1235-1237 (`StBusy`, `StStreaming` 60 s);
+`BlockFetch/Codec.hs` 54 and `Protocol/Limits.hs` 116-117 (`longWait`).
+A caller's own option still overrides the default; that is not modelled.
+
 ## Running it
 
 ```sh
