@@ -801,7 +801,7 @@ ledger/common	ValidatePlutusScriptResult	modelled	UTXO rule helpers: IsValid res
 ledger/common	ValidatePlutusScriptsWellFormed	vectors	Script well-formedness and native constructor support
 ledger/common	ValidatePoolMargin	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	ValidatePoolMetadataForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	ValidatePoolPledge	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	ValidatePoolPledge	modelled	Reward update arithmetic
 ledger/common	ValidatePoolRegistrationOwners	gap	Duplicate certificate/pool-owner detection
 ledger/common	ValidatePoolRelaysForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	ValidatePreConwayCertificateTypes	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)

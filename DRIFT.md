@@ -1063,6 +1063,17 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`9675856a`, cell walk `bdba9c8b`), no PR yet. `TestCalculateAdaPotsReferenceTable` (5 cells) and `TestCalculateRewardsReferenceTable` (2) fail on main. Model `specs/ledger-rewards`. Production impact: Dingo computes rewards in its own `ledger/rewards` package; gOuroboros's calculator is reached through `RewardService`, the ouroboros-mock callback and Dingo's conformance state provider. The fix adds `DesiredPools` (required), `DecentralizationRate` and `RewardSnapshot.TotalStake`; callers that leave `DesiredPools` zero now get an error
 
+### L18
+
+**Repeated pool owner in the pledge check** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: a pool's owners are a set (`sppOwners :: Set (KeyHash Staking)`), and the self-delegated owners' stake is summed over that set before the pledge check. gOuroboros main: `ValidatePoolPledge` sums once per `PoolOwners` list entry, so an owner listed twice counts twice and can meet a pledge the reference rejects.
+- **Spec.** Shelley formal spec: pool owners are a set
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/State/StakePool.hs` 494, `.../State/SnapShots.hs` 230-235, `eras/shelley/impl/src/Cardano/Ledger/Shelley/Rewards.hs` 256
+- **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/rewards.go` `ValidatePoolPledge`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/ledger-rewards-reference` (`203f3624`, same file as L17), no PR yet. `TestValidatePoolPledgeCountsEachOwnerOnce` fails 2 of 6 cells on the parent commit. Model `specs/ledger-rewards` `RewardPotsOwnerListBug.cfg`. No caller outside gOuroboros tests (workspace search)
+
 ## Pipeline
 
 ### P1
