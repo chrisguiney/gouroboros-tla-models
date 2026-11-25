@@ -98,7 +98,10 @@ closes. A PR can draw on more than one model.
 | `ledger-governance` | #3323 (rules-only conformance replay, network-id and return-address tables) | #3311 | open |
 | `ledger-conway-dijkstra` (`SubCerts`, `SubGov`, `SubGuards`) | #3324 (sub-transaction cells) | #3312 | open |
 | coverage gaps `cbor`, `ledger/common` | #3325 (cbor reference; depends on #3284), #3326 (ledger/common reference; depends on #3279) | #3313, #3314 | open |
-| held | `fix/dmq-ttl-reference-bounds` (N53: no Bug config for the `IsValidAt` mempool expiry), `fix/dmq-payload-preserved-bytes` (N57: no Bug config), `fix/leios-vote-shape` (L22: no model), `test/consensus-nonce-model` (Bytes path describes pre-756a9a89 main) | | local |
+| `dmq` (`MempoolExpiry`, `MessageValidity`, N53) | #3331 (expiry bounds and `IsValidAt` as dmq-node) | #3327 | open |
+| `dmq` (`MessagePayloadBytes`, N57) | #3332 (payload bytes hashed as received) | #3328 | open |
+| `ledger-leios` (`LeiosVoteShape`, L22) | #3333 (CIP-0164 vote shape; breaking) | #3329 | open |
+| `consensus-nonce` (`EpochNonce`, GoBytes "Family") | #3334 (epoch nonce over whole chains) | #3330 | open |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 
