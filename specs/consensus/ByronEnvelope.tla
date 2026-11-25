@@ -23,15 +23,21 @@
 (*        *ByronEpochBoundaryBlock counts as a main block.                *)
 (*   [G2] The fix: an EBB predecessor counts as an EBB whether it is      *)
 (*        passed as a header or as a block.                               *)
+(*   [G3] gOuroboros PR #3111 at 08b86c41, consensus/byron/validate.go    *)
+(*        validatePrevHash: with PrevIsOrigin set it still requires a     *)
+(*        PrevHeaderHash when PrevBlockNumber is nonzero, though the      *)
+(*        PrevIsOrigin doc says the Prev fields are ignored.              *)
+(*   [G4] The fix: after Origin the Prev fields are not read.             *)
 (* Hash and protocol-magic checks are out of scope here; the Shelley      *)
 (* envelope model covers the predecessor hash after Origin.               *)
 (***************************************************************************)
 EXTENDS Naturals
 
 CONSTANTS
-    Mutation    \* "none" ([G2]) or "GoEBBHeaderOnly" ([G1])
+    Mutation    \* "none" ([G2][G4]), "GoEBBHeaderOnly" ([G1]) or
+                \* "GoOriginReadsPrev" ([G3])
 
-ASSUME Mutation \in {"none", "GoEBBHeaderOnly"}
+ASSUME Mutation \in {"none", "GoEBBHeaderOnly", "GoOriginReadsPrev"}
 
 \* In English: the slot and block number of the predecessor, when there is
 \* one.
@@ -40,13 +46,17 @@ PrevSlot == 20
 PrevNo   == 5
 
 \* In English: every case the table checks: the predecessor's kind and how
-\* it is passed, the header's kind, its slot and its block number.
+\* it is passed, the header's kind, its slot and its block number, and
+\* whether the caller left a nonzero PrevBlockNumber with no
+\* PrevHeaderHash ("stale"), which only Origin allows.
 \* Literally: "Cases is defined as the set of records whose field prev is
 \*   "Origin", "Main" or "EBB", whose field repr is "Header" or "Block",
-\*   whose field cur is "Main" or "EBB", whose field slot is 19, 20 or 21, and
-\*   whose field no is 0, 4, 5 or 6."
+\*   whose field cur is "Main" or "EBB", whose field slot is 19, 20 or 21,
+\*   whose field no is 0, 4, 5 or 6, and whose field stale is TRUE or
+\*   FALSE." BOOLEAN is the set {TRUE, FALSE}.
 Cases == [prev : {"Origin", "Main", "EBB"}, repr : {"Header", "Block"},
-          cur : {"Main", "EBB"}, slot : {19, 20, 21}, no : {0, 4, 5, 6}]
+          cur : {"Main", "EBB"}, slot : {19, 20, 21}, no : {0, 4, 5, 6},
+          stale : BOOLEAN]
 
 \* In English: the reference's verdict, given whether the predecessor is an
 \* EBB [R8][B1]. After Origin, block 0 at any slot.
@@ -73,10 +83,20 @@ RefOK(c) == EnvOK(c, c.prev = "EBB")
 GoPrevIsEBB(c) ==
     c.prev = "EBB" /\ (c.repr = "Header" \/ Mutation = "none")
 
+\* In English: gOuroboros' predecessor-field check. [G3] refuses a first
+\* header whose caller left a stale PrevBlockNumber; [G4] ignores the Prev
+\* fields after Origin, as the reference has no previous header there [R8].
+\* Literally: "GoPrevFieldsOK of c is defined as: not (c's prev equals
+\*   "Origin" and c's stale is true and Mutation equals
+\*   "GoOriginReadsPrev")."
+GoPrevFieldsOK(c) ==
+    ~(c.prev = "Origin" /\ c.stale /\ Mutation = "GoOriginReadsPrev")
+
 \* In English: gOuroboros' verdict: the reference rules applied to its own
-\* classification of the predecessor.
-\* Literally: "GoOK of c is defined as EnvOK of c and GoPrevIsEBB of c."
-GoOK(c) == EnvOK(c, GoPrevIsEBB(c))
+\* classification of the predecessor, and its predecessor-field check.
+\* Literally: "GoOK of c is defined as EnvOK of c and GoPrevIsEBB of c, and
+\*   GoPrevFieldsOK of c."
+GoOK(c) == EnvOK(c, GoPrevIsEBB(c)) /\ GoPrevFieldsOK(c)
 
 \* The state is one case.
 VARIABLE cs
