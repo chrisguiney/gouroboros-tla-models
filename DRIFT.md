@@ -132,6 +132,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L11](#l11) | ledger | Node-to-client CertRB with inlined EB transactions | none | Accepts a certifying block whose endorser-block transactions are inlined, over node-to-client only | CertRB carries no transactions on chain | conforms | Local delivery only; the on-chain body is unchanged |
 | [L13](#l13) | ledger | Conway vote naming an enacted purpose root | Refused, `GovActionsDoNotExist`: votes resolve against the live proposals only | main: accepted when the caller's `GovActionById` returns the root, which the contract allowed and Dingo does; PR: the contract excludes roots | A vote names a proposal in the governance state | does not conform → conforms | Open PR #3155. Dingo's `GovActionById` must stop returning the current root |
 | [L14](#l14) | ledger | Proposed protocol version width in a classic parameter update | Minor is `Word32`; major bounded per era | main: both 16 bits, so a minor above 65,535 is refused; branch: minor 32 bits | Silent on widths | does not conform → conforms | Local branch `fix/ledger-pparam-update-minor-width` |
+| [L15](#l15) | ledger | Zero-coin output in a PlutusV2/V3 TxInfo | `transValue` always writes the ada entry, `{"": {"": 0}}` at zero | main: Shelley, Mary, Alonzo and Babbage `ToPlutusData` drop the ada entry when the coin is 0; branch: kept | Silent | does not conform → conforms | Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. 25 of the 26 PlutusV3 instances in cardano-ledger's Conway `translations.cbor` failed before the fix. A valid transaction cannot reach it today (every output meets the minimum UTxO) |
+| [L16](#l16) | ledger | PlutusV1 TxInfo with a redeemer that points at nothing | Ignored: a V1 TxInfo carries no redeemers | `NewTxInfoV1FromTransaction` resolves every redeemer and returns an error | n/a | conforms (stricter) | Phase-1 rejects such a transaction (extraneous redeemer) before any script runs, so the outcome is the same. The golden test clears the Alonzo generator's arbitrary redeemers for V1 |
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
@@ -1028,6 +1030,28 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Verdict.** does not conform → conforms (minor); major: conforms (outcome)
 - **Status.** Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet. Allegra shares Shelley's update type, so an era-exact major bound would need its own type
 
+### L15
+
+**Zero-coin output in a PlutusV2/V3 TxInfo** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: an output value is `transValue (MaryValue c m) = transCoinToValue c <> transMultiAsset m`, and `transCoinToValue` is `PV1.singleton adaSymbol adaToken c` for any `c`, so a zero coin still gives an ada entry of 0. gOuroboros main: `ShelleyTransactionOutput`, `MaryTransactionOutput`, `AlonzoTransactionOutput` and `BabbageTransactionOutput` `ToPlutusData` write the ada entry only when the coin is positive. These are the TxOut encodings of a PlutusV3 TxInfo's inputs, reference inputs and outputs (V1/V2 go through `WithZeroAdaAsset`, which was already right).
+- **Spec.** Alonzo formal spec `txinfo.tex` (`transValue`); silent on zero
+- **Reference.** cardano-ledger `1210d37fe6bd` `libs/cardano-ledger-core/src/Cardano/Ledger/Plutus/TxInfo.hs` 186-187, `eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Plutus/TxInfo.hs` 417-418, `eras/babbage/impl/src/Cardano/Ledger/Babbage/TxInfo.hs` 158; golden `eras/conway/impl/golden/translations.cbor`
+- **gOuroboros.** gOuroboros `cc300dc8` `ledger/shelley/shelley.go` 858, `ledger/mary/mary.go` 713, `ledger/alonzo/alonzo.go` 641, `ledger/babbage/babbage.go` 1080
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet; test `TestTxOutPlutusDataKeepsZeroAda` fails on main for all four eras. Pinned by `TestTxInfoMatchesLedgerTranslationGoldens` on `test/script-context-reference` (`3b3be7c0`, stacked on the fix). Unreachable on chain today: the minimum-UTxO rule keeps every output's coin positive
+
+### L16
+
+**PlutusV1 TxInfo with a redeemer that points at nothing** (kind 3: stricter, same outcome)
+
+- **What differs.** Reference: the Alonzo PlutusV1 `toPlutusTxInfo` never reads redeemers, since `PlutusLedgerApi.V1.Contexts.TxInfo` has no redeemer field. gOuroboros: `NewTxInfoV1FromTransaction` resolves every redeemer's purpose and fails with "does not match any script purpose" on a dangling one.
+- **Spec.** n/a
+- **Reference.** cardano-ledger `1210d37fe6bd` `eras/alonzo/impl/src/Cardano/Ledger/Alonzo/Plutus/TxInfo.hs` 137-165; plutus `bdc12f105a98` `plutus-ledger-api/src/PlutusLedgerApi/V1/Contexts.hs` 100-111
+- **gOuroboros.** gOuroboros `cc300dc8` `ledger/common/script/context.go` 285, `ledger/common/script/purpose.go` 39
+- **Verdict.** conforms (stricter)
+- **Status.** Recorded. The UTXOW extraneous-redeemer rule rejects such a transaction before phase 2, so no block or mempool outcome differs. 98 of the 100 Alonzo golden instances carry such redeemers; the golden test clears them for V1
+
 ## Pipeline
 
 ### P1
@@ -1143,6 +1167,7 @@ No pull request yet (decide whether and how to fix):
 - **L6** Byron `maxTxSize`. Open, no branch. Adding it changes the API (`VerifyConfig` or `ValidateAgainstUtxo`).
 - **L9** Leios committee with fewer pools than `Nc`. Fixed on local branch `fix/leios-committee-size` (`fec72765`), no PR yet. Hits the prototype testnet (committee size 900).
 - **L14** Proposed protocol minor version above 16 bits. Fixed on local branch `fix/ledger-pparam-update-minor-width` (`5b42b5aa`), no PR yet.
+- **L15** Zero-coin output in a PlutusV2/V3 TxInfo. Fixed on local branch `fix/script-context-zero-ada-output` (`51c2b6f3`), no PR yet. Unreachable on chain today.
 
 Fixed by an open pull request (decide by reviewing and merging it):
 

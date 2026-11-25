@@ -412,7 +412,7 @@ ledger/common	Address.StakeAddress	vectors	Address parse/encode, accessors, poin
 ledger/common	Address.StakeCredential	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	Address.StakeKeyHash	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	Address.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	Address.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Address.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	Address.UnmarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	Address.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	AlonzoAuxiliaryData.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
@@ -479,9 +479,9 @@ ledger/common	CompareRedeemerKeys	vectors	Script integrity hash encoding (langua
 ledger/common	ComposeUtxoValidationRules	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	ConsumedReferenceScriptSizePerBlock	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
 ledger/common	ConvertToUtxorpcCardanoCostModels	gap	UTxO RPC conversions
-ledger/common	CostModelsToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	CostModelsToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	Credential.Hash	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
-ledger/common	Credential.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Credential.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	Credential.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	Credential.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	Credential.Utxorpc	gap	UTxO RPC conversions
@@ -503,13 +503,13 @@ ledger/common	DijkstraLeiosCertificateMessageFor	vectors	Leios vote/certificate/
 ledger/common	DRepDelegationStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
 ledger/common	Drep.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	Drep.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	Drep.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Drep.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	Drep.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	Drep.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	Drep.Utxorpc	gap	UTxO RPC conversions
 ledger/common	DuplicateLogicalMapKeyError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
 ledger/common	EncodeLangViews	vectors	Script integrity hash encoding (language views, redeemer key order)
-ledger/common	EncodeRewardAccountMap	gap	Reward-account ordering and withdrawal map encoding
+ledger/common	EncodeRewardAccountMap	vectors	Reward-account ordering and withdrawal map encoding
 ledger/common	EncodeTransactionBodyWithValidityIntervalUpperBound	vectors	Tx body id and validity-upper-bound re-encoding
 ledger/common	EpochNonceFromNonces	modelled	Nonce combination, rolling and epoch nonce
 ledger/common	EraById	gap	MultiAsset accessors, era registry, AddInt64Checked
@@ -533,7 +533,7 @@ ledger/common	GovActionId.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genes
 ledger/common	GovAnchor.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	GovAnchor.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	GovAnchor.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	HardForkInitiationGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	HardForkInitiationGovAction.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	InstantaneousRewardsTotalsFor	modelled	BlockLedgerState MIR totals within a block
 ledger/common	IssuerVkey.Hash	vectors	Blake2b hash helpers, pool id from issuer vkey
 ledger/common	IssuerVkey.PoolId	vectors	Blake2b hash helpers, pool id from issuer vkey
@@ -575,7 +575,7 @@ ledger/common	MultiAsset.MarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis 
 ledger/common	MultiAsset.Policies	gap	MultiAsset accessors, era registry, AddInt64Checked
 ledger/common	MultiAsset.RangeUnordered	gap	MultiAsset accessors, era registry, AddInt64Checked
 ledger/common	MultiAsset.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	MultiAsset.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	MultiAsset.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	MultiAsset.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	MultiAsset.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	MultiAsset.ValidateMintQuantities	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
@@ -594,7 +594,7 @@ ledger/common	NewBlake2b224Checked	vectors	Blake2b hash helpers, pool id from is
 ledger/common	NewBlake2b256Checked	vectors	Blake2b hash helpers, pool id from issuer vkey
 ledger/common	NewByronAddressFromParts	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	NewByronAddressRedeem	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
-ledger/common	NewConstitutionGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	NewConstitutionGovAction.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	NewConstitutionGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	NewGenesisRat	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	NewGovActionId	gap	Voting procedure mutators and gov constructors
@@ -607,7 +607,7 @@ ledger/common	NewScriptHashFromBech32	gap	JSON/text/bech32 codecs (incl. genesis
 ledger/common	NewStreamingBlockDecoder	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
 ledger/common	NewTreasuryWithdrawalGovAction	gap	Voting procedure mutators and gov constructors
 ledger/common	NewUpdateCommitteeGovAction	gap	Voting procedure mutators and gov constructors
-ledger/common	NoConfidenceGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	NoConfidenceGovAction.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	NonceFromPraosVRF	modelled	Nonce combination, rolling and epoch nonce
 ledger/common	NonceFromTPraosVRF	modelled	Nonce combination, rolling and epoch nonce
 ledger/common	Nonce.MarshalCBOR	vectors	Nonce CBOR/JSON codecs
@@ -674,12 +674,12 @@ ledger/common/script	EvaluatePlutusScripts	vectors	EvaluatePlutusScripts: phase-
 ledger/common/script	NativeScriptsToEvaluate	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	NewCachedTxInfo	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	NewNativeScriptEnv	modelled	Needed scripts, script purposes, native-script env, required redeemers
-ledger/common/script	NewTxInfoV1FromTransaction	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	NewTxInfoV2FromTransaction	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	NewTxInfoV3FromTransaction	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewTxInfoV1FromTransaction	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewTxInfoV2FromTransaction	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewTxInfoV3FromTransaction	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	NewTxScriptView	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	NewTxScriptViewSkippingUnresolved	modelled	Needed scripts, script purposes, native-script env, required redeemers
-ledger/common/script	Option.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	Option.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	PlutusWitnessScripts	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common	ScriptRef.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	ScriptRef.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
@@ -688,27 +688,27 @@ ledger/common/script	ScriptPurposeCertifying.ScriptHash	modelled	Needed scripts,
 ledger/common/script	ScriptPurposeGuarding.ScriptHash	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	ScriptPurposeProposing.ScriptHash	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	ScriptPurposes	modelled	Needed scripts, script purposes, native-script env, required redeemers
-ledger/common/script	SortInputs	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	SortInputs	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	SortVoters	modelled	Needed scripts, script purposes, native-script env, required redeemers
-ledger/common/script	TimeRange.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	ToPairs	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	TxInfoV1.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	TimeRange.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	ToPairs	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	TxInfoV1.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	TxScriptView.AllResolvedInputs	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	TxScriptView.NeedsAny	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	TxScriptView.UsedPlutusVersions	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	ValidatePlutusV3ReferenceInputs	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common/script	ValidateRequiredRedeemers	modelled	Needed scripts, script purposes, native-script env, required redeemers
 ledger/common/script	VoterUsesScriptCredential	modelled	Needed scripts, script purposes, native-script env, required redeemers
-ledger/common/script	WithOptionDatum.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	WithPartialCertificates.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	WithWrappedStakeCredential.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	WithWrappedTransactionId.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
-ledger/common/script	WithZeroAdaAsset.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithOptionDatum.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithPartialCertificates.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithWrappedStakeCredential.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithWrappedTransactionId.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithZeroAdaAsset.ToPlutusData	vectors	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
 ledger/common	ShelleyAuxiliaryData.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
 ledger/common	ShelleyMaAuxiliaryData.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
 ledger/common	ShortLex	vectors	Script integrity hash encoding (language views, redeemer key order)
-ledger/common	SortRewardAccountAddresses	gap	Reward-account ordering and withdrawal map encoding
+ledger/common	SortRewardAccountAddresses	vectors	Reward-account ordering and withdrawal map encoding
 ledger/common	StakeCredentialDepositOrDefault	modelled	Pool deposit due and stake deposit refund
 ledger/common	StakeCredentialDepositStateFor	modelled	BlockLedgerState account/pool fold and queries
 ledger/common	StakeDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
@@ -748,7 +748,7 @@ ledger/common	TransactionValidityFlags	modelled	Block body counts, validity flag
 ledger/common	TransactionValidityIntervalLowerBound	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	TransactionValidityIntervalUpperBound	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
 ledger/common	TreasuryWithdrawalGovAction.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
-ledger/common	TreasuryWithdrawalGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	TreasuryWithdrawalGovAction.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	TreasuryWithdrawalGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	TxComponent.String	gap	Error()/Unwrap/WithDiagnostic string methods
 ledger/common	TxDecodeError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
@@ -757,7 +757,7 @@ ledger/common	TxDecodeError.WithDiagnostic	gap	Error()/Unwrap/WithDiagnostic str
 ledger/common	TxSize	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/common	UnwrapLedgerState	caller-contract	UnwrapLedgerState capability lookup
 ledger/common	UpdateCommitteeGovAction.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
-ledger/common	UpdateCommitteeGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	UpdateCommitteeGovAction.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	UpdateCommitteeGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	UpdateCommitteeGovAction.Validate	gap	UpdateCommitteeGovAction.Validate
 ledger/common	UpdateDrepCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
@@ -828,10 +828,10 @@ ledger/common	VoteRegistrationDelegationCertificate.UnmarshalCBOR	vectors	Ledger
 ledger/common	VoteRegistrationDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	Voter.MarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
 ledger/common	Voter.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	Voter.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Voter.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	Voter.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	Voter.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
-ledger/common	Vote.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Vote.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	VotingProcedures.AddOrReplace	gap	Voting procedure mutators and gov constructors
 ledger/common	VotingProcedures.Clone	gap	Voting procedure mutators and gov constructors
 ledger/common	VotingProcedures.LookupGovActionId	gap	Voting procedure mutators and gov constructors
@@ -855,7 +855,7 @@ ledger/conway	ConwayParameterChangeGovAction.GetPolicyHash	gap	Conway gov helper
 ledger/conway	ConwayParameterChangeGovAction.PreviousGovActionId	gap	Conway gov helpers and constructors
 ledger/conway	ConwayParameterChangeGovAction.ProtocolParamUpdateUtxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/conway	ConwayParameterChangeGovAction.SecurityGroupFields	gap	Conway pparams application and security groups
-ledger/conway	ConwayParameterChangeGovAction.ToPlutusData	gap	Conway script-context translation of governance
+ledger/conway	ConwayParameterChangeGovAction.ToPlutusData	vectors	Conway script-context translation of governance
 ledger/conway	ConwayParameterChangeGovAction.UnmarshalCBOR	vectors	conway codecs
 ledger/conway	ConwayProposalProcedure.UnmarshalCBOR	vectors	conway codecs
 ledger/conway	ConwayProtocolParameters.ApplyUpdate	vectors	Protocol parameter update keys and application (reference eraPParams)
@@ -864,7 +864,7 @@ ledger/conway	ConwayProtocolParameters.UpdateFromGenesis	gap	Conway pparams appl
 ledger/conway	ConwayProtocolParameters.Update	vectors	Protocol parameter update keys and application (reference eraPParams)
 ledger/conway	ConwayProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/conway	ConwayProtocolParameterUpdate.SecurityGroupFields	gap	Conway pparams application and security groups
-ledger/conway	ConwayProtocolParameterUpdate.ToPlutusData	gap	Conway script-context translation of governance
+ledger/conway	ConwayProtocolParameterUpdate.ToPlutusData	vectors	Conway script-context translation of governance
 ledger/conway	ConwayProtocolParameterUpdate.UnmarshalCBOR	vectors	conway codecs
 ledger/conway	ConwayProtocolParameterUpdate.Utxorpc	gap	UTxO RPC / JSON / String conversions
 ledger/conway	ConwayRedeemers.Indexes	vectors	Conway rules exercised by Blueprint vectors
