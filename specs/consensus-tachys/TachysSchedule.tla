@@ -78,6 +78,8 @@ CONSTANTS
     GoZero,     \* "Reject": gOuroboros main rejects a zero-stake pool;
                 \* "Accept": a zero-stake pool gets an empty interval
     Mutation    \* "none", or a deliberate bug to prove an invariant can fail
+                \* (including "eligibilityAfterVrfOnly", the order before the
+                \* reference validation order)
 
 \* In English: "D is a positive number and pool IDs are numbers."
 \* Literally: "it is assumed that D is a member of the set of naturals
@@ -338,6 +340,21 @@ GoValidate(n, s, p, c) ==
     /\ c.ocert                                              \* opcert (9-10)
     /\ c.vrfKey                                             \* registered VRF key
 
+\* In English: "Whether ValidateHeader reports that the issuer is not the
+\* scheduled Tachys leader. The schedule is part of the eligibility check,
+\* and in the reference header validation order eligibility runs only after
+\* both the VRF proof and the registered VRF key pass (model
+\* `consensus-eras`, HeaderValidation.tla). The "eligibilityAfterVrfOnly"
+\* mutation is the order before that: eligibility after the VRF proof
+\* alone."
+\* Literally: "GoReportsUnscheduled of n, s, p and c is defined as: (c's vrf,
+\*   and (Mutation equals "eligibilityAfterVrfOnly" or c's vrfKey)), and
+\*   GoAuthorized of n, s and p is not true."
+GoReportsUnscheduled(n, s, p, c) ==
+    /\ c.vrf                                                \* the VRF proof passed
+    /\ Mutation = "eligibilityAfterVrfOnly" \/ c.vrfKey     \* and the registered key
+    /\ ~GoAuthorized(n, s, p)                               \* and p is not scheduled
+
 \* In English: "IsTachysSlotLeader: the producer forges exactly when the
 \* schedule names it. The "forgePraos" mutation also asks the Praos
 \* lottery."
@@ -504,6 +521,21 @@ ValidatorExact ==
         GoValidate(n, s, p, c) <=>
             /\ c.vrf /\ c.kes /\ c.ocert /\ c.vrfKey        \* Praos authentication
             /\ p = SpecLeader(hash[<<n, s>>])               \* the scheduled pool
+
+\* In English: "The validator reports "not the scheduled leader" exactly
+\* when the VRF proof and the registered VRF key both pass and the issuer
+\* is not the scheduled pool. This is the expectation the Go table test
+\* checks for every combination of header checks."
+\* Literally: "UnscheduledReportedExact is defined as: if sel's ok then for
+\*   all n in Nonces, s in Slots, p in Pools and c in Crypto,
+\*   GoReportsUnscheduled of n, s, p and c if and only if (c's vrf and c's
+\*   vrfKey and p does not equal SpecLeader of hash of the tuple of n and
+\*   s)."
+UnscheduledReportedExact ==
+    sel.ok => \A n \in Nonces, s \in Slots, p \in Pools, c \in Crypto :
+        GoReportsUnscheduled(n, s, p, c) <=>
+            /\ c.vrf /\ c.vrfKey                            \* eligibility runs
+            /\ p /= SpecLeader(hash[<<n, s>>])              \* and p is not scheduled
 
 \* In English: "A producer forges exactly when its header would be
 \* authorised [S7]."
