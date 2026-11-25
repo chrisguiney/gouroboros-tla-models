@@ -102,6 +102,10 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N45](#n45) | network | Leios limits and timeouts | LeiosNotify reply 1,536 bytes / 16 votes; LeiosFetch `Block` and `BlockTxs` 60 s | LeiosNotify 65,535 bytes / 1,000 votes; LeiosFetch block states untimed (the caller's context bounds them); LeiosVotes count 1-1,000 | Silent on limits; CIP's request count unbounded | conforms (implementation choice) | Recorded (model `leios-peras`) |
 | [N46](#n46) | network | LeiosFetch extra messages (tags 10-14) | Only `Block` and `BlockTxs` (tags 0-4) | Adds votes and block-range requests | CIP-0164 has its own message set | conforms (implementation choice) | gOuroboros extension. A reference peer never sends them; sent to a reference server they fail to decode, so only use them with peers that know them |
 | [N47](#n47) | network | Peras votes (ObjectDiffusion): await, server idle, timeouts | `MsgServerIdle` [6], `MsgAwaitReply` [7], a `MustReply` state; client waits 10 s, then 60 s after await | main: no await messages, no `MustReply`, one 5 s timeout; PR: as the reference, server awaits then replies or idles | CDDL defines tags 6 and 7 | does not conform → conforms | Open PR #3165. The network spec itself only lists `NodeToNodeV_17` as "Experimental, support Peras mini-protocols" (line 2231) |
+| [N48](#n48) | network | Local-state-query era filter sets | `toEraCBOR @era`: plain array before Conway (a tag 258 is refused), tag 258 from Conway | main: `GetFilteredDelegationsAndRewardAccounts` always tagged, so refused before Conway; UTxO address and input filters never tagged; a nil filter sent as CBOR null; branch: as the reference | CDDL silent; the era's ledger encoding | does not conform → conforms | Fixed on local branch `fix/localstatequery-era-set-encoding` (`fb802943`), no PR yet |
+| [N49](#n49) | network | Local-state-query `GetAccountState` and `GetGovState` before Conway | Both decoded and answered in every Shelley-based era | main: the client refuses both before Conway; branch: `GetAccountState` sent from Shelley; `GetGovState` still Conway only (its result type is Conway's) | Silent | does not conform → conforms (`GetAccountState`) | `GetAccountState` fixed on local branch `fix/localstatequery-account-state-all-eras` (`ddae722e`), no PR yet; `GetGovState` recorded |
+| [N50](#n50) | network | Local-state-query `GetFuturePParams` (Shelley query 33) | Decoded and answered from Conway | main: the server fails with "unknown Block query type: 33"; no client call; branch: decoded and handed to the query callback | Silent | does not conform → conforms (server decode) | Fixed on local branch `fix/localstatequery-decode-future-pparams` (`dd131af9`), no PR yet; client call not added |
+| [N51](#n51) | network | Local-state-query queries gOuroboros does not decode or re-encode exactly | `QueryAnytime` (`GetEraStart`) and Byron's own queries decoded; era history written as an indefinite list; UTxO filters keep their tag | `QueryAnytime` and Byron queries fail to decode; decoded UTxO filters re-encode without the tag; era history has no list encoder (each era summary re-encodes exactly) | Silent | does not conform (decode); conforms (re-encode, both forms decode) | Recorded; pinned by `reference_golden_test.go` on `test/localstatequery-reference` |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -683,6 +687,50 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/perasvotes/messages.go` 26-38, `perasvotes.go` 38; PR #3165 head `55c7cdf95` `messages.go` 39-44, `perasvotes.go` 40-50
 - **Verdict.** does not conform → conforms
 - **Status.** Open PR #3165. The network spec itself only lists `NodeToNodeV_17` as "Experimental, support Peras mini-protocols" (line 2231)
+
+### N48
+
+**Local-state-query era filter sets** (kind 1: branch moves to the reference)
+
+- **What differs.** Reference: `GetUTxOByAddress`, `GetFilteredDelegationsAndRewardAccounts` and `GetUTxOByTxIn` carry their set with the era's own encoding: a plain array before Conway, where the decoder refuses tag 258, and tag 258 from Conway. gOuroboros: main: the delegations filter always tagged, so a node refuses the query in Shelley through Babbage; the UTxO filters never tagged; a nil filter sent as CBOR null; branch: as the reference.
+- **Spec.** No CDDL for queries; the era's ledger encoding applies (cardano-ledger `1210d37f` `libs/cardano-ledger-binary/src/Cardano/Ledger/Binary/Decoding/Decoder.hs` 943-952, `decodeSet`: tag 258 only below version 2 and allowed from 9)
+- **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus-cardano/src/shelley/Ouroboros/Consensus/Shelley/Ledger/Query.hs` 742-761 (encode, `LC.toEraCBOR @era`), 842-850 (decode, `LC.fromEraCBOR @era`); goldens `golden/cardano/QueryVersion3/CardanoNodeToClientVersion19/Query_<Era>_GetUTxOByAddress`, `_GetFilteredDelegationsAndRewardAccounts`, `_GetUTxOByTxIn`
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/client.go` 594, 674, 892; branch `fix/localstatequery-era-set-encoding` `fb802943` `eraFilterSet`, test `TestEraFilterSetEncoding` (23 of 35 cells fail before the fix)
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch, no PR yet
+
+### N49
+
+**Local-state-query `GetAccountState` and `GetGovState` before Conway** (kind 1 for `GetAccountState`; kind 2 for `GetGovState`)
+
+- **What differs.** Reference: both decoded and answered in every Shelley-based era. gOuroboros: main: the client refuses both before Conway; branch: `GetAccountState` sent from Shelley. `GetGovState` stays Conway only because `GovStateResult` decodes the Conway governance state.
+- **Spec.** Silent
+- **Reference.** ouroboros-consensus `ec239d57f618` `.../Shelley/Ledger/Query.hs` 411-412 (`queryChainAccountState`), 498, 503 (`blockQueryIsSupportedOnVersion`), 872, 882 (decoded without `requireCG`); goldens `Query_<Era>_GetAccountState`, `Query_<Era>_GetGovState` for Shelley to Dijkstra
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/client.go` 941-945, 1341-1345; branch `fix/localstatequery-account-state-all-eras` `ddae722e`, test `TestGetAccountStateEveryShelleyEra` (5 eras fail before the fix)
+- **Verdict.** does not conform → conforms (`GetAccountState`); `GetGovState` a missing feature
+- **Status.** `GetAccountState` fixed on local branch, no PR yet; `GetGovState` recorded
+
+### N50
+
+**Local-state-query `GetFuturePParams` (Shelley query 33)** (kind 1: branch moves to the reference)
+
+- **What differs.** Reference: decoded and answered from Conway. gOuroboros: main: a server fails to decode it ("unknown Block query type: 33"); there is no client call. Branch: decoded as `ShelleyFuturePParamsQuery` and handed to the query callback.
+- **Spec.** Silent
+- **Reference.** ouroboros-consensus `ec239d57f618` `.../Shelley/Ledger/Query.hs` 419, 507, 886; goldens `Query_Conway_GetFuturePParams`, `Query_Dijkstra_GetFuturePParams`
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/queries.go` 81, 244; branch `fix/localstatequery-decode-future-pparams` `dd131af9`, test `TestDecodeGetFuturePParamsQuery` (both cells fail before the fix)
+- **Verdict.** does not conform → conforms (server decode)
+- **Status.** Fixed on local branch, no PR yet; a client call is not added
+
+### N51
+
+**Local-state-query queries gOuroboros does not decode or re-encode exactly** (kind 2: recorded)
+
+- **What differs.** Reference: the hard-fork combinator's `QueryAnytime` (`GetEraStart`) and Byron's own queries are decoded; the era history (`GetInterpreter` result) is written as an indefinite-length list; UTxO address and input filters keep tag 258 from Conway. gOuroboros: `BlockQuery` knows only `QueryIfCurrent` and the hard-fork queries, so `QueryAnytime` and Byron queries fail to decode; decoded UTxO filters are plain slices and re-encode without the tag; the era history reply has no list encoder (each era summary re-encodes byte for byte).
+- **Spec.** Silent
+- **Reference.** ouroboros-consensus `ec239d57f618` `ouroboros-consensus/src/ouroboros-consensus/Ouroboros/Consensus/HardFork/Combinator/Ledger/Query.hs` 106-108 (`QueryAnytime`); goldens `Query_AnytimeByron`, `Query_AnytimeShelley`, `Query_Byron`, `Result_HardFork`
+- **gOuroboros.** gOuroboros `62fa36d1` `protocol/localstatequery/queries.go` 175-199; pinned by `reference_golden_test.go` on `test/localstatequery-reference` `925d1263`
+- **Verdict.** does not conform (decode); conforms (re-encode: both forms decode)
+- **Status.** Recorded
 
 ## Consensus
 
