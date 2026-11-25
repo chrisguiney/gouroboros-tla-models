@@ -312,6 +312,80 @@ GoCom(b) ==
            ELSE CRun(lv, C0, FALSE).ok
 
 -----------------------------------------------------------------------------
+(* Family 3: Dijkstra-only proposal checks, at any level [V3].             *)
+
+\* A ParameterChange proposal's update must be well formed (cardano-ledger
+\* 1210d37fe6bd eras/dijkstra/.../PParams.hs 1150-1172 ppuWellFormed,
+\* reached through Conway Gov.hs actionWellFormed): not empty, no set
+\* number among maxTxSize, nOpt, eMax and coinsPerUTxOByte zero, and a set
+\* pledge leverage cap at least 1 (no cap is allowed). An UpdateCommittee
+\* proposal may not add a member whose term ends at or before the current
+\* epoch (Gov.hs ExpirationEpochTooSmall). Both run in GOV and SUBGOV, so
+\* for a valid batch only, at whichever level carries the proposal.
+\* In English: a field of an update: unset, set to zero, or set to a good
+\* value.
+\* Literally: "Field is defined as the set containing "unset", "zero" and
+\*   "ok"."
+Field == {"unset", "zero", "ok"}
+
+\* In English: every update of family 3.
+\* Literally: "Upds is defined as the set of records whose maxTx, nOpt, eMax
+\*   and coins are members of Field, and lev a member of the set containing
+\*   "unset", "lt1", "ge1" and "nocap"."
+Upds == [maxTx : Field, nOpt : Field, eMax : Field, coins : Field,
+         lev : {"unset", "lt1", "ge1", "nocap"}]
+
+\* In English: every batch of family 3: a parameter change or a committee
+\* update at the top or in a sub-transaction.
+\* Literally: "PBatches is defined as the set of records whose valid is a
+\*   member of BOOLEAN, at a member of the set containing "top" and "sub",
+\*   upd a member of Upds, and exp a member of the set containing "none",
+\*   "past", "now" and "future"."
+PBatches == [valid : BOOLEAN, at : {"top", "sub"}, upd : Upds,
+             exp : {"none", "past", "now", "future"}]
+
+\* In English: the numeric fields of an update.
+\* Literally: "Nums of u is defined as the set containing u's maxTx, u's
+\*   nOpt, u's eMax and u's coins."
+Nums(u) == {u.maxTx, u.nOpt, u.eMax, u.coins}
+
+\* In English: the reference's well-formedness of an update.
+\* Literally: "SpecWF of u is defined as: (Nums of u does not equal the set
+\*   containing "unset", or u's lev does not equal "unset"), and "zero" is not
+\*   a member of Nums of u, and u's lev does not equal "lt1"."
+SpecWF(u) == /\ Nums(u) # {"unset"} \/ u.lev # "unset"
+             /\ "zero" \notin Nums(u)
+             /\ u.lev # "lt1"
+
+\* In English: the reference's decision: a valid batch's parameter change
+\* is well formed and its committee update, if any, adds only members whose
+\* term ends after the current epoch. (exp "none" stands for a parameter
+\* change; any other exp for a committee update, whose upd is ignored.)
+\* Literally: "SpecProp of b is defined as: if b's valid then (if b's exp
+\*   equals "none" then SpecWF of b's upd, else b's exp equals "future")."
+SpecProp(b) == b.valid => IF b.exp = "none" THEN SpecWF(b.upd) ELSE b.exp = "future"
+
+\* In English: gOuroboros' decision. "GoPpuMain" is main: eMax may be zero
+\* and the leverage cap below 1 (DRIFT L24). The other mutations check an
+\* invalid batch, skip a sub-transaction's proposal, or let a member's term
+\* end in the current epoch.
+\* Literally: "GoProp of b is defined as: if (b's valid or Mutation equals
+\*   "GoPropAnyPhase") and not (Mutation equals "GoPropTopOnly" and b's at
+\*   equals "sub"), then: if b's exp equals "none" then (if Mutation equals
+\*   "GoPpuMain" then SpecWF of b's upd with eMax and lev relaxed, else SpecWF
+\*   of b's upd), else b's exp equals "future" or (Mutation equals
+\*   "GoUcNowOk" and b's exp equals "now")."
+GoProp(b) ==
+    ((b.valid \/ Mutation = "GoPropAnyPhase")
+        /\ ~(Mutation = "GoPropTopOnly" /\ b.at = "sub")) =>
+        IF b.exp = "none"
+        THEN IF Mutation = "GoPpuMain"
+             THEN SpecWF([b.upd EXCEPT !.eMax = IF @ = "zero" THEN "ok" ELSE @,
+                                       !.lev = IF @ = "lt1" THEN "ge1" ELSE @])
+             ELSE SpecWF(b.upd)
+        ELSE b.exp = "future" \/ (Mutation = "GoUcNowOk" /\ b.exp = "now")
+
+-----------------------------------------------------------------------------
 (* The table questions.                                                    *)
 
 \* In English: family 1 reads reg, dreg, cc and pool; family 2 dreg and c1.
@@ -320,10 +394,14 @@ GoCom(b) ==
 \* Literally: "GoAgrees is defined as: (if c1 equals "member", then for all b
 \*   in GBatches, GoGov of b if and only if SpecGov of b); and (if reg and not
 \*   cc and not pool, then for all b in CBatches, GoCom of b if and only if
-\*   SpecCom of b)."
+\*   SpecCom of b); and (in the one state where reg holds and
+\*   nothing else does, for all b in PBatches, GoProp of b if and only if
+\*   SpecProp of b)."
 GoAgrees ==
     /\ c1 = "member" => \A b \in GBatches : GoGov(b) <=> SpecGov(b)
     /\ (reg /\ ~cc /\ ~pool) => \A b \in CBatches : GoCom(b) <=> SpecCom(b)
+    /\ (reg /\ ~dreg /\ ~cc /\ ~pool /\ c1 = "member") =>
+           \A b \in PBatches : GoProp(b) <=> SpecProp(b)
 
 \* Table probes, each expected to be violated.
 \* In English: "the top never votes on the sub-transaction's proposal".
