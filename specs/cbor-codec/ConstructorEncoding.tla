@@ -22,6 +22,11 @@
 (*        its pairs in the Data value's list order, each key and value     *)
 (*        written by encodeData, so long byte strings are chunked and      *)
 (*        lists indefinite inside a map as anywhere else.                  *)
+(*   [R5] Data.hs 170-182 encodeInteger: an integer outside the 64-bit    *)
+(*        range is tag 2 or 3 around encodeBs of its magnitude, so a       *)
+(*        magnitude longer than 64 bytes is chunked.                       *)
+(*   [R6] Data.hs 269-271 decodeList, decodeListOf: a constructor's fields *)
+(*        are a list; Data has no constructor whose fields are not.        *)
 (*   [R3] plutus-core/plutus-core/test/CBOR/DataStability.hs: the vectors  *)
 (*        auction_1-1 and future-increase-margin-5 (second encodings).     *)
 (*                                                                         *)
@@ -45,6 +50,17 @@
 (*        converted like any item. A Go map has no order, so its pairs are *)
 (*        written in the order of their encoded keys, the order the        *)
 (*        encoder already used; that is the plutus Map with that list.     *)
+(*   [G5] origin/main 5b8eeea4 merged into that branch: ConstructorDecoder *)
+(*        refuses fields that are not a list, but MarshalCBOR still writes *)
+(*        a non-list fields value (a scalar, or a value whose MarshalCBOR  *)
+(*        writes no list) as given. Items are matched by Go type, so a     *)
+(*        named byte slice or array (PlutusV1Script) and a big.Int value   *)
+(*        (not a pointer) are written by the library: a long one as one   *)
+(*        definite string, a large big.Int as tag 2 around one.           *)
+(*   [G6] the fix on that branch: items are matched by kind, so every     *)
+(*        byte slice or array without its own MarshalCBOR, and every       *)
+(*        big.Int value, is chunked; a fields value that is not a list is  *)
+(*        refused.                                                         *)
 (* Checked in Go on ad7a4f25: [2]uint64{1,2} gives d879820102;             *)
 (* []any{[]any{1}} gives d8799f8101ff; a 65-byte field gives a definite    *)
 (* 5841 string; IndefLengthList{} gives d8799fff. On the parent nil gives *)
@@ -57,23 +73,30 @@
 CONSTANTS
     Containers, \* Go values tried as fields, a subset of AllContainers
     ItemKinds,  \* item kinds tried inside them, a subset of AllItems
-    GoRule      \* "main" [G1], "fix" [G2], "plutus" [G3] or "plutusMap" [G4]
+    GoRule      \* "main" [G1], "fix" [G2], "plutus" [G3], "plutusMap" [G4]
+                \* or "plutusKinds" [G6]
 
 VARIABLE input  \* the one constructor this behaviour encodes
 
 \* In English: "The Go values a caller may pass as the fields: nil, an
-\*   empty slice, a slice, a Go array, and an IndefLengthList."
+\*   empty slice, a slice, a Go array, an IndefLengthList, and a value that
+\*   is not a list (an integer, or a type whose MarshalCBOR writes no list)."
 \* Literally: "AllContainers is defined as the set containing "nil",
-\*   "emptySlice", "slice", "goArray" and "indefList"."
-AllContainers == {"nil", "emptySlice", "slice", "goArray", "indefList"}
+\*   "emptySlice", "slice", "goArray", "indefList" and "scalar"."
+AllContainers == {"nil", "emptySlice", "slice", "goArray", "indefList",
+                  "scalar"}
 
 \* In English: "Kinds of item inside the fields: an integer, a byte
 \*   string of at most 64 bytes, a longer one, a nested Data list given as
-\*   a []any, and one given as an IndefLengthList."
+\*   a []any, one given as an IndefLengthList, the map kinds below, a byte
+\*   string over 64 bytes given as a named byte slice (PlutusV1Script), and
+\*   a big.Int value whose magnitude is over 64 bytes."
 \* Literally: "AllItems is defined as the set containing "int",
-\*   "shortBytes", "longBytes", "nestedSlice" and "nestedIndef"."
+\*   "shortBytes", "longBytes", "nestedSlice", "nestedIndef", the map
+\*   kinds, "namedLongBytes" and "bigIntValueLong"."
 AllItems == {"int", "shortBytes", "longBytes", "nestedSlice", "nestedIndef",
-             "mapShort", "mapLongBytes", "mapNestedSlice", "indefMapShort"}
+             "mapShort", "mapLongBytes", "mapNestedSlice", "indefMapShort",
+             "namedLongBytes", "bigIntValueLong"}
 
 \* In English: "The map item kinds: a Go map with short members, one with
 \*   a byte string over 64 bytes as a key or value, one with a []any list
@@ -82,29 +105,35 @@ AllItems == {"int", "shortBytes", "longBytes", "nestedSlice", "nestedIndef",
 \*   "mapLongBytes", "mapNestedSlice" and "indefMapShort"."
 MapItems == {"mapShort", "mapLongBytes", "mapNestedSlice", "indefMapShort"}
 
-\* In English: "Every family, container and set of item kinds; nil and an
-\*   empty slice hold no items."
+\* In English: "Every family, container and set of item kinds; nil, an
+\*   empty slice and a value that is not a list hold no items."
 \* Literally: "Inputs is defined as the set of records r whose family is
 \*   a member of the set containing "121-127", "1280-1400" and "102", whose
 \*   container is a member of Containers and whose items is a subset of
-\*   ItemKinds, such that the container of r is not "nil" or
-\*   "emptySlice", or the items of r is the empty set."
+\*   ItemKinds, such that the container of r is not "nil", "emptySlice"
+\*   or "scalar", or the items of r is the empty set."
 Inputs == {r \in [family : {"121-127", "1280-1400", "102"},
                   container : Containers, items : SUBSET ItemKinds] :
-              r.container \notin {"nil", "emptySlice"} \/ r.items = {}}
+              r.container \notin {"nil", "emptySlice", "scalar"}
+                  \/ r.items = {}}
 
 \* In English: "plutus's field list: 0x80 when empty, indefinite
-\*   otherwise." [R1]
-\* Literally: "RefHead of i is defined as: if the items of i is the empty
-\*   set then "empty", else "indef"."
-RefHead(i) == IF i.items = {} THEN "empty" ELSE "indef"
+\*   otherwise; fields that are not a list are no Data at all." [R1] [R6]
+\* Literally: "RefHead of i is defined as: if the container of i is
+\*   "scalar" then "refused", else if the items of i is the empty set then
+\*   "empty", else "indef"."
+RefHead(i) ==
+    IF i.container = "scalar" THEN "refused"
+    ELSE IF i.items = {} THEN "empty" ELSE "indef"
 
 \* In English: "How plutus writes each kind of item." [R1] [R2]
 \* Literally: "RefItem of k is defined as: if k is "int" then "int", else
 \*   if k is "shortBytes" then "bytes", else if k is "longBytes" then
 \*   "chunkedBytes", else "indefList"."
 RefItem(k) ==
-    IF k \in {"mapShort", "indefMapShort"} THEN "defMap"
+    IF k = "namedLongBytes" THEN "chunkedBytes"           \* [R2]
+    ELSE IF k = "bigIntValueLong" THEN "chunkedBignum"    \* [R5]
+    ELSE IF k \in {"mapShort", "indefMapShort"} THEN "defMap"
     ELSE IF k = "mapLongBytes" THEN "defMapChunkedBytes"
     ELSE IF k = "mapNestedSlice" THEN "defMapIndefList"
     ELSE IF k = "int" THEN "int"
@@ -119,7 +148,9 @@ RefItem(k) ==
 \*   "definiteBytes", else if k is "nestedSlice" then "defList", else
 \*   "indefList"."
 GoItem(k) ==
-    IF k = "mapShort" THEN "defMap"
+    IF k = "namedLongBytes" THEN "definiteBytes"
+    ELSE IF k = "bigIntValueLong" THEN "definiteBignum"
+    ELSE IF k = "mapShort" THEN "defMap"
     ELSE IF k = "mapLongBytes" THEN "defMapDefiniteBytes"
     ELSE IF k = "mapNestedSlice" THEN "defMapDefList"
     ELSE IF k = "indefMapShort" THEN "indefMap"
@@ -137,7 +168,8 @@ GoItem(k) ==
 \*   (if the items of i is empty then "indefEmpty" else "indef"), else if
 \*   the items of i is empty then "empty", else "def"."
 GoMainHead(i) ==
-    IF i.container = "nil" THEN "null"
+    IF i.container = "scalar" THEN "scalar"
+    ELSE IF i.container = "nil" THEN "null"
     ELSE IF i.container = "indefList"
          THEN (IF i.items = {} THEN "indefEmpty" ELSE "indef")
     ELSE IF i.items = {} THEN "empty"
@@ -151,17 +183,29 @@ GoMainHead(i) ==
 \*   "indef"), else if the items of i is empty then "empty", else if the
 \*   container of i is "goArray" then "def", else "indef"."
 GoFixHead(i) ==
-    IF i.container = "indefList"
+    IF i.container = "scalar" THEN "scalar"
+    ELSE IF i.container = "indefList"
     THEN (IF i.items = {} THEN "indefEmpty" ELSE "indef")
     ELSE IF i.items = {} THEN "empty"
     ELSE IF i.container = "goArray" THEN "def"
     ELSE "indef"
 
-\* In English: "3d91ad2f's field list (and [G4]'s): plutusList writes 0x80 for no items
-\*   and an indefinite list otherwise, whatever the container." [G3]
-\* Literally: "GoPlutusHead of i is defined as: if the items of i is the
-\*   empty set then "empty", else "indef"."
-GoPlutusHead(i) == IF i.items = {} THEN "empty" ELSE "indef"
+\* In English: "3d91ad2f's field list (and [G4]'s): plutusList writes 0x80
+\*   for no items and an indefinite list otherwise, whatever the list
+\*   container; a value that is not a list is written as given." [G3] [G5]
+\* Literally: "GoPlutusHead of i is defined as: if the container of i is
+\*   "scalar" then "scalar", else if the items of i is the empty set then
+\*   "empty", else "indef"."
+GoPlutusHead(i) ==
+    IF i.container = "scalar" THEN "scalar"
+    ELSE IF i.items = {} THEN "empty" ELSE "indef"
+
+\* In English: "The fix's field list: as GoPlutusHead, but a value that is
+\*   not a list is refused." [G6]
+\* Literally: "GoKindsHead of i is defined as: if the container of i is
+\*   "scalar" then "refused", else GoPlutusHead of i."
+GoKindsHead(i) ==
+    IF i.container = "scalar" THEN "refused" ELSE GoPlutusHead(i)
 
 \* In English: "How 3d91ad2f writes each kind of item: plutusBytes chunks a
 \*   long byte string, plutusList writes any nested list indefinite." [G3]
@@ -169,7 +213,8 @@ GoPlutusHead(i) == IF i.items = {} THEN "empty" ELSE "indef"
 \*   else if k is "shortBytes" then "bytes", else if k is "longBytes" then
 \*   "chunkedBytes", else "indefList"."
 GoPlutusItem(k) ==
-    IF k \in MapItems THEN GoItem(k)
+    IF k \in MapItems \cup {"namedLongBytes", "bigIntValueLong"}
+    THEN GoItem(k)
     ELSE IF k = "int" THEN "int"
     ELSE IF k = "shortBytes" THEN "bytes"
     ELSE IF k = "longBytes" THEN "chunkedBytes"
@@ -187,6 +232,16 @@ GoPlutusMapItem(k) ==
     ELSE IF k = "mapNestedSlice" THEN "defMapIndefList"
     ELSE GoPlutusItem(k)
 
+\* In English: "How the fix writes each kind of item: as [G4] does, with a
+\*   named byte slice and a big.Int value chunked like any other." [G6]
+\* Literally: "GoKindsItem of k is defined as: if k is "namedLongBytes"
+\*   then "chunkedBytes", else if k is "bigIntValueLong" then
+\*   "chunkedBignum", else GoPlutusMapItem of k."
+GoKindsItem(k) ==
+    IF k = "namedLongBytes" THEN "chunkedBytes"
+    ELSE IF k = "bigIntValueLong" THEN "chunkedBignum"
+    ELSE GoPlutusMapItem(k)
+
 \* In English: "The shape of plutus's bytes for this constructor."
 \* Literally: "RefBytes of i is defined as the record whose head is
 \*   RefHead of i and whose items is the set of RefItem of k for every k in
@@ -200,11 +255,14 @@ RefBytes(i) == [head |-> RefHead(i), items |-> {RefItem(k) : k \in i.items}]
 \*   is the set of GoPlutusItem of k (GoRule "plutus") or GoItem of k
 \*   for every k in the items of i."
 GoBytes(i) ==
-    [head |-> CASE GoRule = "main" -> GoMainHead(i)
-                [] GoRule = "fix"  -> GoFixHead(i)
-                [] OTHER           -> GoPlutusHead(i),
+    [head |-> CASE GoRule = "main"        -> GoMainHead(i)
+                [] GoRule = "fix"         -> GoFixHead(i)
+                [] GoRule = "plutusKinds" -> GoKindsHead(i)
+                [] OTHER                  -> GoPlutusHead(i),
      items |-> CASE GoRule = "plutus"    -> {GoPlutusItem(k) : k \in i.items}
                  [] GoRule = "plutusMap" -> {GoPlutusMapItem(k) : k \in i.items}
+                 [] GoRule = "plutusKinds" ->
+                        {GoKindsItem(k) : k \in i.items}
                  [] OTHER                -> {GoItem(k) : k \in i.items}]
 
 \* In English: "Pick any one input."

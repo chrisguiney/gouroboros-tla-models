@@ -46,6 +46,9 @@ model cites the implementation.
 | `RewardPotsProbeUnregisteredBug.cfg` | probe violated | a reward is owed to a deregistered member at the boundary |
 | `RewardPotsProbeReserveReturnBug.cfg` | probe violated | part of R returns to the reserves |
 | `RewardPotsProbePrefilterBug.cfg` | probe violated | before version 7 an unregistered member's reward is not computed |
+| `RewardFilter.cfg` | pass | `RewardFilter.tla`: at versions 2 and 3, what one credential is paid of its leader and member rewards |
+| `RewardFilterPayAllBug.cfg` | `PaidAsReference` violated | at version 2 every reward is paid, where `filterRewards` pays the least in `Ord Reward` (leaders first, then pool key hash) and returns the rest to the reserves |
+| `RewardFilterPayAllPV3.cfg` | pass | from version 3 paying every reward is the reference rule |
 
 ## Spec, reference, and gOuroboros
 
