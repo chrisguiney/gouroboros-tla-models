@@ -444,15 +444,16 @@ and compared.
 
 ### The answer
 
-`main` fails three ways:
+`main` and the first body-size fix fail four ways:
 
 | Config | What `main` does | The reference |
 | --- | --- | --- |
 | `MessageIngressAllOrNothingBug.cfg` | any failing message, even an expired one or one from a pool without stake, refuses the whole reply and closes the connection | judges each message; drops expired and unregistered ones quietly; keeps the valid ones even when another is fatal |
 | `MessageIngressMainOrderBug.cfg` | checks the pool before the KES window and the signatures before the counter, so a message failing both is dropped where the reference disconnects | `Validate.hs` order: expiry, rate, id, window, pool, counter, signatures |
 | `MessageIngressNoRateLimitBug.cfg` | no rate limit | `SigTooFrequent`, fatal for node-to-node |
+| `MessageIngressSizeAfterExpiryBug.cfg` | (the first body-size fix) checks the body in the authenticator, after expiry, so an expired message with a bad body is dropped | the decoder refuses the body first (`Codec.hs` 193-202): the whole reply fails and the connection closes |
 
-With the fixes `MessageIngress.cfg` (129,772 states) passes every question.
+With the fixes `MessageIngress.cfg` (148,820 states) passes every question.
 Mutations: `RateOnDuplicateBug` (the limit applied to an accepted message, so
 relaying it fails), `NoRateRecheckBug` (commit without re-checking the limit
 accepts two concurrent submissions), `DupRaceFatalBug` (a submission that lost
@@ -513,7 +514,7 @@ Branches from gOuroboros `62fa36d1` (the first five) or `ebc63eab` (the rest).
 | --- | --- | --- |
 | `fix/dmq-kes-claimed-period` | `7e1a0820`, `db6103a6` | `TestVerifyMessageKESPeriodAsReference` (11 cells). On `main` 3 fail (cross-period both ways; a signature at the current period claiming an earlier one is accepted). The second commit drops the opcert window at the current slot: its two cells failed before it. `CurrentSlot`, `SlotsPerKESPeriod` and `VerifyMessageWithSlot`'s slot become unused (deprecated) |
 | `fix/dmq-ttl-reference-bounds` | `1f492baf`, `5d48a376` | `TestValidateMessageTTLAtAsReference` (8 cells; 2 fail on `main`); `TestIsValidAtAsReferenceMempool` (4 cells; "at expiresAt" fails on `main`): `IsValidAt` now drops a message once `expiresAt <= now`, as the mempool does |
-| `fix/dmq-message-body-size` | `9804e9d9` | `TestVerifyMessageBodySizeAsReference`; a 0-byte body is accepted on `main` |
+| `fix/dmq-message-body-size` | `9804e9d9`, `52c1b032` | `TestVerifyMessageBodySizeAsReference`; a 0-byte body is accepted on `main`. The second commit refuses the body when decoding, before expiry (`TestDmqMessageDecodeRefusesBodySize`, expired messages in both shapes; on the first commit a 0-byte body decodes) |
 | `fix/dmq-commit-recheck-every-counter` | `aa2673b6` | `TestPrepareMessagesCommitRechecksEveryCounter`; the stale commit returns nil on `main` |
 | `test/dmq-validity-reference` | `2a86f5ad` | `TestVerifyMessageCounterAndPoolAsReference` (48 cells); 3 mutations killed |
 | `fix/dmq-payload-preserved-bytes` | `d21d3969` | `TestVerifyMessageHashesPayloadBytesAsReceived`: a payload with a non-minimal KES period, signed and hashed as received, fails on `main` with an ID mismatch; the decoded payload now keeps its bytes (`DecodeStoreCbor`) and re-encodes to them |
@@ -522,7 +523,7 @@ Branches from gOuroboros `62fa36d1` (the first five) or `ebc63eab` (the rest).
 | `fix/messagesubmission-reference-receipt` | `a12edd17` | `TestServerReceivesRepliesAsReference` (7 cells; 5 fail on `main`) and `TestServerReplyKeepsValidMessagesBesideAFatalOne`, which replaces a test of the all-or-nothing behaviour. Mutations killed: main's check order, an expired message fatal, a dropped authentication error fatal, stopping at the first failure |
 
 All nine merge onto current `main` (`scratch/dmq-validation-combined`,
-`47e66ef2`, local only) with two hand resolutions in `authentication.go` (the
+`7274cb47` after the decode-time size check, local only) with two hand resolutions in `authentication.go` (the
 window and chain-counter drops both remove adjacent config checks; the rate
 limit and the receipt branch both rework `PrepareMessages`) and one
 cross-branch test fix: `TestPrepareMessagesCommitRechecksEveryCounter` needs
@@ -590,10 +591,7 @@ gOuroboros `61046085`.
 
 The per-connection replay caches beyond what `MessageIngress.tla` keeps as
 the set of accepted ids; the opcert cold signature, message id and payload
-bytes (pure checks, covered by Go tests); the body size against expiry for a
-message that fails both (dmq-node refuses the body when it decodes, before
-expiry; gOuroboros checks expiry first, so such a message is dropped rather
-than fatal); the
+bytes (pure checks, covered by Go tests); the
 pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
 time limits as durations (the 20 s V2 limit appears only as "an unanswered
 blocking request is a deadlock"); wire tags and list encodings, which the Go

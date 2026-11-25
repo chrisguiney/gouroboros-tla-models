@@ -39,6 +39,9 @@
 (*   [R4] app/Main.hs 199-221: for node-to-node, SigDuplicate, SigExpired, *)
 (*        NotInitialized, PoolNotEligible and UnrecognizedPool are only    *)
 (*        traced; any other error is thrown, closing the connection.       *)
+(*   [R6] src/DMQ/Protocol/SigSubmission/Codec.hs 193-202: a body outside *)
+(*        90..2000 bytes fails decoding, before any validateSig check;     *)
+(*        a node-to-node decoding failure closes the connection.           *)
 (*   [R5] ouroboros-network 4646039f, ouroboros-network/lib/Ouroboros/    *)
 (*        Network/TxSubmission/Mempool/Simple.hs 183-245: one timestamp    *)
 (*        per batch; messages already in the mempool are SigDuplicate and  *)
@@ -62,22 +65,32 @@ CONSTANTS
     Workers,    \* connections that may hold a prepared local submission
     Mutation    \* "none", or which gOuroboros behaviour to model
 
-\* In English: "The reference's check order, with "toofrequent" in the
-\* place it is checked [R1]."
-\* Literally: "RefOrder is defined as the sequence "expired", "toofar",
-\*   "toofrequent", "kesWindow", "unregistered", "counter", "badsig"."
-RefOrder == <<"expired", "toofar", "toofrequent", "kesWindow",
+\* In English: "The reference's check order: the body size when the
+\* message is decoded [R6], then validateSig's checks with "toofrequent" in
+\* the place it is checked [R1]."
+\* Literally: "RefOrder is defined as the sequence "badsize", "expired",
+\*   "toofar", "toofrequent", "kesWindow", "unregistered", "counter",
+\*   "badsig"."
+RefOrder == <<"badsize", "expired", "toofar", "toofrequent", "kesWindow",
               "unregistered", "counter", "badsig">>
 
-\* In English: "gOuroboros's order: the reference's, or main's, which checks
-\* the pool before the KES window and the signatures before the counter."
-\* Literally: "GoOrder is defined as: if Mutation equals "MainOrder", then
-\*   the sequence "expired", "toofar", "toofrequent", "unregistered",
-\*   "badsig", "kesWindow", "counter"; otherwise RefOrder."
-GoOrder == IF Mutation = "MainOrder"
-           THEN <<"expired", "toofar", "toofrequent", "unregistered",
-                  "badsig", "kesWindow", "counter">>
-           ELSE RefOrder
+\* In English: "gOuroboros's order: the reference's; or main's, which checks
+\* the pool before the KES window and the signatures before the counter;
+\* or, with "SizeAfterExpiry", the body size checked by the authenticator,
+\* after the expiry checks, instead of when the message is decoded."
+\* Literally: "GoOrder is defined as: in the case Mutation equals
+\*   "MainOrder", the sequence "badsize", "expired", "toofar",
+\*   "toofrequent", "unregistered", "badsig", "kesWindow", "counter"; in the
+\*   case Mutation equals "SizeAfterExpiry", the sequence "expired",
+\*   "toofar", "badsize", "toofrequent", "kesWindow", "unregistered",
+\*   "counter", "badsig"; otherwise RefOrder."
+GoOrder == CASE Mutation = "MainOrder" ->
+                  <<"badsize", "expired", "toofar", "toofrequent",
+                    "unregistered", "badsig", "kesWindow", "counter">>
+             [] Mutation = "SizeAfterExpiry" ->
+                  <<"expired", "toofar", "badsize", "toofrequent",
+                    "kesWindow", "unregistered", "counter", "badsig">>
+             [] OTHER -> RefOrder
 
 \* In English: "The outcomes the reference only traces, for node-to-node
 \* [R4]; every other failure disconnects."
@@ -135,16 +148,23 @@ Step(r, id, ord, rate) ==
                         !.hist = Append(@, now)]
          ELSE [r EXCEPT !.fatal = @ \/ f \notin Tolerated]
 
-\* In English: "Handle a reply b (one or two ids) from the current state."
+\* In English: "Handle a reply b (one or two ids) from the current state.
+\* When the body size is checked at decoding (it comes first in ord), a
+\* reply holding an out-of-range body fails to decode as a whole: nothing in
+\* it is accepted and the connection closes [R6]."
 \* Literally: "Run of b, ord and rate is defined as: letting r0 be the
 \*   record of accepted, lastT, history and fatal FALSE, and r1 be Step of
-\*   r0 and b of 1: if the length of b is 1 then r1, otherwise Step of r1 and
-\*   b of 2."
+\*   r0 and b of 1: if ord of 1 is "badsize" and there exists an i in the
+\*   domain of b such that "badsize" is a member of fails of b of i, then r0
+\*   with fatal TRUE; otherwise, if the length of b is 1 then r1, otherwise
+\*   Step of r1 and b of 2."
 Run(b, ord, rate) ==
     LET r0 == [acc |-> accepted, t |-> lastT, hist |-> history,
                fatal |-> FALSE]
         r1 == Step(r0, b[1], ord, rate)
-    IN IF Len(b) = 1 THEN r1 ELSE Step(r1, b[2], ord, rate)
+    IN IF ord[1] = "badsize" /\ \E i \in DOMAIN b : "badsize" \in fails[b[i]]
+       THEN [r0 EXCEPT !.fatal = TRUE]
+       ELSE IF Len(b) = 1 THEN r1 ELSE Step(r1, b[2], ord, rate)
 
 \* In English: "The reference's result for reply b [R1]-[R5]."
 \* Literally: "RefRun of b is defined as Run of b, RefOrder and TRUE."
