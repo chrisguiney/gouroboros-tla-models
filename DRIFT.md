@@ -113,6 +113,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N56](#n56) | network | DMQ: checks dmq-node does not make, and its rate limit | Counter compared only with counters seen in messages; current slot not consulted; one message per pool per 60 s (`SigTooFrequent`, fatal for node-to-node) | main: counter must not be below the chain-state counter; opcert window must contain the current KES period; no rate limit; branches: as the reference | Neither check required (397-402; 405-411 is a hedged note); rate limiting suggested (528) | does not conform → conforms | Fixed on local branches `fix/dmq-drop-chain-counter-check` (`aa7c8605`), `fix/dmq-kes-claimed-period` (`db6103a6`), `fix/dmq-sig-rate-limit` (`d4c8c2f1`), no PR (model `dmq` `MessageValidityExtrasBug.cfg`, `MessageIngressNoRateLimitBug.cfg`) |
 | [N57](#n57) | network | DMQ: bytes the message id and KES signature cover | The payload bytes as received | main: the payload re-encoded from its decoded fields; branch: the decoded bytes | `messageId` = Blake2b-256 of the CBOR payload | does not conform → conforms (for a non-canonical payload) | Fixed on local branch `fix/dmq-payload-preserved-bytes` (`d21d3969`), no PR (model `dmq` `MessagePayloadBytes`) |
 | [N58](#n58) | network | DMQ: what node-to-node receipt does with each message | Judged one at a time in `Validate.hs` order; expired, unregistered, not-initialised and duplicate dropped quietly; any other failure closes the connection after the valid ones are kept | main: any failure refuses the whole reply and closes the connection; pool checked before the KES window, signatures before the counter; branch: as the reference | Any failed step is "a protocol violation" (402) | does not conform → conforms | Fixed on local branch `fix/messagesubmission-reference-receipt` (`a12edd17`), no PR (model `dmq` `MessageIngressAllOrNothingBug.cfg`, `MessageIngressMainOrderBug.cfg`) |
+| [N59](#n59) | network | LeiosNotify: source consulted when requests are pipelined behind `MsgQuit` | Every outstanding request answered `MsgCanceled`, then `MsgDone`; silent on how often the source is consulted | main: every request answered; the source is asked zero or one time, by whether the handler runs before the read loop reaches `MsgQuit` | Not stated | conforms | Test assertion fixed on local branch `fix/leiosnotify-pipelined-cancel-flake`, no PR (model `leios-peras` `LeiosNotifyPipelinedQuitAssumptionBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -831,6 +832,17 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `ebc63eab` `protocol/messagesubmission/server.go` `handleReplyMessages`; branch `fix/messagesubmission-reference-receipt` `a12edd17`: `TestServerReceivesRepliesAsReference` (5 of 7 cells fail on main), `MessageAuthenticator.PrepareEach`, `ErrStakeDistributionUnavailable`
 - **Verdict.** does not conform → conforms
 - **Status.** Fixed on a local branch, no PR. The body size is refused at decode (N54), before expiry, as in dmq-node. Duplicates are dropped per connection (`deliveredIDs`) and, with the rate limit, exempt from it node-wide
+
+### N59
+
+**LeiosNotify: source consulted when requests are pipelined behind `MsgQuit`** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: once `MsgQuit` arrives the server answers every outstanding request with `MsgCanceled`, then `MsgDone`; nothing says the source is consulted. gOuroboros: the same answers; the source is asked once when the handler runs before the read loop reads `MsgQuit`, and not at all otherwise. A test that asserted exactly one call failed intermittently
+- **Spec.** spec silent
+- **Reference.** ouroboros-consensus `ec239d57f618` `.../MiniProtocol/LeiosNotify/Server.hs` 51-57, 94-134
+- **gOuroboros.** gOuroboros `7e29631f` `protocol/leiosnotify/server.go` `initProtocol` (`MessageReceivedFunc`), `serveRequestNext`; `protocol/leiosnotify/server_test.go` `TestServerCancelsEveryPipelinedRequest`
+- **Verdict.** conforms
+- **Status.** Test fixed on a local branch, no PR. The server is unchanged
 
 ## Consensus
 
