@@ -201,6 +201,44 @@ gOuroboros judges a message on arrival, so its "Waits" is a refusal, except
 that the client queues requests the server pipelines in `StTxIdsNonBlocking`
 and `StTxs`.
 
+## A local stop during a blocking request
+
+`TxSubmissionLocalStop.tla` follows the one blocking `MsgRequestTxIds` that
+the client is still answering, with an empty mempool, when its own node
+stops. The reference waits for a transaction or for `Terminate`, and answers
+`Terminate` with `MsgDone` (`Outbound.hs` 193-210, `ControlMessage.hs`
+43-55). It never answers a blocking request with an empty list, and its stop
+never reports a protocol error.
+
+In gOuroboros the wait is the application's `RequestTxIdsFunc`. Its answer
+decides what the client does: `ErrStopServerProcess` sends `MsgDone`; an
+empty list is refused by `reconcileTxIds` as a protocol violation, which
+the connection reports as it closes; a missing mempool consumer is an error
+that is reported the same way. Dingo's wait ends when the mempool consumer
+is released: the connection-closed cleanup cancels it after `Close`
+returns, and node shutdown stops the mempool before draining connections.
+
+| Config | Callback | Close joins callbacks | States | Result |
+| --- | --- | --- | --- | --- |
+| `TxSubmissionLocalStopReference.cfg` | reference | yes | 30 | passes |
+| `TxSubmissionLocalStopMainBug.cfg` | Dingo main | no | | **fails** `LocalStopBlamesNoPeer` |
+| `TxSubmissionLocalStopJoinBug.cfg` | Dingo main | yes | | **deadlock** |
+| `TxSubmissionLocalStopEmptyBug.cfg` | ends on `StopChan`, empty list | yes | | **fails** `LocalStopBlamesNoPeer` |
+| `TxSubmissionLocalStopFixed.cfg` | ends on any release with `ErrStopServerProcess` | yes | 30 | passes |
+| `TxSubmissionLocalStopFixedNoJoin.cfg` | same | no | 34 | passes |
+
+`MainBug` is node shutdown on Dingo `main`: the mempool stops, the wait
+returns nothing, and the empty reply closes the connection with
+"blocking request for 1 transaction IDs received an empty reply". Once
+`Close` waits for running callbacks, Dingo `main`'s wait, which only the
+cleanup after `Close` releases, deadlocks `Close` (`JoinBug`; the Dingo
+test `TestTxSubmissionServerInitExitsCleanlyOnPeerDisconnect` hung on it).
+Ending the wait on `StopChan` removed the deadlock but kept the empty reply
+(`EmptyBug`). The fix answers every released wait, and a blocking request
+with no consumer, with `ErrStopServerProcess`, as the reference answers
+`Terminate`. Dingo test:
+`TestTxSubmissionClientEndsBlockingWaitWithDoneWhenMempoolStops`.
+
 ## Checking the checks
 
 Every invariant is shown to fail at least once: the `*Bug.cfg` configs above
@@ -314,6 +352,7 @@ unless shown.
 | R5 | [`Server.hs` 112-130](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/TxSubmission2/Server.hs#L112-L130) | A blocking request awaits `MsgDone` or a non-empty reply; only non-blocking requests are pipelined. |
 | R6 | [`ouroboros-network/lib/Ouroboros/Network/TxSubmission/Inbound/V2.hs` 334-358, 386-425](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/lib/Ouroboros/Network/TxSubmission/Inbound/V2.hs#L334-L425) | The reference server sends blocking iff its FIFO is empty; reply checks `TxIdsNotRequested`, `TxNotRequested`. |
 | R7 | typed-protocols `Driver.hs` (as cited in Model `keepalive`, `[S8]`) | A side reads only when its peer has agency. |
+| R8 | [`ouroboros-network/api/lib/Ouroboros/Network/ControlMessage.hs` 43-55](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/api/lib/Ouroboros/Network/ControlMessage.hs#L43-L55) | `timeoutWithControlMessage`: `Terminate` returns `Nothing`, which `Outbound.hs` 201 answers with `MsgDone`. |
 | G1-G4 | gOuroboros `protocol/txsubmission/` `txsubmission.go`, `client.go`, `server.go`, `validation.go` | `StateMap`; `handleRequestTxIds`, `handleRequestTxs`; `RequestTxIds`, `RequestTxs`, `handleReplyTxIds`, `handleReplyTxs`, `handleDone`; `reconcileTxIds`, `requestedTxIdsAreOutstanding`. |
 
 ## Not modelled
