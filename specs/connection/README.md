@@ -16,6 +16,7 @@ first.
 | 3 | `MuxIngress.tla` | What happens when several mini-protocols share one demultiplexer? |
 | 4 | `ConnectionShutdown.tla` | Can errors and shutdown race into a panic or a hang? |
 | 5 | `ConnectionTeardown.tla` | Can `Close` during `Dial` leak the muxer, or a late `waitGroup.Go` panic? |
+| 5 | `ConnectionCloseConcurrent.tla` | Can callbacks closing one connection at once wait for each other? |
 
 `make connection` runs all of them.
 
@@ -373,6 +374,58 @@ invariant: `NoMetricsCallbackAfterClose`.
 | `ConnectionTeardownMetricsAfterCloseBug.cfg` (neither join: `Stop` only signals) | | `NoMetricsCallbackAfterClose` violated |
 | `ConnectionTeardownMuxerStopPlainBug.cfg` (the callback's `Stop` carries no marker) | | deadlock: the callback waits for the goroutine running it, which is why the marker exists |
 | `ConnectionTeardownMuxerStopNoMarkerBug.cfg` (mutation: `Stop` ignores the marker) | | deadlock |
+
+### Part 5, fifth pass: several callbacks closing at once (`ConnectionCloseConcurrent.tla`)
+
+Review of #3239 at `f60a0213` asked whether two callbacks of different
+protocol instances, each calling `CloseContext` with its own context at the
+same time, can wait for each other. `ConnectionTeardown.tla` has one
+callback, whose `CloseContext` ends when `connClosedChan` closes, so it
+could not show the wait `CloseContext` does after that
+(`WaitProtocolLoopsExcept(owner)`, which waits for every other loop, excused
+or not). `ConnectionCloseConcurrent.tla` models that wait for any number of
+instances, each with one loop and one callback that returns or closes, plus
+a user `Close`. Fix `skipClosing` is the change: `CloseContext` waits only
+for loops not excused (`WaitProtocolLoops`), so it never waits for another
+callback that is itself closing; plain `Close` still waits for every loop.
+The reference tears the mux down once and releases every thread that asked
+(network-mux `Network/Mux.hs:280-287`, `Control/Concurrent/JobPool.hs:105-109`).
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ConnectionCloseConcurrent.cfg` (three instances, any of them closing, user `Close`, `skipClosing`) | 810 | passes `TypeOK`, `CloseWaitsForEveryLoop`, `CloseContextWaitsForOthers`, no deadlock |
+| `ConnectionCloseConcurrentOneCloser.cfg` (`f60a0213`, one instance) | 30 | passes: the hang needs two closers |
+| `ConnectionCloseConcurrentMutualWaitBug.cfg` (`f60a0213`, two instances) | | deadlock: both callbacks wait in their post-shutdown wait for the other's loop, and the user's `Close` waits for both |
+| `ConnectionCloseConcurrentSelfJoinBug.cfg` (mutation: the wait includes the caller's own loop) | | deadlock with one closer |
+| `ConnectionCloseConcurrentUserSkipsBug.cfg` (mutation: plain `Close` skips excused loops too) | | `CloseWaitsForEveryLoop` violated |
+
+The same review found that a `Close` made after `doneChan` exists and before
+the muxer does returns with the conn open: shutdown sees no muxer, and
+setup's guard closes the conn only when setup resumes. Fix `sockClose` in
+`ConnectionTeardown.tla` makes shutdown that finds no muxer close the conn
+itself; new invariant `CloseClosesConn` (after `Close` returns, the conn is
+closed). It holds only with the muxer join (merge 6), since at merge 5
+`Muxer.Stop` only signals and the muxer's cleanup goroutine closes the conn
+later; `Fixed` and `FixedPlain` carry `sockClose` without the invariant.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `ConnectionTeardownCloseCtx.cfg` (now with `sockClose`) | 8,044 | passes all eight, with `CloseClosesConn` |
+| `ConnectionTeardownMuxerStop.cfg` (now with `sockClose`) | 29,350 | passes all nine |
+| `ConnectionTeardownFixed.cfg`, `FixedPlain.cfg` (now with `sockClose`) | 12,843 | pass |
+| `ConnectionTeardownCloseOpenConnBug.cfg` (`CloseCtx` without `sockClose`) | | `CloseClosesConn` violated |
+
+Go (`c321f708`): `closeExcept` calls `WaitProtocolLoops` for a callback's
+`CloseContext` and `WaitProtocolLoopsExcept(nil)` for `Close`; `shutdown`
+closes the conn when it finds no muxer. Tests, each failing before the fix:
+`TestConcurrentCloseContextCallbacksReturn` (the keep-alive server callback
+and a second instance's loop close at once; both return, then `Close`
+returns) and `TestCloseBeforeMuxerCreatedClosesConn` (now checks the conn is
+closed as soon as `Close` returns). The third finding, a blocking receive on
+`ErrorChan` in `TestCallbackMayCloseItsConnection`, is a test-only change
+(non-blocking receive) that cannot affect the model. Merge 6 replaces
+`CloseContext` with `Close(ctx)`, which calls the same `closeExcept(owner)`,
+so both fixes carry over unchanged.
 
 ## What model `connection` found
 
