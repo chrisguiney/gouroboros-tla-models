@@ -15,6 +15,8 @@ The engine is modelled in slices, simplest first:
 | 2 | `EnginePipelining.tla` | Pipelined requests end to end: sends, deferred state changes, the agency token, and replies that arrive early |
 | 3 | `EngineTimer.tla` | When a state's timeout is armed: only while this side waits for the peer, never while it holds agency or handles the peer's message |
 | 4 | `EngineLifecycle.tla` | `Start`, `Stop` and `StopForRestart` against the five goroutines `Start` launches, one Go primitive per step |
+| 5 | `EngineSendBeforeStart.tla` | A message sent before or during `Start` |
+| 6 | `EngineIngressOwner.tla` | A stopped instance must not change the ingress settings of the instance registered after it |
 
 Read [Model `keepalive`](../keepalive/README.md) first.
 
@@ -462,3 +464,26 @@ of its range context.
 Task note, merge 6 (#3253, `8e855d8c`): five build-tagged test call sites of
 `Connection.Close()` gained a context argument; a mechanical call-site fix,
 no model change.
+
+## Slice 6: who owns a role's ingress settings (`EngineIngressOwner.tla`)
+
+Review finding on gOuroboros #3274 (`fix/protocol-send-before-start`).
+
+The muxer keys a role's ingress limit, budget extension and backpressure by
+protocol ID and role. A block-fetch client's `Stop` releases its lifecycle
+lock before resolving the old instance's requests, so a `Start` can register
+a successor and raise its allowance first. Resolving the old requests then
+recomputes the old instance's allowance (zero), and because the old instance
+stayed `registered` the update reached the muxer and reset the successor's.
+The fix clears `registered` in `stop` under `ingressMu`. The rule is
+UNSOURCED: the reference mux sizes each mini-protocol's ingress once and has
+no run-time setting an instance can change.
+
+| Config | Behaviour | Result |
+| --- | --- | --- |
+| `EngineIngressOwnerStaleBug` | before the fix | **fails** `SuccessorKeepsAllowance`: stop, successor registers and raises, old cleanup resets to base (`TestStoppedInstanceLeavesSuccessorIngress`: limit equals the base limit, not the raised allowance) |
+| `EngineIngressOwner` | the fix | passes |
+
+```sh
+bin/tlc -config specs/engine/EngineIngressOwnerStaleBug.cfg specs/engine/EngineIngressOwner.tla
+```
