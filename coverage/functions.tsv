@@ -1,0 +1,1696 @@
+package	function	class	item
+cbor	AnnotateAddresses	gap	Diagnostics and decode errors
+cbor	ArrayHeaderSize	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	ArrayInfo	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	CheckForDuplicateCBORMembers	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	ConstructorDecoder.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	ConstructorDecoder.ParsedFields	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	ConstructorDecoder.UnmarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	ConstructorEncoder.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	DecodeBool	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeById	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeError.Error	gap	Diagnostics and decode errors
+cbor	DecodeError.Unwrap	gap	Diagnostics and decode errors
+cbor	DecodeError.WithDiagnostic	gap	Diagnostics and decode errors
+cbor	DecodeGeneric	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeIdFromList	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DecodeStoreCbor.SetCbor	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
+cbor	DecodeStoreCbor.ShareWithinParent	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
+cbor	DecodeUntrustedExact	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	DiagnoseBlock	gap	Diagnostics and decode errors
+cbor	DiagnoseTransaction	gap	Diagnostics and decode errors
+cbor	DiagnosticNode.FormatDiagnostic	gap	Diagnostics and decode errors
+cbor	DiagnosticNode.FormatDiagnosticPretty	gap	Diagnostics and decode errors
+cbor	DiagnosticNode.FormatHexDump	gap	Diagnostics and decode errors
+cbor	DiagnosticNode.GetNodeAtOffset	gap	Diagnostics and decode errors
+cbor	DiagnosticNode.GetPathToOffset	gap	Diagnostics and decode errors
+cbor	Encode	gap	Encode helpers and indefinite-length wrappers
+cbor	EncodeGeneric	gap	Encode helpers and indefinite-length wrappers
+cbor	FormatBlockDiagnostic	gap	Diagnostics and decode errors
+cbor	FormatNativeScript	gap	Diagnostics and decode errors
+cbor	FormatPlutusData	gap	Diagnostics and decode errors
+cbor	FormatTransactionDiagnostic	gap	Diagnostics and decode errors
+cbor	IndefLengthByteString.MarshalCBOR	gap	Encode helpers and indefinite-length wrappers
+cbor	IndefLengthList.MarshalCBOR	gap	Encode helpers and indefinite-length wrappers
+cbor	IndefLengthMap.MarshalCBOR	gap	Encode helpers and indefinite-length wrappers
+cbor	IsEmptyCollection	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	LazyValue.Cbor	gap	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.Decode	gap	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.MarshalCBOR	gap	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.MarshalJSON	gap	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.UnmarshalCBOR	gap	Generic Value/LazyValue decode and JSON
+cbor	LazyValue.Value	gap	Generic Value/LazyValue decode and JSON
+cbor	ListLength	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	MapInfo	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	NewDecodeError	gap	Diagnostics and decode errors
+cbor	PlutusConstrFromTag	gap	Diagnostics and decode errors
+cbor	Rat.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	Rat.UnmarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	Rat.UnmarshalJSON	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	RegisterAddressFormatter	gap	Diagnostics and decode errors
+cbor	SetType.CheckForDuplicates	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	SetType.MarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	SetType.MarshalJSON	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	SetType.UnmarshalCBOR	gap	Tagged types: rational (tag 30), set (tag 258), constructors
+cbor	SkipTags	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.Advance	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeAllDiagnosticWithLimits	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeArrayHeader	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeArrayItems	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeDiagnosticWithLimits	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.Decode	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeMapHeader	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.DecodeRaw	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.RawBytes	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.Skip	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	StreamDecoder.SkipN	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	ValidateExact	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	ValidateMapFields	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	ValidateUntrustedExact	gap	Strict/untrusted decode, stream decoder and shape validators
+cbor	Value.MarshalJSON	gap	Generic Value/LazyValue decode and JSON
+cbor	Value.UnmarshalCBOR	gap	Generic Value/LazyValue decode and JSON
+cbor	ViewWithin	vectors	Preserved original bytes (DecodeStoreCbor, ViewWithin)
+.	Connection.Close	modelled	Connection setup/close/dial
+connection	ConnectionId.String	gap	ConnectionId printing
+.	Connection.DialTimeout	modelled	Connection setup/close/dial
+consensus	BlockBuilder.BuildHeader	gap	Praos header construction
+consensus	BlockBuilder.CheckSlotLeadership	vectors	Praos leader election (E34 schedules)
+consensus/byron	ByronConfig.EpochFirstSlot	modelled	Byron slot/epoch arithmetic
+consensus/byron	ByronConfig.IsEpochBoundarySlot	modelled	Byron slot/epoch arithmetic
+consensus/byron	ByronConfig.SlotLeader	gap	Byron round-robin slot leader
+consensus/byron	ByronConfig.SlotToEpochChecked	modelled	Byron slot/epoch arithmetic
+consensus/byron	ByronConfig.SlotToEpoch	modelled	Byron slot/epoch arithmetic
+consensus/byron	ByronTxFeePolicy.CalculateMinFee	gap	Byron linear fee
+consensus/byron	HeaderValidator.ValidateHeader	vectors	Byron header validation
+consensus/byron	NewByronConfigFromGenesis	vectors	Byron genesis config and delegation view
+consensus/byron	NewHeaderValidator	vectors	Byron header validation
+consensus/byron	NewPBFTDelegationState	modelled	Byron heavyweight delegation state
+consensus/byron	NewPBFTStateFromConfig	modelled	PBFT signature window
+consensus/byron	NewPBFTStateWithThreshold	modelled	PBFT signature window
+consensus/byron	PBFTDelegationState.ActiveDelegations	modelled	Byron heavyweight delegation state
+consensus/byron	PBFTDelegationState.ApplyPayloadCbor	modelled	Byron heavyweight delegation state
+consensus/byron	PBFTDelegationState.ApplyPayload	modelled	Byron heavyweight delegation state
+consensus/byron	PBFTDelegationState.Tick	modelled	Byron heavyweight delegation state
+consensus/byron	PBFTState.Observe	modelled	PBFT signature window
+consensus/byron	PBFTState.SignatureHistory	modelled	PBFT signature window
+consensus/byron	PBFTState.Transition	modelled	PBFT signature window
+consensus/byron	PBFTVerificationKeyHash	vectors	Byron PBFT header crypto
+consensus/byron	ValidateBodyHash	vectors	Byron body proof
+consensus/byron	ValidateByronBlockHeader	vectors	Byron header validation
+consensus/byron	ValidateEBBBodyHash	vectors	Byron body proof
+consensus/byron	ValidatePBFTHeaderCrypto	vectors	Byron PBFT header crypto
+consensus/byron	ValidatePBFTHeader	vectors	Byron PBFT header crypto
+consensus	ComputeVRFInput	vectors	VRF input builders
+consensus	FindNextSlotLeadershipContext	gap	Next-leader-slot search
+consensus/genesis	ComputeGenesisWindow	gap	Genesis window size (sgen)
+consensus/genesis	Density	gap	Float density helpers
+consensus/genesis	ExpectedDensity	gap	Float density helpers
+consensus/genesis	GenesisSelector.Compare	modelled	Genesis density ordering
+consensus/genesis	GenesisSelector.Preferred	modelled	Genesis density ordering
+consensus/genesis	GenesisSelector.ShouldUseGenesis	caller-contract	Genesis sync-mode switch
+consensus/genesis	NewGenesisSelector	gap	Genesis window size (sgen)
+consensus/genesis	SimpleChainFragment.BlockCountInWindow	modelled	Genesis density ordering
+consensus	HeaderValidator.ValidateHeader	modelled	Praos/TPraos header validation
+consensus	IsSlotLeaderFromComponentsWithMode	vectors	Praos leader election (E34 schedules)
+consensus	IsSlotLeaderWithMode	vectors	Praos leader election (E34 schedules)
+consensus	IsTachysSlotLeader	modelled	Tachys schedule, forging and authorization
+consensus	LeaderEligibility.CheckCertifiedNatural	vectors	E34 leader eligibility predicate
+consensus	LeaderEligibility.CheckVRFOutput	vectors	E34 leader eligibility predicate
+consensus	NewNetworkConfigFromFile	gap	Shelley genesis NetworkConfig loader
+consensus	NewNetworkConfigFromReader	gap	Shelley genesis NetworkConfig loader
+consensus	NewSimpleVRFSigner	vectors	Praos leader election (E34 schedules)
+consensus	NewTachysBlockBuilder	modelled	Tachys schedule, forging and authorization
+consensus	NewTachysHeaderValidator	modelled	Tachys schedule, forging and authorization
+consensus	NewTachysLeaderSelector	modelled	Tachys schedule, forging and authorization
+consensus	PraosChainSelector.Compare	modelled	Praos chain ordering and preference
+consensus	PraosChainSelector.CompareWithDensity	modelled	Deep-fork density routing
+consensus	PraosChainSelector.IsDeepFork	modelled	Deep-fork density routing
+consensus	PraosChainSelector.PreferCandidate	modelled	Praos chain ordering and preference
+consensus	PraosChainSelector.PreferCandidateWithDensity	modelled	Deep-fork density routing
+consensus	QuickValidateHeader	gap	QuickValidateHeader structural check
+consensus	SimpleChainTip.Density	gap	Tip density window counting
+consensus	SimpleVRFSigner.Destroy	gap	VRF signer key erasure
+consensus	TachysLeaderSelector.AuthorizeIssuer	modelled	Tachys schedule, forging and authorization
+consensus	TachysLeaderSelector.IsLeader	modelled	Tachys schedule, forging and authorization
+consensus	TachysLeaderSelector.LeaderForSample	modelled	Tachys schedule, forging and authorization
+consensus	TachysLeaderSelector.Leader	modelled	Tachys schedule, forging and authorization
+consensus	TachysSample	gap	Tachys sample hash representation
+consensus	VrfLeaderValue	vectors	E34 leader eligibility predicate
+consensus	WindowedChainTip.BlocksInWindow	gap	Tip density window counting
+consensus	WindowedChainTip.Density	gap	Tip density window counting
+kes	KeyGen	vectors	Sum6 KES sign/verify/evolve
+kes	NewSumKesFromBytes	vectors	Sum6 KES sign/verify/evolve
+kes	PublicKey	vectors	Sum6 KES sign/verify/evolve
+kes	SecretKey.Zeroize	gap	KES secret erasure
+kes	SignatureSize	vectors	Sum6 KES sign/verify/evolve
+kes	Sign	vectors	Sum6 KES sign/verify/evolve
+kes	Sum0KesSigFromBytes	vectors	Sum6 KES sign/verify/evolve
+kes	Sum0KesSig.Verify	vectors	Sum6 KES sign/verify/evolve
+kes	SumXKesSig.Verify	vectors	Sum6 KES sign/verify/evolve
+kes	Update	vectors	Sum6 KES sign/verify/evolve
+kes	VerifySignedKES	vectors	Sum6 KES sign/verify/evolve
+ledger/allegra	AllegraBlock.MarshalCBOR	vectors	allegra codecs
+ledger/allegra	AllegraBlock.Transactions	vectors	Block.Transactions (pre-Alonzo)
+ledger/allegra	AllegraBlock.UnmarshalCBOR	vectors	allegra codecs
+ledger/allegra	AllegraBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/allegra	AllegraTransactionBody.Certificates	modelled	Allegra UTxO rule
+ledger/allegra	AllegraTransactionBody.Id	vectors	Allegra tx id
+ledger/allegra	AllegraTransactionBody.Inputs	modelled	Allegra UTxO rule
+ledger/allegra	AllegraTransactionBody.MarshalCBOR	vectors	allegra codecs
+ledger/allegra	AllegraTransactionBody.Outputs	modelled	Allegra UTxO rule
+ledger/allegra	AllegraTransactionBody.ProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/allegra	AllegraTransactionBody.UnmarshalCBOR	vectors	allegra codecs
+ledger/allegra	AllegraTransactionBody.Withdrawals	modelled	Allegra UTxO rule
+ledger/allegra	AllegraTransaction.Cbor	vectors	allegra codecs
+ledger/allegra	AllegraTransaction.MarshalCBOR	vectors	allegra codecs
+ledger/allegra	AllegraTransaction.Produced	modelled	Allegra UTxO rule
+ledger/allegra	AllegraTransaction.UnmarshalCBOR	vectors	allegra codecs
+ledger/allegra	AllegraTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/allegra	NewAllegraBlockFromCbor	vectors	allegra codecs
+ledger/allegra	NewAllegraBlockHeaderFromCbor	vectors	allegra codecs
+ledger/allegra	NewAllegraTransactionBodyFromCbor	vectors	allegra codecs
+ledger/allegra	NewAllegraTransactionFromCbor	vectors	allegra codecs
+ledger/allegra	UtxoValidateFeeTooSmallUtxo	modelled	Allegra UTxO rule
+ledger/allegra	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/allegra	UtxoValidateNativeScripts	modelled	Native scripts (witness family)
+ledger/allegra	UtxoValidateOutputTooSmallUtxo	modelled	Allegra UTxO rule
+ledger/allegra	UtxoValidateOutsideValidityIntervalUtxo	modelled	Allegra UTxO rule
+ledger/allegra	UtxoValidateValueNotConservedUtxo	modelled	Allegra UTxO rule
+ledger/alonzo	AlonzoBlock.MarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoBlock.Transactions	modelled	Block.Transactions validity flags (Alonzo+)
+ledger/alonzo	AlonzoBlock.UnmarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoGenesis.ApplyExtraConfigCostModels	gap	Shelley-Babbage pparam update application
+ledger/alonzo	AlonzoGenesisCostModels.UnmarshalJSON	vectors	Alonzo genesis
+ledger/alonzo	AlonzoGenesisExecutionPrices.UnmarshalJSON	vectors	Alonzo genesis
+ledger/alonzo	AlonzoGenesisExUnits.UnmarshalJSON	vectors	Alonzo genesis
+ledger/alonzo	AlonzoProtocolParameters.UpdateFromGenesis	gap	Shelley-Babbage pparam update application
+ledger/alonzo	AlonzoProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/alonzo	AlonzoProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/alonzo	AlonzoRedeemers.Indexes	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoRedeemers.Iter	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoRedeemers.MarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoRedeemers.UnmarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoRedeemers.Value	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoRedeemer.UnmarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransactionBody.Certificates	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransactionBody.Collateral	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransactionBody.Id	vectors	Alonzo tx id
+ledger/alonzo	AlonzoTransactionBody.Inputs	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransactionBody.MarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransactionBody.Outputs	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransactionBody.ProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/alonzo	AlonzoTransactionBody.TransactionNetworkId	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/alonzo	AlonzoTransactionBody.UnmarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransactionBody.Withdrawals	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransaction.Cbor	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransaction.Consumed	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransaction.MarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransactionOutput.MarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransactionOutput.MarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoTransactionOutput.String	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoTransactionOutput.ToPlutusData	vectors	Alonzo/Babbage output ToPlutusData
+ledger/alonzo	AlonzoTransactionOutput.UnmarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransactionOutput.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoTransaction.Produced	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	AlonzoTransaction.UnmarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	AlonzoTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	AlonzoTransactionWitnessSet.UnmarshalCBOR	vectors	alonzo codecs
+ledger/alonzo	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/alonzo	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/alonzo	NewAlonzoBlockFromCbor	vectors	alonzo codecs
+ledger/alonzo	NewAlonzoBlockHeaderFromCbor	vectors	alonzo codecs
+ledger/alonzo	NewAlonzoGenesisFromFile	vectors	Alonzo genesis
+ledger/alonzo	NewAlonzoGenesisFromReader	vectors	Alonzo genesis
+ledger/alonzo	NewAlonzoTransactionBodyFromCbor	vectors	alonzo codecs
+ledger/alonzo	NewAlonzoTransactionFromCbor	vectors	alonzo codecs
+ledger/alonzo	NewAlonzoTransactionOutputFromCbor	vectors	alonzo codecs
+ledger/alonzo	PlutusDataList.MarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/alonzo	UtxoValidateCollateralContainsNonAda	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateCostModelsPresent	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/alonzo	UtxoValidateExUnitsTooBigUtxo	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/alonzo	UtxoValidateFeeTooSmallUtxo	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateInsufficientCollateral	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateIsValidFlag	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateMalformedReferenceScripts	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/alonzo	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/alonzo	UtxoValidateMetadata	gap	Pre-Conway metadata rule
+ledger/alonzo	UtxoValidateNoCollateralInputs	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateOutputTooBigUtxo	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateOutputTooSmallUtxo	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidatePlutusScripts	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/alonzo	UtxoValidateProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/alonzo	UtxoValidateScriptDataHash	modelled	Alonzo witness/datum/integrity rules
+ledger/alonzo	UtxoValidateSupplementalDatums	modelled	Alonzo witness/datum/integrity rules
+ledger/alonzo	UtxoValidateTooManyCollateralInputs	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateTransactionNetworkId	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/alonzo	UtxoValidateValueNotConservedUtxo	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	UtxoValidateWithdrawals	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger/alonzo	ValidateInsufficientCollateral	modelled	Alonzo UTxO, collateral and IsValid rules
+ledger	ApplyTxError.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	ApplyTxError.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/babbage	BabbageBlockHeaderBody.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageBlockHeader.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageBlock.MarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageBlock.Transactions	modelled	Block.Transactions validity flags (Alonzo+)
+ledger/babbage	BabbageBlock.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/babbage	BabbageProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/babbage	BabbageProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/babbage	BabbageProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/babbage	BabbageTransactionBody.Certificates	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionBody.Collateral	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionBody.CollateralReturn	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionBody.Id	vectors	Babbage tx id
+ledger/babbage	BabbageTransactionBody.Inputs	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionBody.MarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionBody.Outputs	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionBody.ProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/babbage	BabbageTransactionBody.ReferenceInputs	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionBody.TransactionNetworkId	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/babbage	BabbageTransactionBody.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionBody.Withdrawals	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransaction.Cbor	vectors	babbage codecs
+ledger/babbage	BabbageTransaction.Consumed	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransaction.MarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionOutput.DatumHash	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionOutput.Datum	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionOutputDatumOption.MarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionOutputDatumOption.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionOutput.MarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionOutput.MarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/babbage	BabbageTransactionOutput.ScriptRef	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransactionOutput.String	gap	UTxO RPC / JSON / String conversions
+ledger/babbage	BabbageTransactionOutput.ToPlutusData	vectors	Alonzo/Babbage output ToPlutusData
+ledger/babbage	BabbageTransactionOutput.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/babbage	BabbageTransaction.Produced	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	BabbageTransaction.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/babbage	BabbageTransactionWitnessSet.MarshalCBOR	vectors	babbage codecs
+ledger/babbage	BabbageTransactionWitnessSet.UnmarshalCBOR	vectors	babbage codecs
+ledger/babbage	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/babbage	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/babbage	NewBabbageBlockFromCbor	vectors	babbage codecs
+ledger/babbage	NewBabbageBlockHeaderFromCbor	vectors	babbage codecs
+ledger/babbage	NewBabbageTransactionBodyFromCbor	vectors	babbage codecs
+ledger/babbage	NewBabbageTransactionFromCbor	vectors	babbage codecs
+ledger/babbage	NewBabbageTransactionOutputFromCborLenient	vectors	babbage codecs
+ledger/babbage	NewBabbageTransactionOutputFromCbor	vectors	babbage codecs
+ledger	BabbageNonDisjointRefInputs.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	BabbageOutputTooSmallUTxO.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/babbage	UtxoValidateCollateralContainsNonAda	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateCollateralEqBalance	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateCostModelsPresent	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/babbage	UtxoValidateDisjointRefInputs	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateExUnitsTooBigUtxo	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/babbage	UtxoValidateFeeTooSmallUtxo	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateInlineDatumsWithPlutusV1	modelled	Babbage witness/datum/integrity rules
+ledger/babbage	UtxoValidateInsufficientCollateral	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateIsValidFlag	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateMalformedReferenceScripts	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/babbage	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/babbage	UtxoValidateMetadata	gap	Pre-Conway metadata rule
+ledger/babbage	UtxoValidateNativeScripts	modelled	Native scripts (witness family)
+ledger/babbage	UtxoValidateNoCollateralInputs	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateOutputTooBigUtxo	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateOutputTooSmallUtxo	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidatePlutusScripts	gap	Alonzo/Babbage Plutus, cost-model, ex-units and reference-script well-formedness
+ledger/babbage	UtxoValidateProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/babbage	UtxoValidateScriptDataHash	modelled	Babbage witness/datum/integrity rules
+ledger/babbage	UtxoValidateSupplementalDatums	modelled	Babbage witness/datum/integrity rules
+ledger/babbage	UtxoValidateTooManyCollateralInputs	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateTransactionNetworkId	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/babbage	UtxoValidateValueNotConservedUtxo	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	UtxoValidateWithdrawals	modelled	Babbage UTxO, collateral and IsValid rules
+ledger/babbage	ValidateInlineDatumsWithPlutusV1	modelled	Babbage witness/datum/integrity rules
+ledger	BadInputsUtxo.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/byron	ByronEpochBoundaryBlock.BlockBodyHashChecked	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronEpochBoundaryBlock.BodyCbor	vectors	Byron codecs
+ledger/byron	ByronEpochBoundaryBlockHeader.BlockBodyHashChecked	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronEpochBoundaryBlockHeader.BlockBodyHash	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronEpochBoundaryBlockHeader.SlotNumber	vectors	Byron slot arithmetic
+ledger/byron	ByronEpochBoundaryBlockHeader.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronEpochBoundaryBlock.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronEpochBoundaryBlock.ValidateBodyProof	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronEpochSscState.AccumulateBlock	vectors	Byron SSC accumulation
+ledger/byron	ByronGenesisFtsSeed.MarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/byron	ByronGenesisFtsSeed.UnmarshalJSON	vectors	Byron genesis
+ledger/byron	ByronGenesis.GenesisDelegateKeyHashes	vectors	Byron genesis
+ledger/byron	ByronGenesis.GenesisUtxos	vectors	Byron genesis
+ledger/byron	ByronLovelacePortion.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronMainBlock.BlockBodyHashChecked	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronMainBlockBody.MarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronMainBlockBody.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronMainBlockBody.ValidateUpdatePayloadStructure	vectors	Byron update payload (stateless)
+ledger/byron	ByronMainBlockHeader.BlockBodyHashChecked	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronMainBlockHeader.BlockBodyHash	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronMainBlockHeader.SlotNumber	vectors	Byron slot arithmetic
+ledger/byron	ByronMainBlockHeader.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronMainBlock.Transactions	vectors	Byron codecs
+ledger/byron	ByronMainBlock.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronMainBlock.ValidateBodyProof	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	ByronMainBlock.ValidateDelegationPayload	vectors	Byron delegation payload (stateless)
+ledger/byron	ByronMainBlock.ValidatePayloads	vectors	Byron update payload (stateless)
+ledger/byron	ByronMainBlock.ValidateUpdatePayload	vectors	Byron update payload (stateless)
+ledger/byron	ByronSoftForkRule.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransactionBody.Id	vectors	Byron tx id
+ledger/byron	ByronTransactionBody.Inputs	modelled	Byron UTxO rule
+ledger/byron	ByronTransactionBody.Outputs	modelled	Byron UTxO rule
+ledger/byron	ByronTransactionBody.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransaction.Cbor	vectors	Byron codecs
+ledger/byron	ByronTransactionInput.MarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransactionInput.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransaction.MarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransactionOutput.MarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransactionOutput.ToPlutusData	gap	Pre-Alonzo output ToPlutusData
+ledger/byron	ByronTransactionOutput.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransactionOutput.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/byron	ByronTransaction.Produced	modelled	Byron UTxO rule
+ledger/byron	ByronTransaction.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronTransaction.ValidateAgainstUtxo	modelled	Byron UTxO rule
+ledger/byron	ByronTransaction.ValidateByronVKeyWitnesses	modelled	Byron UTxO rule
+ledger/byron	ByronTransaction.ValidateVKeyWitnesses	modelled	Byron UTxO rule
+ledger/byron	ByronTransaction.Witnesses	modelled	Byron UTxO rule
+ledger/byron	ByronTxFeePolicy.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronUpdatePayload.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronUpdateProposalBlockVersionMod.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronUpdateProposal.UnmarshalCBOR	vectors	Byron codecs
+ledger/byron	ByronUpdateProposal.ValidateSystemTags	vectors	Byron update payload (stateless)
+ledger/byron	ByronUpdateProposal.Validate	vectors	Byron update payload (stateless)
+ledger/byron	DelegationCertificate.Verify	vectors	Byron delegation payload (stateless)
+ledger/byron	EncodeDelegationEpoch	vectors	Byron delegation payload (stateless)
+ledger/byron	MerkleRoot	vectors	Byron body proof, body hash, Merkle root
+ledger/byron	NewByronEpochBoundaryBlockFromCbor	vectors	Byron codecs
+ledger/byron	NewByronEpochBoundaryBlockHeaderFromCbor	vectors	Byron codecs
+ledger/byron	NewByronGenesisFromFile	vectors	Byron genesis
+ledger/byron	NewByronGenesisFromReader	vectors	Byron genesis
+ledger/byron	NewByronMainBlockFromCbor	vectors	Byron codecs
+ledger/byron	NewByronMainBlockHeaderFromCbor	vectors	Byron codecs
+ledger/byron	NewByronTransactionFromCbor	vectors	Byron codecs
+ledger/byron	NewByronTransactionInput	gap	Byron constructors
+ledger/byron	NewByronTransactionOutputFromCbor	vectors	Byron codecs
+ledger/byron	NewByronTransactionWitnessSet	gap	Byron constructors
+ledger/byron	ParseDelegationCertificate	vectors	Byron delegation payload (stateless)
+ledger/byron	ParseUpdateVote	vectors	Byron update payload (stateless)
+ledger/byron	SlotNumberFromBlockHeader	vectors	Byron slot arithmetic
+ledger/byron	SlotNumberFromEpochAndSlot	vectors	Byron slot arithmetic
+ledger/byron	SlotNumberFromHeader	vectors	Byron slot arithmetic
+ledger/byron	UpdateVote.Verify	vectors	Byron update payload (stateless)
+ledger/byron	VerifyDelegationCertificateSignature	vectors	Byron delegation payload (stateless)
+ledger	CalculateBlockBodyHash	vectors	Block body hash computation and check
+ledger	CollateralContainsNonADA.MarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	CollateralContainsNonADA.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/common	AddInt64Checked	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	Address.Bytes	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.MarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.NetworkId	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.PaymentAddress	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.PaymentKeyHash	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.RewardAccountCredential	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.StakeAddress	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.StakeCredential	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.StakeKeyHash	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Address.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Address.UnmarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	Address.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	AlonzoAuxiliaryData.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	AssetFingerprint.Hash	vectors	Asset fingerprint
+ledger/common	AssetFingerprint.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	AuthCommitteeHotCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	AuthCommitteeHotCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	BabbageTransactionMetadataSet.UnmarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	BigIntToUtxorpcBigInt	gap	UTxO RPC conversions
+ledger/common	Blake2b160Hash	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	Blake2b160.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Blake2b160.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Blake2b224.Bech32	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Blake2b224Hash	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	Blake2b224.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Blake2b224.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Blake2b256.Bech32	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Blake2b256Cache.Get	modelled	Blake2b256Cache.Get lock-free memo
+ledger/common	Blake2b256Hash	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	Blake2b256.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Blake2b256.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	BlockBodySizeFromCbor	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
+ledger/common	BlockLedgerState.ApplyCertificateDepositLevel	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.ApplyPoolCertificates	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.ApplyTransaction	modelled	BlockLedgerState UTxO fold (ApplyTransaction, UtxoById)
+ledger/common	BlockLedgerState.CommitteeMember	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.DRepRegistration	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.DRepRegistrations	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.GovActionById	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.GovActionExists	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	BlockLedgerState.IsFutureVrfKeyInUse	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.IsPoolRegistered	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.IsRewardAccountRegistered	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.IsStakeCredentialRegistered	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.IsVrfKeyInUse	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.PoolCurrentState	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.PoolPendingParameters	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.RewardAccountBalance	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	BlockLedgerState.UtxoById	modelled	BlockLedgerState UTxO fold (ApplyTransaction, UtxoById)
+ledger/common	BootstrapWitness.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ByronAddressAttributes.ExtraSize	gap	Bootstrap address attribute size
+ledger/common	ByronAddressAttributes.MarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	ByronAddressAttributes.UnmarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	ByronTxFeePolicy.MinFee	modelled	Byron min fee policy
+ledger/common	CalculateAdaPots	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	CalculateEpochNonce	modelled	Nonce combination, rolling and epoch nonce
+ledger/common	CalculateExecutionUnitsFee	gap	Min fee, tx size, execution-unit fee (incl. Conway ref-script tiers)
+ledger/common	CalculateMinFee	gap	Min fee, tx size, execution-unit fee (incl. Conway ref-script tiers)
+ledger/common	CalculateOptimalPoolCount	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	CalculatePoolSaturation	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	CalculateRewards	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	CalculateRollingNonce	modelled	Nonce combination, rolling and epoch nonce
+ledger/common	CertificateLogicalKey	gap	Duplicate certificate/pool-owner detection
+ledger/common	CertificateWrapper.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	CheckAccountAddress	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	CheckAddressFullyConsumed	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	CheckAddressPointerInRange	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	CloneCostModels	vectors	Protocol parameter CBOR codecs (ExUnits, prices, cost models)
+ledger/common	CombineNonces	modelled	Nonce combination, rolling and epoch nonce
+ledger/common	CommitteeCredentialStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	CommitteeHotCredentialMembersFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	CommitteeVotingStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	CompareRedeemerKeys	vectors	Script integrity hash encoding (language views, redeemer key order)
+ledger/common	ComposeUtxoValidationRules	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	ConsumedReferenceScriptSizePerBlock	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
+ledger/common	ConvertToUtxorpcCardanoCostModels	gap	UTxO RPC conversions
+ledger/common	CostModelsToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Credential.Hash	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Credential.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Credential.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Credential.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Credential.Utxorpc	gap	UTxO RPC conversions
+ledger/common	CurrentTreasuryValueMismatchError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	Datum.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Datum.MarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Datum.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Datum.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	DecodeAuxiliaryDataForEra	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	DecodeAuxiliaryDataToMetadata	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	DecodeBlockWithOffsets	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	DecodeMetadatumRaw	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	DeregistrationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	DeregistrationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	DeregistrationDrepCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	DeregistrationDrepCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	DijkstraBlsProofDomainFor	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	DijkstraLeiosCertificateMessageFor	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	DRepDelegationStateFor	gap	BlockLedgerState Conway overlay (DReps, proposals, committee) within a block
+ledger/common	Drep.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Drep.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Drep.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Drep.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Drep.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Drep.Utxorpc	gap	UTxO RPC conversions
+ledger/common	DuplicateLogicalMapKeyError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	EncodeLangViews	vectors	Script integrity hash encoding (language views, redeemer key order)
+ledger/common	EncodeRewardAccountMap	gap	Reward-account ordering and withdrawal map encoding
+ledger/common	EncodeTransactionBodyWithValidityIntervalUpperBound	vectors	Tx body id and validity-upper-bound re-encoding
+ledger/common	EpochNonceFromNonces	modelled	Nonce combination, rolling and epoch nonce
+ledger/common	EraById	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	ExtractAndSetTransactionCbor	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
+ledger/common	ExtractOutputCbor	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	ExtractTransactionBodyCbor	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	ExtractTransactionOffsets	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	ExtractWitnessCbor	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	ExUnitPrice.UnmarshalCBOR	vectors	Protocol parameter CBOR codecs (ExUnits, prices, cost models)
+ledger/common	ExUnits.UnmarshalCBOR	vectors	Protocol parameter CBOR codecs (ExUnits, prices, cost models)
+ledger/common	FirstInvalidNativeScriptIn	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	FirstInvalidNativeScript	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	FuturePoolParametersStateFor	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	GenesisDelegationFromCertificate	gap	Genesis delegation scheduling within a block
+ledger/common	GenesisDelegationsFor	gap	Genesis delegation scheduling within a block
+ledger/common	GenesisKeyDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	GovActionId.MarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	GovActionId.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	GovActionId.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	GovActionId.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	GovAnchor.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	GovAnchor.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	GovAnchor.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	HardForkInitiationGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	InstantaneousRewardsTotalsFor	modelled	BlockLedgerState MIR totals within a block
+ledger/common	IssuerVkey.Hash	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	IssuerVkey.PoolId	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	IssuerVkey.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	LeiosEbCertificate.MarshalCBOR	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	LeiosEbCertificate.SetAggregatedSignature	modelled	Leios certificate shape: bitfield size/bits, signature validation
+ledger/common	LeiosEbCertificate.UnmarshalCBOR	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	LeiosEbCertificate.Validate	modelled	Leios certificate shape: bitfield size/bits, signature validation
+ledger/common	LeiosEndorserBlock.Hash	gap	Endorser block decode (no duplicate refs, size), hash
+ledger/common	LeiosEndorserBlock.MarshalCBOR	gap	Endorser block decode (no duplicate refs, size), hash
+ledger/common	LeiosEndorserBlock.UnmarshalCBOR	gap	Endorser block decode (no duplicate refs, size), hash
+ledger/common	LeiosKey.UnmarshalCBOR	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	LeiosKey.UnmarshalJSON	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	LeiosPrototypeVote.UnmarshalCBOR	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	LeiosSignerBit	modelled	Leios certificate shape: bitfield size/bits, signature validation
+ledger/common	LeiosVote.MarshalCBOR	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	LeiosVote.UnmarshalCBOR	vectors	Leios vote/certificate/key CBOR and BLS domain/message helpers
+ledger/common	MalformedScriptWitnessesError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	MetaBytes.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	MetaInt.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	MetaList.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	MetaMap.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	MetaText.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	MoveInstantaneousRewardsCertificateReward.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	MoveInstantaneousRewardsCertificateReward.RewardsAmount	modelled	MIR genesis quorum and classic PPUP rules
+ledger/common	MoveInstantaneousRewardsCertificateReward.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	MoveInstantaneousRewardsCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	MoveInstantaneousRewardsCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	MultiAsset.Add	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	MultiAsset.Asset	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	MultiAsset.Assets	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	MultiAsset.CheckForDuplicateKeys	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.CheckForEmptyMultiAsset	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.CheckForZeroAssets	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.Compare	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	MultiAsset.EncodedSize	gap	Output CBOR size and value size (min-UTxO, max value size)
+ledger/common	MultiAsset.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	MultiAsset.MarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	MultiAsset.Policies	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	MultiAsset.RangeUnordered	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	MultiAsset.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	MultiAsset.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	MultiAsset.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	MultiAsset.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	MultiAsset.ValidateMintQuantities	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MultiAsset.ValidateOutputQuantities	gap	MultiAsset well-formedness (zero/negative/empty/duplicate)
+ledger/common	MustUtxoValidationRulesFromDescriptors	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	NativeScript.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	NativeScriptPubkey.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	NativeScriptsForValidation	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	NativeScript.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	NewAddressFromBytesLenient	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	NewAddressFromBytes	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	NewAddressFromParts	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	NewAddress	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	NewBlake2b160Checked	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	NewBlake2b224Checked	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	NewBlake2b256Checked	vectors	Blake2b hash helpers, pool id from issuer vkey
+ledger/common	NewByronAddressFromParts	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	NewByronAddressRedeem	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	NewConstitutionGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	NewConstitutionGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	NewGenesisRat	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	NewGovActionId	gap	Voting procedure mutators and gov constructors
+ledger/common	NewGovAnchor	gap	Voting procedure mutators and gov constructors
+ledger/common	NewLeiosEndorserBlockFromCbor	gap	Endorser block decode (no duplicate refs, size), hash
+ledger/common	NewMultiAsset	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	NewNewConstitutionGovAction	gap	Voting procedure mutators and gov constructors
+ledger/common	NewPoolIdFromBech32	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	NewScriptHashFromBech32	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	NewStreamingBlockDecoder	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	NewTreasuryWithdrawalGovAction	gap	Voting procedure mutators and gov constructors
+ledger/common	NewUpdateCommitteeGovAction	gap	Voting procedure mutators and gov constructors
+ledger/common	NoConfidenceGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	NonceFromPraosVRF	modelled	Nonce combination, rolling and epoch nonce
+ledger/common	NonceFromTPraosVRF	modelled	Nonce combination, rolling and epoch nonce
+ledger/common	Nonce.MarshalCBOR	vectors	Nonce CBOR/JSON codecs
+ledger/common	Nonce.UnmarshalCBOR	vectors	Nonce CBOR/JSON codecs
+ledger/common	Nonce.UnmarshalJSON	vectors	Nonce CBOR/JSON codecs
+ledger/common	NotAllowedSupplementalDatumsError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	ParsePoolMarginJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	PendingInstantaneousRewardsFor	modelled	BlockLedgerState MIR totals within a block
+ledger/common	PlutusScriptVersion	vectors	PlutusV1-V4 EvaluateContext
+ledger/common	PlutusV1Script.EvaluateContext	vectors	PlutusV1-V4 EvaluateContext
+ledger/common	PlutusV2Script.EvaluateContext	vectors	PlutusV1-V4 EvaluateContext
+ledger/common	PlutusV3Script.EvaluateContext	vectors	PlutusV1-V4 EvaluateContext
+ledger/common	PlutusV4Script.EvaluateContext	vectors	PlutusV1-V4 EvaluateContext
+ledger/common	PlutusV4ScriptsFromWitnessSet	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	PooledEvalContext	gap	PooledEvalContext (Plutus machine/eval context pool)
+ledger/common	PoolId.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolMetadataHash.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolMetadataHash.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolMetadataHash.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	PoolMetadata.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolMetadata.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolMetadata.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	PoolMetadata.Utxorpc	gap	UTxO RPC conversions
+ledger/common	PoolOwnersWitnessRequired	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	PoolRegistrationCertificate.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolRegistrationCertificate.MarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	PoolRegistrationCertificate.RewardAccountCredential	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRegistrationCertificate.SetCbor	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRegistrationCertificate.SetRewardAccountCredential	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRegistrationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolRegistrationCertificate.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	PoolRegistrationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	PoolRegistrationDepositDue	modelled	Pool deposit due and stake deposit refund
+ledger/common	PoolRelayIpv6WireOrder	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	PoolRelay.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolRelay.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PoolRelay.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	PoolRelay.Utxorpc	gap	UTxO RPC conversions
+ledger/common	PoolRetirementCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PreConwayWithdrawals.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	PreverifySignatures	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ProtocolParameterUpdateCostModelError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	ProtocolParameterUpdateEpochError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	ReassembleTransactionCbor	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	RedeemerKey.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	RedeemerTag.MarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	RedeemerTag.UnmarshalJSON	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	RedeemerValue.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	RegisterEra	gap	MultiAsset accessors, era registry, AddInt64Checked
+ledger/common	RegistrationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	RegistrationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	RegistrationDrepCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	RegistrationDrepCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	ResignCommitteeColdCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ResignCommitteeColdCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	ResolveInputUtxo	modelled	ResolveInputUtxo (input existence)
+ledger/common	RewardService.CalculateEpochRewards	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	RewardService.ValidateRewardDistribution	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	ScheduleGenesisDelegation	gap	Genesis delegation scheduling within a block
+ledger/common/script	AvailablePlutusScripts	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	BuildScriptPurpose	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	CheckPlutusV1V3Features	vectors	CheckPlutusV1V3Features (Conway features under PlutusV1/V2)
+ledger/common/script	EvaluatePlutusScripts	vectors	EvaluatePlutusScripts: phase-2 driver (budgets, IsValid outcome)
+ledger/common/script	NativeScriptsToEvaluate	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	NewCachedTxInfo	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewNativeScriptEnv	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	NewTxInfoV1FromTransaction	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewTxInfoV2FromTransaction	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewTxInfoV3FromTransaction	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	NewTxScriptView	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	NewTxScriptViewSkippingUnresolved	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	Option.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	PlutusWitnessScripts	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common	ScriptRef.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ScriptRef.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common/script	ResolveTxInputs	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	ScriptPurposeCertifying.ScriptHash	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	ScriptPurposeGuarding.ScriptHash	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	ScriptPurposeProposing.ScriptHash	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	ScriptPurposes	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	SortInputs	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	SortVoters	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	TimeRange.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	ToPairs	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	TxInfoV1.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	TxScriptView.AllResolvedInputs	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	TxScriptView.NeedsAny	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	TxScriptView.UsedPlutusVersions	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	ValidatePlutusV3ReferenceInputs	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	ValidateRequiredRedeemers	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	VoterUsesScriptCredential	modelled	Needed scripts, script purposes, native-script env, required redeemers
+ledger/common/script	WithOptionDatum.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithPartialCertificates.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithWrappedStakeCredential.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithWrappedTransactionId.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common/script	WithZeroAdaAsset.ToPlutusData	gap	Plutus script context (TxInfo V1/V2/V3, purposes, time range, wrappers)
+ledger/common	ShelleyAuxiliaryData.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	ShelleyMaAuxiliaryData.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	ShortLex	vectors	Script integrity hash encoding (language views, redeemer key order)
+ledger/common	SortRewardAccountAddresses	gap	Reward-account ordering and withdrawal map encoding
+ledger/common	StakeCredentialDepositOrDefault	modelled	Pool deposit due and stake deposit refund
+ledger/common	StakeCredentialDepositStateFor	modelled	BlockLedgerState account/pool fold and queries
+ledger/common	StakeDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	StakeDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	StakeDeregistrationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	StakeDeregistrationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	StakeRegistrationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	StakeRegistrationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	StakeRegistrationDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	StakeRegistrationDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	StakeVoteDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	StakeVoteDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	StakeVoteRegistrationDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	StakeVoteRegistrationDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	StreamingBlockDecoder.DecodeWithOffsets	vectors	Block offset extraction and streaming decode, tx CBOR reassembly
+ledger/common	SubTransactionBodiesFromTransaction	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	SubTransactionOutputsFromTransaction	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	SubTransactionWitnessSetsFromTransaction	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	ToUtxorpcBigInt	gap	UTxO RPC conversions
+ledger/common	ToUtxorpcRationalNumber	gap	UTxO RPC conversions
+ledger/common	TransactionBodyBase.DecodeTransactionBodyFieldPresence	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	TransactionBodyBase.DecodeValidityIntervalUpperBoundPresence	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	TransactionBodyBase.ValidityIntervalLowerBoundPresent	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	TransactionBodyId	vectors	Tx body id and validity-upper-bound re-encoding
+ledger/common	TransactionBodyToUtxorpc	gap	UTxO RPC conversions
+ledger/common	TransactionCurrentTreasuryValuePresent	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	TransactionMetadataSet.MarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	TransactionMetadataSet.UnmarshalCBOR	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	TransactionMetadataSet.ValidateAuxiliaryDataForEra	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	TransactionMetadataSet.ValidateIndices	vectors	Auxiliary data / metadata codecs and era checks
+ledger/common	TransactionOutputCborSize	gap	Output CBOR size and value size (min-UTxO, max value size)
+ledger/common	TransactionOutputsAndCollateralReturn	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	TransactionRunsPhase2Scripts	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	TransactionTotalCollateralPresent	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	TransactionToUtxorpc	gap	UTxO RPC conversions
+ledger/common	TransactionValidityFlags	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
+ledger/common	TransactionValidityIntervalLowerBound	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	TransactionValidityIntervalUpperBound	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	TreasuryWithdrawalGovAction.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	TreasuryWithdrawalGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	TreasuryWithdrawalGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	TxComponent.String	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	TxDecodeError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	TxDecodeError.Unwrap	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	TxDecodeError.WithDiagnostic	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	TxSize	gap	Min fee, tx size, execution-unit fee (incl. Conway ref-script tiers)
+ledger/common	UnwrapLedgerState	caller-contract	UnwrapLedgerState capability lookup
+ledger/common	UpdateCommitteeGovAction.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	UpdateCommitteeGovAction.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	UpdateCommitteeGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	UpdateCommitteeGovAction.Validate	gap	UpdateCommitteeGovAction.Validate
+ledger/common	UpdateDrepCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	UpdateDrepCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	UsedPlutusVersions	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	UtxoValidateCurrentTreasuryValueAnyPhase	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	UtxoValidateCurrentTreasuryValue	modelled	Current treasury value, Dijkstra sub-transaction accessors, PlutusV4 scripts
+ledger/common	UtxoValidateOutsideForecast	gap	Outside-forecast rule
+ledger/common	UtxoValidateProposalReturnAddressShape	gap	Proposal return address shape
+ledger/common	UtxoValidateSignatures	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	UtxoValidationRulesFromDescriptors	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	ValidateAuxiliaryDataPlutusScriptsWellFormed	vectors	Script well-formedness and native constructor support
+ledger/common	ValidateAuxiliaryDataScriptsWellFormed	vectors	Script well-formedness and native constructor support
+ledger/common	ValidateBlockBodyHash	modelled	Block body counts, validity flags, body hash/size, per-block ref-script size
+ledger/common	ValidateBootstrapWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateCBORArrayLength	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ValidateCertificateSet	gap	Duplicate certificate/pool-owner detection
+ledger/common	ValidateClassicCostModelUpdate	gap	Protocol parameter update domain checks (cost models, intervals, well-formedness)
+ledger/common	ValidateClassicProtocolParameterUpdates	modelled	MIR genesis quorum and classic PPUP rules
+ledger/common	ValidateClassicProtocolParameterUpdateWitnesses	modelled	MIR genesis quorum and classic PPUP rules
+ledger/common	ValidateCollateralKeyLocked	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	ValidateCollateralVKeyWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateCostModelLanguageIDs	gap	Bounded rational / cost model language id validation by protocol version
+ledger/common	ValidateDefiniteCBORArrayLength	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ValidateExactExtraneousRedeemers	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateExtraneousRedeemers	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateInputVKeyWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateLeiosSignature	modelled	Leios certificate shape: bitfield size/bits, signature validation
+ledger/common	ValidateLeiosSignerBitfield	modelled	Leios certificate shape: bitfield size/bits, signature validation
+ledger/common	ValidateLeiosSignerBitfieldSize	modelled	Leios certificate shape: bitfield size/bits, signature validation
+ledger/common	ValidateMapFields	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ValidateMIRGenesisQuorum	modelled	MIR genesis quorum and classic PPUP rules
+ledger/common	ValidateNativeScriptConstructors	vectors	Script well-formedness and native constructor support
+ledger/common	ValidateNativeScriptOutputConstructor	vectors	Script well-formedness and native constructor support
+ledger/common	ValidateNonNegativeBoundedRatArrayCBORForVersion	gap	Bounded rational / cost model language id validation by protocol version
+ledger/common	ValidateNonNegativeBoundedRatCBORForVersion	gap	Bounded rational / cost model language id validation by protocol version
+ledger/common	ValidateNonNegativeInterval	gap	Protocol parameter update domain checks (cost models, intervals, well-formedness)
+ledger/common	ValidateNullOrFixedLengthByteStringCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	ValidateOutsideForecast	gap	Outside-forecast rule
+ledger/common	ValidatePlutusScriptResult	modelled	UTXO rule helpers: IsValid result, collateral key-locked, validity bounds, outputs incl. return, total collateral, value add/compare, rule list composition
+ledger/common	ValidatePlutusScriptsWellFormed	vectors	Script well-formedness and native constructor support
+ledger/common	ValidatePoolMargin	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidatePoolMetadataForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidatePoolPledge	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	ValidatePoolRegistrationOwners	gap	Duplicate certificate/pool-owner detection
+ledger/common	ValidatePoolRelaysForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidatePreConwayCertificateTypes	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
+ledger/common	ValidateProtocolParameterUpdateDomains	gap	Protocol parameter update domain checks (cost models, intervals, well-formedness)
+ledger/common	ValidateRedeemerAndScriptWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateRedeemerTagLimit	gap	Redeemer tag limit per era
+ledger/common	ValidateRequiredSpendingDatums	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateRequiredSpendingDatumsWithAvailableScripts	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateRequiredVKeyWitnessesWithPoolOwners	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateScriptWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateSupplementalDatums	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateSupplementalDatumsWithExtraBodies	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateUnsupportedPlutusExecution	gap	ValidateUnsupportedPlutusExecution (fail closed when an era has no Plutus)
+ledger/common	ValidateVKeyWitnesses	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	ValidateWithdrawalAddresses	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
+ledger/common	ValidationError.Error	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	ValidationError.WithDiagnostic	gap	Error()/Unwrap/WithDiagnostic string methods
+ledger/common	VerifyTransactionWithSignatures	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	VerifyVKeySignature	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
+ledger/common	VkeyWitness.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	VoteDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	VoteDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	VoteRegistrationDelegationCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	VoteRegistrationDelegationCertificate.Utxorpc	gap	UTxO RPC conversions
+ledger/common	Voter.MarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Voter.String	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Voter.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	Voter.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	Voter.UnmarshalText	gap	JSON/text/bech32 codecs (incl. genesis pool JSON, pool margin, GenesisRat)
+ledger/common	Vote.ToPlutusData	gap	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
+ledger/common	VotingProcedures.AddOrReplace	gap	Voting procedure mutators and gov constructors
+ledger/common	VotingProcedures.Clone	gap	Voting procedure mutators and gov constructors
+ledger/common	VotingProcedures.LookupGovActionId	gap	Voting procedure mutators and gov constructors
+ledger/common	VotingProcedures.LookupVoter	gap	Voting procedure mutators and gov constructors
+ledger/common	VotingProcedures.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	VotingProcedures.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/common	VotingProcedure.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
+ledger/conway	CalculateRefScriptFee	modelled	Conway reference-script fee and size
+ledger/conway	CommitteeExpiryEpochUnavailableError.Error	gap	Errors: Error() strings
+ledger/conway	ConflictingCommitteeUpdateError.Error	gap	Errors: Error() strings
+ledger/conway	ConwayBlockHeader.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayBlock.MarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayBlock.Transactions	modelled	Block.Transactions validity flags (Alonzo+)
+ledger/conway	ConwayBlock.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayGenesisDelegatee.UnmarshalJSON	vectors	Conway genesis
+ledger/conway	ConwayGenesisDelegs.UnmarshalJSON	vectors	Conway genesis
+ledger/conway	ConwayGenesisInitialDReps.UnmarshalJSON	vectors	Conway genesis
+ledger/conway	ConwayGovAction.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayParameterChangeGovAction.GetPolicyHash	gap	Conway gov helpers and constructors
+ledger/conway	ConwayParameterChangeGovAction.PreviousGovActionId	gap	Conway gov helpers and constructors
+ledger/conway	ConwayParameterChangeGovAction.ProtocolParamUpdateUtxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayParameterChangeGovAction.SecurityGroupFields	gap	Conway pparams application and security groups
+ledger/conway	ConwayParameterChangeGovAction.ToPlutusData	gap	Conway script-context translation of governance
+ledger/conway	ConwayParameterChangeGovAction.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayProposalProcedure.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayProtocolParameters.ApplyUpdate	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameters.CommitteeMaxTermLength	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameters.UpdateFromGenesis	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameters.Update	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayProtocolParameterUpdate.SecurityGroupFields	gap	Conway pparams application and security groups
+ledger/conway	ConwayProtocolParameterUpdate.ToPlutusData	gap	Conway script-context translation of governance
+ledger/conway	ConwayProtocolParameterUpdate.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayProtocolParameterUpdate.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayRedeemers.Indexes	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayRedeemers.Iter	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayRedeemers.Len	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayRedeemers.MarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayRedeemers.MarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayRedeemers.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayRedeemers.UnmarshalJSON	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayRedeemers.Value	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.Certificates	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.CollateralReturn	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.Collateral	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.CurrentTreasuryValue	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger/conway	ConwayTransactionBody.Id	vectors	Conway tx id
+ledger/conway	ConwayTransactionBody.Inputs	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.MarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayTransactionBody.Outputs	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.ProposalProcedures	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.ReferenceInputs	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionBody.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayTransactionBody.Withdrawals	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransaction.Cbor	vectors	conway codecs
+ledger/conway	ConwayTransaction.Consumed	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger/conway	ConwayTransactionInputSet.CheckForDuplicates	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ConwayTransactionInputSet.MarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayTransactionInputSet.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayTransaction.MarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayTransaction.Produced	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger/conway	ConwayTransaction.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/conway	ConwayTransactionWitnessSet.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	ConwayVotingProcedure.UnmarshalCBOR	vectors	conway codecs
+ledger/conway	GovernanceStateUnavailableError.Error	gap	Errors: Error() strings
+ledger/conway	MinCoinTxOut	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	MinFeeTx	modelled	Conway reference-script fee and size
+ledger/conway	MinFeeTxWithRefScriptSize	modelled	Conway reference-script fee and size
+ledger/conway	MinFeeTxWithUtxo	modelled	Conway reference-script fee and size
+ledger/conway	NewConwayBlockFromCbor	vectors	conway codecs
+ledger/conway	NewConwayBlockHeaderFromCbor	vectors	conway codecs
+ledger/conway	NewConwayGenesisFromFile	vectors	Conway genesis
+ledger/conway	NewConwayGenesisFromReader	vectors	Conway genesis
+ledger/conway	NewConwayGovAction	gap	Conway gov helpers and constructors
+ledger/conway	NewConwayParameterChangeGovAction	gap	Conway gov helpers and constructors
+ledger/conway	NewConwayProposalProcedure	gap	Conway gov helpers and constructors
+ledger/conway	NewConwayTransactionBodyFromCbor	vectors	conway codecs
+ledger/conway	NewConwayTransactionFromCbor	vectors	conway codecs
+ledger/conway	PoolValidateVrfKeyUniqueness	gap	Conway pool VRF-key uniqueness (PV11)
+ledger/conway	TreasuryWithdrawalReturnAccountsDoNotExistError.Error	gap	Errors: Error() strings
+ledger/conway	UnknownGovActionIdError.Error	gap	Errors: Error() strings
+ledger/conway	UtxoValidateBootstrapAllowedGovActions	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateBootstrapVotingRestrictions	gap	Conway voter-x-action restrictions
+ledger/conway	UtxoValidateCCVotingRestrictions	gap	Conway voter-x-action restrictions
+ledger/conway	UtxoValidateCertificateDeposits	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger/conway	UtxoValidateCollateralContainsNonAda	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateCommitteeCertificates	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateConwayFeaturesWithPlutusV1V2	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateCostModelsPresent	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateDelegation	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateDisjointRefInputs	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger/conway	UtxoValidateEmptyTreasuryWithdrawals	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateExtraneousRedeemers	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateExUnitsTooBigUtxo	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateFeeTooSmallUtxo	modelled	Conway reference-script fee and size
+ledger/conway	UtxoValidateGovActionWellFormedness	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateGuardrailsScriptHash	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateHardForkCanFollow	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateInsufficientCollateral	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateIsValidFlag	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateMalformedReferenceScripts	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateMaxTxSizeUtxo	gap	Conway max tx size
+ledger/conway	UtxoValidateMetadata	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateNoCollateralInputs	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateOutputTooBigUtxo	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateOutputTooSmallUtxo	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidatePlutusScripts	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateProposalAncestry	modelled	Conway governance ancestry and live-vote lookup
+ledger/conway	UtxoValidateProposalDeposit	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateProposalNetworkIds	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateProposalProcedures	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateProposalReturnAccounts	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateRedeemerAndScriptWitnesses	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateRefScriptSizePerTx	modelled	Conway reference-script fee and size
+ledger/conway	UtxoValidateScriptDataHash	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateStakePoolVotingRestrictions	gap	Conway voter-x-action restrictions
+ledger/conway	UtxoValidateSupplementalDatums	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateTooManyCollateralInputs	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateTransactionNetworkId	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	UtxoValidateUnelectedCommitteeVoters	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateUnknownGovActionIds	modelled	Conway governance ancestry and live-vote lookup
+ledger/conway	UtxoValidateUnknownVoters	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateValueNotConservedUtxo	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger/conway	UtxoValidateVotingOnExpiredGovAction	caller-contract	Conway vote expiry
+ledger/conway	UtxoValidateWithdrawals	modelled	Conway balance, deposits, withdrawals, disjointness
+ledger	ConwayUtxowFailure.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/conway	ValidateCommitteeTerm	gap	Conway governance rules not pinned by vectors
+ledger/conway	ValidateConwayFeaturesWithPlutusV1V2	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ValidateHeaderProtocolVersion	modelled	Conway header protocol version
+ledger/conway	ValidateProtocolParameterUpdateNonZeroFields	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	ValidateRefScriptSizePerBlock	modelled	Conway per-block reference-script limit
+ledger/conway	ValidateTreasuryDonationScriptCompatibility	vectors	Conway rules exercised by Blueprint vectors
+ledger/conway	WrongNetworkProposalAddressError.Error	gap	Errors: Error() strings
+ledger	CreateOpCert	gap	CreateOpCert (opcert construction)
+ledger	DetermineBlockType	vectors	Block and header decoding, era detection
+ledger	DetermineTransactionType	vectors	Transaction/body/output decoding and tx-type detection
+ledger/dijkstra	ApplyConwayRefScriptFeeDefaults	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	BalancesOutsideAccountBalanceIntervalsError.Error	gap	Errors: Error() strings
+ledger/dijkstra	DijkstraAccountBalanceInterval.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraAccountBalanceIntervals.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraAccountBalanceInterval.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlockBody.Hash	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlockBody.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlockBody.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlock.HasInlinedCertifiedTransactions	modelled	Dijkstra Leios header certification rules
+ledger/dijkstra	DijkstraBlockHeader.LeiosAnnouncement	modelled	Dijkstra Leios header certification rules
+ledger/dijkstra	DijkstraBlockHeader.LeiosCertified	modelled	Dijkstra Leios header certification rules
+ledger/dijkstra	DijkstraBlockHeader.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlockHeader.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlock.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlock.OnChainBlockBodyCbor	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlock.Transactions	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlock.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/dijkstra	DijkstraDirectDeposits.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraGenesis.UnmarshalJSON	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraGovAction.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraGuards.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraGuards.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraLeiosCertificate.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraLeiosCertificate.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraLeiosCertificate.Validate	gap	Dijkstra Leios certificate field validation
+ledger/dijkstra	DijkstraParameterChangeGovAction.GetPolicyHash	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraParameterChangeGovAction.PreviousGovActionId	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraParameterChangeGovAction.ProtocolParamUpdateUtxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/dijkstra	DijkstraParameterChangeGovAction.SecurityGroupFields	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraParameterChangeGovAction.ToPlutusData	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProposalProcedure.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraProtocolParameters.ApplyUpdate	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProtocolParameters.CommitteeMaxTermLength	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProtocolParameters.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraProtocolParameters.RewardParams	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProtocolParameters.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraProtocolParameters.UpdateFromGenesis	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProtocolParameterUpdate.MarshalCBOR	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProtocolParameterUpdate.ToPlutusData	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraProtocolParameterUpdate.UnmarshalCBOR	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	DijkstraRedeemers.Indexes	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	DijkstraRedeemers.Iter	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	DijkstraRedeemers.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraRedeemers.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraRedeemers.Value	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	DijkstraRequiredTopLevelGuards.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraSubTransactionBody.CurrentTreasuryValue	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraSubTransactionBody.Id	vectors	Dijkstra tx ids
+ledger/dijkstra	DijkstraSubTransactionBody.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraSubTransactionBody.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraSubTransaction.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraSubTransaction.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransactionBody.CollateralReturn	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	DijkstraTransactionBody.CurrentTreasuryValue	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransactionBody.Id	vectors	Dijkstra tx ids
+ledger/dijkstra	DijkstraTransactionBody.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransactionBody.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransaction.Cbor	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransaction.Consumed	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransaction.Id	vectors	Dijkstra tx ids
+ledger/dijkstra	DijkstraTransaction.LedgerEffectLevels	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransaction.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransactionOutput.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransactionOutput.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransaction.Produced	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransaction.SubTransactionBodies	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransaction.SubTransactionOutputs	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransaction.SubTransactionWitnessSets	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	DijkstraTransaction.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/dijkstra	DijkstraTransactionWitnessSet.MarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	DijkstraTransactionWitnessSet.UnmarshalCBOR	vectors	Dijkstra codecs
+ledger/dijkstra	EvaluatePlutusScripts	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	LeiosClosureSize	gap	Dijkstra Leios size bounds
+ledger/dijkstra	LeiosMinCertificationSlot	modelled	Dijkstra Leios header certification rules
+ledger/dijkstra	MalformedGuardDatums.Error	gap	Errors: Error() strings
+ledger/dijkstra	MalformedGuardDatums.UnmarshalCBOR	gap	Errors: Error() strings
+ledger/dijkstra	MinCoinTxOut	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	MinFeeTx	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	MinFeeTxWithRefScriptSize	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	MinFeeTxWithUtxo	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	MissingAccountsInBalanceIntervalsError.Error	gap	Errors: Error() strings
+ledger/dijkstra	MissingRequiredGuards.Error	gap	Errors: Error() strings
+ledger/dijkstra	MissingRequiredGuards.UnmarshalCBOR	gap	Errors: Error() strings
+ledger/dijkstra	NewDijkstraBlockFromCbor	vectors	Dijkstra codecs
+ledger/dijkstra	NewDijkstraBlockHeaderFromCbor	vectors	Dijkstra codecs
+ledger/dijkstra	NewDijkstraGenesisFromFile	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	NewDijkstraGenesisFromReader	gap	Dijkstra pparams, genesis and script context
+ledger/dijkstra	NewDijkstraTransactionBodyFromCbor	vectors	Dijkstra codecs
+ledger/dijkstra	NewDijkstraTransactionFromCborComponents	vectors	Dijkstra codecs
+ledger/dijkstra	UtxoValidateAccountBalanceIntervals	gap	Dijkstra legacy-mode value and account balance intervals
+ledger/dijkstra	UtxoValidateBadInputsUtxo	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateBatchWithdrawals	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateBootstrapAllowedGovActions	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidateCertificateDeposits	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateCollateralContainsNonAda	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateConwayFeaturesWithPlutusV1V2	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidateCostModelsPresent	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateExtraneousRedeemers	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateExUnitsTooBigUtxo	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateFeeTooSmallUtxo	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateInlineDatumsWithPlutusV1	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateInputSetEmptyUtxo	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateInsufficientCollateral	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateIsValidFlag	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidateMalformedReferenceScripts	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateMaxTxSizeUtxo	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateMetadata	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidateNativeScripts	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateNoCollateralInputs	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateOutputTooBigUtxo	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateOutputTooSmallUtxo	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateOutsideForecast	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateOutsideValidityIntervalUtxo	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidatePlutusScripts	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidatePoolCertificates	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidateProposalProcedures	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidatePtrPresentInCollateralReturn	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateRedeemerAndScriptWitnesses	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateRefScriptSizePerTx	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateRequiredVKeyWitnesses	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateScriptDataHash	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateScriptWitnesses	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateSignatures	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateSupplementalDatums	modelled	Dijkstra witness rules (top level)
+ledger/dijkstra	UtxoValidateTooManyCollateralInputs	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateTransactionNetworkId	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	UtxoValidateTreasuryDonationScripts	gap	Dijkstra pool, governance, metadata and IsValid rules
+ledger/dijkstra	UtxoValidateValueNotConservedLegacyModeUtxo	gap	Dijkstra legacy-mode value and account balance intervals
+ledger/dijkstra	UtxoValidateValueNotConservedUtxo	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateWithdrawals	modelled	Dijkstra sub-transaction batch rules
+ledger/dijkstra	UtxoValidateWrongNetworkWithdrawal	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	ValidateHeaderProtocolVersion	modelled	Dijkstra header protocol version
+ledger/dijkstra	ValidateLeiosAnnouncementSize	gap	Dijkstra Leios size bounds
+ledger/dijkstra	ValidateLeiosCertificateTiming	modelled	Dijkstra Leios header certification rules
+ledger/dijkstra	ValidateLeiosClosureSize	gap	Dijkstra Leios size bounds
+ledger/dijkstra	ValidateRefScriptSizePerBlock	gap	Dijkstra collateral, outputs, network, size, ex-units, scripts
+ledger/dijkstra	ValueNotConservedInLegacyModeError.Error	gap	Errors: Error() strings
+ledger	ExtractBlockHeaderCbor	vectors	Block and header decoding, era detection
+ledger	ExtractKesFields	vectors	KES signature verification of a header
+ledger	ExtractOpCertFromHeader	vectors	Opcert signature, KES period window, opcert extraction
+ledger	ExtractOpCert	vectors	Opcert signature, KES period window, opcert extraction
+ledger	ExtractTokens	gap	Exported helpers GetTxBodies/GetBlockOutput/ExtractTokens/GetList*CertPoolId
+ledger	ExtraneousScriptWitnessesUTXOW.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	ExtraRedeemers.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	GenericError.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	GetBlockOutput	gap	Exported helpers GetTxBodies/GetBlockOutput/ExtractTokens/GetList*CertPoolId
+ledger	GetHeaderBodyCbor	vectors	KES signature verification of a header
+ledger	GetListRegisCertPoolId	gap	Exported helpers GetTxBodies/GetBlockOutput/ExtractTokens/GetList*CertPoolId
+ledger	GetListUnregisCertPoolId	gap	Exported helpers GetTxBodies/GetBlockOutput/ExtractTokens/GetList*CertPoolId
+ledger	GetTxBodies	gap	Exported helpers GetTxBodies/GetBlockOutput/ExtractTokens/GetList*CertPoolId
+ledger/leios	VerifyDijkstraCertificateForMessage	modelled	Leios certificate verification (committee, bitfield, quorum, aggregate signature)
+ledger/leios	VerifyPossessionProofForDomain	vectors	BLS possession-proof verification
+ledger	MalformedReferenceScripts.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	MalformedScriptWitnesses.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/mary	MaryBlock.MarshalCBOR	vectors	mary codecs
+ledger/mary	MaryBlock.Transactions	vectors	Block.Transactions (pre-Alonzo)
+ledger/mary	MaryBlock.UnmarshalCBOR	vectors	mary codecs
+ledger/mary	MaryBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/mary	MaryProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/mary	MaryProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/mary	MaryProtocolParameterUpdate.MarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/mary	MaryProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/mary	MaryTransactionBody.Certificates	modelled	Mary UTxO rule
+ledger/mary	MaryTransactionBody.Id	vectors	Mary tx id
+ledger/mary	MaryTransactionBody.Inputs	modelled	Mary UTxO rule
+ledger/mary	MaryTransactionBody.MarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransactionBody.Outputs	modelled	Mary UTxO rule
+ledger/mary	MaryTransactionBody.ProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/mary	MaryTransactionBody.UnmarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransactionBody.ValidityIntervalLowerBound	modelled	Mary UTxO rule
+ledger/mary	MaryTransactionBody.ValidityIntervalStart	modelled	Mary UTxO rule
+ledger/mary	MaryTransactionBody.Withdrawals	modelled	Mary UTxO rule
+ledger/mary	MaryTransaction.Cbor	vectors	mary codecs
+ledger/mary	MaryTransaction.MarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransactionOutput.String	gap	UTxO RPC / JSON / String conversions
+ledger/mary	MaryTransactionOutput.ToPlutusData	gap	Pre-Alonzo output ToPlutusData
+ledger/mary	MaryTransactionOutput.UnmarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransactionOutput.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/mary	MaryTransactionOutputValue.LedgerSerializedSize	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/mary	MaryTransactionOutputValue.MarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransactionOutputValue.UnmarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransaction.Produced	modelled	Mary UTxO rule
+ledger/mary	MaryTransaction.UnmarshalCBOR	vectors	mary codecs
+ledger/mary	MaryTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/mary	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/mary	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/mary	NewMaryBlockFromCbor	vectors	mary codecs
+ledger/mary	NewMaryBlockHeaderFromCbor	vectors	mary codecs
+ledger/mary	NewMaryTransactionBodyFromCbor	vectors	mary codecs
+ledger/mary	NewMaryTransactionFromCbor	vectors	mary codecs
+ledger/mary	NewMaryTransactionOutputFromCbor	vectors	mary codecs
+ledger/mary	OutputTooBigUtxoError.Error	gap	Errors: Error() strings
+ledger/mary	UtxoValidateFeeTooSmallUtxo	modelled	Mary UTxO rule
+ledger/mary	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/mary	UtxoValidateOutputTooBigUtxo	modelled	Mary UTxO rule
+ledger/mary	UtxoValidateOutputTooSmallUtxo	modelled	Mary UTxO rule
+ledger/mary	UtxoValidateValueNotConservedUtxo	modelled	Mary UTxO rule
+ledger	MissingRedeemers.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	MissingScriptWitnessesUTXOW.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	MissingVKeyWitnessesUTXOW.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	NewBlockFromCbor	vectors	Block and header decoding, era detection
+ledger	NewBlockFromCborWithOffsets	vectors	Block and header decoding, era detection
+ledger	NewBlockHeaderFromCbor	vectors	Block and header decoding, era detection
+ledger	NewEraMismatchErrorFromCbor	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	NewGenericErrorFromCbor	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	NewShelleyTxValidationErrorFromCbor	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	NewTransactionBodyFromCbor	vectors	Transaction/body/output decoding and tx-type detection
+ledger	NewTransactionFromCbor	vectors	Transaction/body/output decoding and tx-type detection
+ledger	NewTransactionOutputFromCbor	vectors	Transaction/body/output decoding and tx-type detection
+ledger	NewTxSubmitErrorFromCbor	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	OutputBootAddrAttrsTooBig.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	OutputTooBigUtxo.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	OutputTooSmallUtxo.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	OutsideValidityIntervalUtxo.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	ScriptsNotPaidUtxo.MarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	ScriptsNotPaidUtxo.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	ScriptWitnessNotValidatingUTXOW.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/shelley	BadInputsUtxoError.Error	gap	Errors: Error() strings
+ledger/shelley	FeeTooSmallUtxoError.Error	gap	Errors: Error() strings
+ledger/shelley	IncorrectWithdrawalAmountError.Error	gap	Errors: Error() strings
+ledger/shelley	MinCoinTxOut	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/shelley	MinFeeTx	gap	Pre-Conway fee and min-UTxO arithmetic
+ledger/shelley	MIRNegativesNotCurrentlyAllowedError.Error	gap	Errors: Error() strings
+ledger/shelley	MIRProducesNegativeUpdateError.Error	gap	Errors: Error() strings
+ledger/shelley	MustNewShelleyTransactionInput	gap	Shelley constructors
+ledger/shelley	NewShelleyBlockFromCbor	vectors	shelley codecs
+ledger/shelley	NewShelleyBlockHeaderFromCbor	vectors	shelley codecs
+ledger/shelley	NewShelleyGenesisFromFile	vectors	Shelley genesis
+ledger/shelley	NewShelleyGenesisFromReader	vectors	Shelley genesis
+ledger/shelley	NewShelleyTransactionBodyFromCbor	vectors	shelley codecs
+ledger/shelley	NewShelleyTransactionFromCbor	vectors	shelley codecs
+ledger/shelley	NewShelleyTransactionInput	gap	Shelley constructors
+ledger/shelley	NewShelleyTransactionOutputFromCbor	vectors	shelley codecs
+ledger/shelley	OutputBootAddrAttrsTooBigError.Error	gap	Errors: Error() strings
+ledger/shelley	OutputTooSmallUtxoError.Error	gap	Errors: Error() strings
+ledger/shelley	PendingInstantaneousRewardsUnavailableError.Error	gap	Errors: Error() strings
+ledger/shelley	ShelleyBlockHeaderBody.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyBlockHeader.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyBlock.MarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyBlock.Transactions	vectors	Block.Transactions (pre-Alonzo)
+ledger/shelley	ShelleyBlock.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyBlock.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/shelley	ShelleyGenesisExtraPool.UnmarshalJSON	vectors	Shelley genesis
+ledger/shelley	ShelleyGenesis.GenesisUtxos	vectors	Shelley genesis
+ledger/shelley	ShelleyGenesis.InitialPools	gap	Shelley genesis staking and CBOR
+ledger/shelley	ShelleyGenesis.MarshalCBOR	gap	Shelley genesis staking and CBOR
+ledger/shelley	ShelleyGenesis.PoolById	gap	Shelley genesis staking and CBOR
+ledger/shelley	ShelleyProtocolParameters.UpdateFromGenesis	gap	Shelley-Babbage pparam update application
+ledger/shelley	ShelleyProtocolParameters.Update	gap	Shelley-Babbage pparam update application
+ledger/shelley	ShelleyProtocolParameters.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/shelley	ShelleyProtocolParameterUpdate.UnmarshalCBOR	gap	Shelley-Babbage pparam update application
+ledger/shelley	ShelleyTransactionBody.Certificates	modelled	Shelley UTxO rule core
+ledger/shelley	ShelleyTransactionBody.Id	vectors	Shelley tx id
+ledger/shelley	ShelleyTransactionBody.Inputs	modelled	Shelley UTxO rule core
+ledger/shelley	ShelleyTransactionBody.MarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionBody.Outputs	modelled	Shelley UTxO rule core
+ledger/shelley	ShelleyTransactionBody.ProtocolParameterUpdates	modelled	Shelley PPUP field accessor
+ledger/shelley	ShelleyTransactionBody.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionBody.Withdrawals	modelled	Shelley UTxO rule core
+ledger/shelley	ShelleyTransaction.Cbor	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionInputSet.MarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionInputSet.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionInput.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransaction.MarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionOutput.ToPlutusData	gap	Pre-Alonzo output ToPlutusData
+ledger/shelley	ShelleyTransactionOutput.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionOutput.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/shelley	ShelleyTransaction.Produced	modelled	Shelley UTxO rule core
+ledger/shelley	ShelleyTransaction.UnmarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransaction.Utxorpc	gap	UTxO RPC / JSON / String conversions
+ledger/shelley	ShelleyTransactionWitnessSet.MarshalCBOR	vectors	shelley codecs
+ledger/shelley	ShelleyTransactionWitnessSet.UnmarshalCBOR	vectors	shelley codecs
+ledger	ShelleyTxValidationError.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger/shelley	UtxoValidateDelegation	modelled	Shelley DELEG/POOL certificates
+ledger/shelley	UtxoValidateFeeTooSmallUtxo	modelled	Shelley UTxO rule core
+ledger/shelley	UtxoValidateInputSetEmptyUtxo	modelled	Shelley UTxO rule core
+ledger/shelley	UtxoValidateMaxTxSizeUtxo	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/shelley	UtxoValidateMetadata	gap	Pre-Conway metadata rule
+ledger/shelley	UtxoValidateNativeScripts	modelled	Native scripts (witness family)
+ledger/shelley	UtxoValidateNoDuplicateInputs	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/shelley	UtxoValidateOutputBootAddrAttrsTooBig	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/shelley	UtxoValidateOutputTooSmallUtxo	modelled	Shelley UTxO rule core
+ledger/shelley	UtxoValidatePoolCertificates	modelled	Shelley DELEG/POOL certificates
+ledger/shelley	UtxoValidateTimeToLive	modelled	Shelley UTxO rule core
+ledger/shelley	UtxoValidateValueNotConservedUtxo	modelled	Shelley UTxO rule core
+ledger/shelley	UtxoValidateWithdrawals	modelled	Shelley UTxO rule core
+ledger/shelley	UtxoValidateWrongNetwork	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/shelley	UtxoValidateWrongNetworkWithdrawal	gap	Pre-Conway network, duplicate-input, bootstrap-attr and size checks
+ledger/shelley	ValidateBadInputs	modelled	Shelley UTxO rule core
+ledger/shelley	ValidateMetadataContent	gap	Pre-Conway metadata rule
+ledger/shelley	ValueNotConservedUtxoError.Error	gap	Errors: Error() strings
+ledger/shelley	WrongNetworkError.Error	gap	Errors: Error() strings
+ledger/shelley	WrongNetworkWithdrawalError.Error	gap	Errors: Error() strings
+ledger	UnspendableUTxONoDatumHash.Error	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	UtxoFailure.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	UtxowFailure.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
+ledger	ValidateKesPeriod	vectors	Opcert signature, KES period window, opcert extraction
+ledger	ValidateOpCert	vectors	Opcert signature, KES period window, opcert extraction
+ledger	VerifyBlockBody	vectors	Block body hash computation and check
+ledger	VerifyBlockState	modelled	VerifyBlockState: block-level limits, tx order, ref-script total, Leios wiring
+ledger	VerifyKesComponents	vectors	KES signature verification of a header
+ledger	VerifyKes	vectors	KES signature verification of a header
+ledger	VerifyOpCertSignature	vectors	Opcert signature, KES period window, opcert extraction
+muxer	EgressClassOf	gap	Muxer egress (Send, egress class)
+muxer	Muxer.IngressBackpressure	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.IngressLimit	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.RaiseReadBufferBudget	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.RegisterProtocol	modelled	Muxer protocol registration/suspend/carry
+muxer	Muxer.ReleaseReadBuffer	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.ReserveReadBuffer	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.Send	gap	Muxer egress (Send, egress class)
+muxer	Muxer.SetIngressBackpressure	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.SetIngressBudgetExtension	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.SetIngressLimit	modelled	Muxer ingress limits/budget/backpressure
+muxer	Muxer.SetMetrics	gap	Muxer metrics hook
+muxer	Muxer.Start	gap	Muxer start gate
+muxer	Muxer.StartOnce	gap	Muxer start gate
+muxer	Muxer.SuspendProtocol	modelled	Muxer protocol registration/suspend/carry
+muxer	Muxer.TakeCarriedIngress	modelled	Muxer protocol registration/suspend/carry
+muxer	Muxer.UnregisterProtocol	modelled	Muxer protocol registration/suspend/carry
+muxer	NewSegment	gap	SDU segment header codec
+muxer	SegmentHeader.GetProtocolId	gap	SDU segment header codec
+.	NetworkById	gap	Network table lookups
+.	NetworkByName	gap	Network table lookups
+.	NetworkByNetworkMagic	gap	Network table lookups
+.	NewConnection	modelled	Connection setup/close/dial
+pipeline	ApplyMetricsRecorder	gap	Pipeline metrics
+pipeline	ApplyStageRunner.Start	modelled	Pipeline lifecycle and worker pools
+pipeline	ApplyStageRunner.Stop	modelled	Pipeline lifecycle and worker pools
+pipeline	BlockItem.ApplyContext	gap	Block item construction/context
+pipeline	BlockPipeline.DrainErrors	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.DrainResults	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.Errors	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.Fence	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.PendingCount	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.Results	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.Start	modelled	BlockPipeline ordering/commit/drain
+pipeline	BlockPipeline.Stop	modelled	Pipeline lifecycle and worker pools
+pipeline	BlockPipeline.WaitForDrain	modelled	BlockPipeline ordering/commit/drain
+pipeline	DecodeMetricsRecorder	gap	Pipeline metrics
+pipeline	DecodeStage.Process	gap	Decode stage block-type check
+pipeline	DecodeStageWorkerPool.Stop	modelled	Pipeline lifecycle and worker pools
+pipeline	NewBlockItem	gap	Block item construction/context
+pipeline	NewBlockPipeline	caller-contract	Pipeline construction/options
+pipeline	NewDecodeStageWorkerPool	modelled	Pipeline lifecycle and worker pools
+pipeline	NewStageWorkerPool	modelled	Pipeline lifecycle and worker pools
+pipeline	NewValidateStageWorkerPool	modelled	Pipeline lifecycle and worker pools
+pipeline	PipelineMetrics.RecordApply	gap	Pipeline metrics
+pipeline	PipelineMetrics.RecordDecode	gap	Pipeline metrics
+pipeline	PipelineMetrics.RecordValidate	gap	Pipeline metrics
+pipeline	PipelineMetrics.UpdateQueueDepth	gap	Pipeline metrics
+pipeline	StageTimings.Mean	gap	Pipeline metrics
+pipeline	StageWorkerPool.Start	modelled	Pipeline lifecycle and worker pools
+pipeline	ValidateMetricsRecorder	gap	Pipeline metrics
+pipeline	ValidateStage.Process	gap	Validate stage verifier dispatch
+pipeline	ValidateStageWorkerPool.Stop	modelled	Pipeline lifecycle and worker pools
+pipeline	WithApplyFunc	caller-contract	Pipeline construction/options
+pipeline	WithDecodeWorkers	caller-contract	Pipeline construction/options
+pipeline	WithMaxPendingBlocks	caller-contract	Pipeline construction/options
+pipeline	WithMetricsWindowSize	caller-contract	Pipeline construction/options
+pipeline	WithPrefetchBufferSize	caller-contract	Pipeline construction/options
+pipeline	WithValidateWorkers	caller-contract	Pipeline construction/options
+protocol/blockfetch	Client.GetBlock	modelled	BlockFetch range requests and queue
+protocol/blockfetch	Client.GetBlockRange	modelled	BlockFetch range requests and queue
+protocol/blockfetch	Client.RequestRange	modelled	BlockFetch range requests and queue
+protocol/blockfetch	Client.Start	modelled	BlockFetch client lifecycle
+protocol/blockfetch	Client.Stop	modelled	BlockFetch client lifecycle
+protocol/blockfetch	NewClient	modelled	BlockFetch client lifecycle
+protocol/blockfetch	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/blockfetch	NewMsgFromCbor	gap	BlockFetch message codec
+protocol/blockfetch	Server.Block	gap	BlockFetch server Block
+protocol/chainsync	Client.GetAvailableBlockRange	gap	ChainSync GetAvailableBlockRange
+protocol/chainsync	Client.GetCurrentTip	modelled	ChainSync tip/jump queries
+protocol/chainsync	Client.Jump	modelled	ChainSync tip/jump queries
+protocol/chainsync	Client.Reintersect	modelled	ChainSync sync window and reintersect
+protocol/chainsync	Client.Start	modelled	ChainSync client lifecycle
+protocol/chainsync	Client.StopAfterDrain	modelled	ChainSync client lifecycle
+protocol/chainsync	Client.Stop	modelled	ChainSync client lifecycle
+protocol/chainsync	Client.Sync	modelled	ChainSync sync window and reintersect
+protocol/chainsync	MsgRollForwardNtC.UnmarshalCBOR	vectors	ChainSync RollForward/header codecs
+protocol/chainsync	NewClient	modelled	ChainSync client lifecycle
+protocol/chainsync	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/chainsync	NewMsgFindIntersect	gap	ChainSync FindIntersect constructor
+protocol/chainsync	NewMsgFromCbor	vectors	ChainSync RollForward/header codecs
+protocol/chainsync	NewMsgRollForwardNtC	vectors	ChainSync RollForward/header codecs
+protocol/chainsync	NewMsgRollForwardNtN	vectors	ChainSync RollForward/header codecs
+protocol/chainsync	NewServer	modelled	ChainSync server
+protocol/chainsync	NewWrappedHeader	vectors	ChainSync RollForward/header codecs
+protocol/chainsync	Server.RollForward	modelled	ChainSync server
+protocol/chainsync	WithPipelineBufferSize	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/chainsync	WithPipelineDrainTimeout	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/chainsync	WithPipelineLimit	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/chainsync	WithRecvQueueSize	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/chainsync	WrappedHeader.MarshalCBOR	vectors	ChainSync RollForward/header codecs
+protocol/chainsync	WrappedHeader.UnmarshalCBOR	vectors	ChainSync RollForward/header codecs
+protocol/common	ComputeDmqMessageID	gap	DMQ message codec and message ID
+protocol/common	DmqMessage.ID	gap	DMQ message codec and message ID
+protocol/common	DmqMessage.MarshalCBOR	gap	DMQ message codec and message ID
+protocol/common	DmqMessagePayload.UnmarshalCBOR	gap	DMQ message codec and message ID
+protocol/common	DmqMessage.SetComputedMessageID	gap	DMQ message codec and message ID
+protocol/common	DmqMessage.UnmarshalCBOR	gap	DMQ message codec and message ID
+protocol/common	FromRejectReasonData	gap	DMQ message codec and message ID
+protocol/common	MessageAuthenticator.PrepareMessages	gap	DMQ message authentication (CIP-0137)
+protocol/common	MessageAuthenticator.VerifyMessage	gap	DMQ message authentication (CIP-0137)
+protocol/common	MessageAuthenticator.VerifyMessages	gap	DMQ message authentication (CIP-0137)
+protocol/common	NewMessageAuthenticator	gap	DMQ message authentication (CIP-0137)
+protocol/common	NewNoOpAuthenticator	caller-contract	DMQ no-op authenticator/TTL
+protocol/common	NewNoOpTTLValidator	caller-contract	DMQ no-op authenticator/TTL
+protocol/common	NewTTLValidator	gap	DMQ TTL validation
+protocol/common	Point.MarshalCBOR	vectors	Point codec
+protocol/common	Point.UnmarshalCBOR	vectors	Point codec
+protocol/common	RejectReasonData.MarshalCBOR	gap	DMQ message codec and message ID
+protocol/common	RejectReasonData.UnmarshalCBOR	gap	DMQ message codec and message ID
+protocol/common	ToRejectReasonData	gap	DMQ message codec and message ID
+protocol/common	TTLValidator.GetTimeUntilExpiration	gap	DMQ TTL validation
+protocol/common	TTLValidator.ValidateMessageTTLAt	gap	DMQ TTL validation
+protocol	GetProtocolVersion	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionMapDMQNtC	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionMapDMQNtN	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionMapWithPerasSupport	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionsDMQNtC	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionsDMQNtN	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionsNtC	gap	Version tables and feature flags (versions.go)
+protocol	GetProtocolVersionsNtN	gap	Version tables and feature flags (versions.go)
+protocol/handshake	Client.Start	modelled	Handshake client/server negotiation
+protocol/handshake	NewClient	modelled	Handshake client/server negotiation
+protocol/handshake	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/handshake	NewMsgFromCbor	modelled	Handshake message codec (version map key order)
+protocol/handshake	NewMsgProposeVersions	modelled	Handshake message codec (version map key order)
+protocol/handshake	NewMsgQueryReply	modelled	Handshake message codec (version map key order)
+protocol/handshake	NewServer	modelled	Handshake client/server negotiation
+protocol/keepalive	Client.Start	modelled	KeepAlive lifecycle
+protocol/keepalive	Client.Stop	modelled	KeepAlive lifecycle
+protocol/keepalive	KeepAlive.Start	modelled	KeepAlive lifecycle
+protocol/keepalive	KeepAlive.Stop	modelled	KeepAlive lifecycle
+protocol/keepalive	NewClient	modelled	KeepAlive lifecycle
+protocol/keepalive	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/keepalive	NewMsgFromCbor	gap	KeepAlive message codec
+protocol/keepalive	NewServer	modelled	KeepAlive lifecycle
+protocol/leiosfetch	Client.BlockRangeRequest	modelled	LeiosFetch client requests
+protocol/leiosfetch	Client.BlockRequest	modelled	LeiosFetch client requests
+protocol/leiosfetch	Client.BlockTxsRequest	modelled	LeiosFetch client requests
+protocol/leiosfetch	Client.VotesRequest	modelled	LeiosFetch client requests
+protocol/leiosfetch	MsgBlockTxs.MarshalCBOR	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	MsgBlockTxsRequest.MarshalCBOR	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	MsgLastBlockAndTxsInRange.UnmarshalCBOR	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	MsgNextBlockAndTxsInRange.UnmarshalCBOR	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	MsgVotes.DecodeVotes	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	MsgVotesRequest.UnmarshalCBOR	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	NewClient	modelled	LeiosFetch client requests
+protocol/leiosfetch	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/leiosfetch	NewMsgFromCbor	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	NewMsgVotesFromVotes	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosfetch	NewMsgVotes	gap	LeiosFetch message codecs and vote decoding
+protocol/leiosnotify	Client.Sync	modelled	LeiosNotify client sync
+protocol/leiosnotify	MsgBlockAnnouncement.MarshalCBOR	vectors	LeiosNotify message codecs
+protocol/leiosnotify	MsgBlockAnnouncement.UnmarshalCBOR	vectors	LeiosNotify message codecs
+protocol/leiosnotify	MsgVotesOffer.MarshalCBOR	vectors	LeiosNotify message codecs
+protocol/leiosnotify	MsgVotesOffer.UnmarshalCBOR	vectors	LeiosNotify message codecs
+protocol/leiosnotify	NewClient	modelled	LeiosNotify client sync
+protocol/leiosnotify	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/leiosnotify	NewMsgFromCbor	vectors	LeiosNotify message codecs
+protocol/leiosnotify	WithPipelineLimit	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/leiosvotes	Client.RequestNext	modelled	LeiosVotes client
+protocol/leiosvotes	Client.Sync	modelled	LeiosVotes client
+protocol/leiosvotes	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/leiosvotes	NewMsgFromCbor	gap	LeiosVotes message codec
+protocol/leiosvotes	WithPipelineLimit	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/leiosvotes	WithRequestNextCount	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/leiosvotes	WithTimeout	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/localmessagenotification	Client.RequestMessagesBlockingValidateTimeout	caller-contract	LocalMessageNotification timeout validation helper
+protocol/localmessagenotification	MsgReplyMessagesBlocking.MarshalCBOR	gap	LocalMessageNotification reply codecs
+protocol/localmessagenotification	MsgReplyMessagesNonBlocking.MarshalCBOR	gap	LocalMessageNotification reply codecs
+protocol/localmessagenotification	NewClient	modelled	LocalMessageNotification server wakeup
+protocol/localmessagenotification	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/localmessagenotification	NewMsgReplyMessagesBlocking	gap	LocalMessageNotification reply codecs
+protocol/localmessagenotification	NewMsgReplyMessagesNonBlocking	gap	LocalMessageNotification reply codecs
+protocol/localmessagenotification	NewServer	modelled	LocalMessageNotification server wakeup
+protocol/localmessagenotification	Server.AddMessage	modelled	LocalMessageNotification server wakeup
+protocol/localmessagenotification	Server.WaitForMessage	modelled	LocalMessageNotification server wakeup
+protocol/localmessagesubmission	Client.SubmitMessage	modelled	LocalMessageSubmission submit
+protocol/localmessagesubmission	NewClient	modelled	LocalMessageSubmission submit
+protocol/localmessagesubmission	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/localmessagesubmission	NewMsgFromCbor	gap	LocalMessageSubmission codecs
+protocol/localmessagesubmission	NewMsgRejectMessage	gap	LocalMessageSubmission codecs
+protocol/localstatequery	BlockQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	Client.Acquire	modelled	LSQ client acquire/release and server
+protocol/localstatequery	Client.DebugChainDepState	vectors	LSQ debug chain-dep state
+protocol/localstatequery	Client.DebugEpochState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.DebugNewEpochState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetAccountState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetChainBlockNo	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetChainPoint	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetCommitteeMembersState	vectors	LSQ committee members state
+protocol/localstatequery	Client.GetConstitution	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetCurrentProtocolParams	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetDRepDelegations	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetDRepStakeDistr	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetDRepState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetEpochNo	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetEraHistory	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetFilteredDelegationsAndRewardAccounts	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetFilteredVoteDelegatees	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetGenesisConfig	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetGovState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetLedgerPeerSnapshot	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetLeiosCommittee	vectors	LSQ Leios committee
+protocol/localstatequery	Client.GetMaxMajorProtocolVersion	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetNonMyopicMemberRewards	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	Client.GetOpCertCounters	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetPoolDistr2	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetPoolDistr	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetPoolState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetProposals	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetProposedProtocolParamsUpdates	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetRatifyState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetRewardInfoPools	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetRewardProvenance	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetSPOStakeDistr	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakeDelegDeposits	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakeDistribution2	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakeDistribution	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakePoolDefaultVote	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakePoolParams	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakePools	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakePoolState	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetStakeSnapshots	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetSystemStart	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetUTxOByAddress	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetUTxOByTxIn	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Client.GetUTxOWhole	gap	LSQ client query wrappers (version/era gating, result unwrap)
+protocol/localstatequery	Committee.MarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	CommitteeMembersStateResult.MarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	CommitteeMembersStateResult.UnmarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	CommitteeMemberState.MarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	CommitteeMemberState.UnmarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	Committee.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	DebugChainDepStateResult.UnmarshalCBOR	vectors	LSQ debug chain-dep state
+protocol/localstatequery	DefaultVote.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	DRepDelegationsResult.MarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	DRepDelegationsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	DRepStakeDistrResult.MarshalCBOR	vectors	LSQ DRep stake distribution
+protocol/localstatequery	DRepStakeDistrResult.UnmarshalCBOR	vectors	LSQ DRep stake distribution
+protocol/localstatequery	DRepStateEntry.MarshalCBOR	vectors	LSQ DRep state
+protocol/localstatequery	DRepStateEntry.UnmarshalCBOR	vectors	LSQ DRep state
+protocol/localstatequery	EnactState.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	EncodeCommittee	gap	LSQ governance state codecs
+protocol/localstatequery	EraHistoryResult.UnmarshalCBOR	modelled	LSQ era history result
+protocol/localstatequery	FilteredDelegationsAndRewardAccountsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	FilteredVoteDelegateesResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	GenesisConfigResult.MarshalCBOR	vectors	LSQ genesis config
+protocol/localstatequery	GenesisConfigResultProtocolParameters.MarshalCBOR	vectors	LSQ genesis config
+protocol/localstatequery	GenesisConfigResultProtocolParameters.UnmarshalCBOR	vectors	LSQ genesis config
+protocol/localstatequery	GenesisConfigResult.UnmarshalCBOR	vectors	LSQ genesis config
+protocol/localstatequery	GovActionState.MarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	GovActionState.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	GovStateResult.DecodeCommittee	gap	LSQ governance state codecs
+protocol/localstatequery	GovStateResult.DecodeDRepPulsingState	gap	LSQ governance state codecs
+protocol/localstatequery	GovStateResult.DecodeFuturePParams	gap	LSQ governance state codecs
+protocol/localstatequery	GovStateResult.MarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	GovStateResult.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	HardForkQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	HotCredAuthStatusValue.MarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	HotCredAuthStatusValue.UnmarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	IndividualPoolStake.MarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	IndividualPoolStake.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	LedgerPeerSnapshotResult.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	LedgerPeerSnapshotResult.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	LeiosCommitteeResult.MarshalCBOR	vectors	LSQ Leios committee
+protocol/localstatequery	LeiosCommitteeResult.UnmarshalCBOR	vectors	LSQ Leios committee
+protocol/localstatequery	NewClient	modelled	LSQ client acquire/release and server
+protocol/localstatequery	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/localstatequery	NewMsgFromCbor	modelled	LSQ client acquire/release and server
+protocol/localstatequery	NewServer	modelled	LSQ client acquire/release and server
+protocol/localstatequery	NextEpochChangeValue.MarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	NextEpochChangeValue.UnmarshalCBOR	vectors	LSQ committee members state
+protocol/localstatequery	NonMyopicMemberRewardsKey.Compare	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	NonMyopicMemberRewardsKey.MarshalCBOR	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	NonMyopicMemberRewardsKey.UnmarshalCBOR	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	NonMyopicMemberRewardsResult.MarshalCBOR	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	NonMyopicMemberRewardsResult.UnmarshalCBOR	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	PoolLedgerPeersDetail.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeersDetail.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeers.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolLedgerPeers.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	PoolStateParams.MarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	PoolStateParams.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	PoolStateResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	PrevGovActionIds.MarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	PrevGovActionIds.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	ProposalsResult.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	QueryWrapper.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	RatifyStateResult.UnmarshalCBOR	gap	LSQ governance state codecs
+protocol/localstatequery	RelayAccessPoint.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	RelayAccessPoint.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	RewardInfoPoolsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	RewardProvenanceResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	ShelleyCborQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyGetLedgerPeerSnapshotQuery.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	ShelleyGetLedgerPeerSnapshotQuery.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	ShelleyNonMyopicMemberRewardsQuery.UnmarshalCBOR	vectors	LSQ non-myopic member rewards
+protocol/localstatequery	ShelleyPoolDistr2Query.PoolFilter	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyPoolDistr2Query.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyPoolDistrQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyPoolStateQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyStakePoolStateQuery.MarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyStakePoolStateQuery.PoolFilter	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyStakePoolStateQuery.UnmarshalCBOR	gap	LSQ query envelope decoders
+protocol/localstatequery	ShelleyStakeSnapshotsQuery.PoolFilter	vectors	LSQ stake snapshots query
+protocol/localstatequery	ShelleyStakeSnapshotsQuery.UnmarshalCBOR	vectors	LSQ stake snapshots query
+protocol/localstatequery	StakeDelegDepositsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	StakePoolParamsEntry.MarshalCBOR	vectors	LSQ stake pool state results
+protocol/localstatequery	StakePoolParamsEntry.UnmarshalCBOR	vectors	LSQ stake pool state results
+protocol/localstatequery	StakePoolParamsResult.MarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	StakePoolParamsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	StakePoolsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	StakePoolStateEntry.UnmarshalCBOR	vectors	LSQ stake pool state results
+protocol/localstatequery	StakePoolStateResult.UnmarshalCBOR	vectors	LSQ stake pool state results
+protocol/localstatequery	SystemStartResult.UnmarshalJSON	gap	LSQ other result codecs
+protocol/localstatequery	UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	UTxOByTxInResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	UtxoId.MarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	UtxoId.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	UTxOsResult.UnmarshalCBOR	gap	LSQ other result codecs
+protocol/localstatequery	WithOriginSlot.MarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localstatequery	WithOriginSlot.UnmarshalCBOR	gap	LSQ ledger peer snapshot codecs
+protocol/localtxmonitor	Client.GetSizes	modelled	LocalTxMonitor client/server
+protocol/localtxmonitor	Client.HasTxForEra	modelled	LocalTxMonitor client/server
+protocol/localtxmonitor	Client.NextTx	modelled	LocalTxMonitor client/server
+protocol/localtxmonitor	Client.Stop	modelled	LocalTxMonitor client/server
+protocol/localtxmonitor	MsgHasTx.MarshalCBOR	gap	LocalTxMonitor message codecs
+protocol/localtxmonitor	MsgHasTx.UnmarshalCBOR	gap	LocalTxMonitor message codecs
+protocol/localtxmonitor	MsgReplyNextTx.MarshalCBOR	gap	LocalTxMonitor message codecs
+protocol/localtxmonitor	MsgReplyNextTx.UnmarshalCBOR	gap	LocalTxMonitor message codecs
+protocol/localtxmonitor	NewClient	modelled	LocalTxMonitor client/server
+protocol/localtxmonitor	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/localtxmonitor	NewMsgFromCbor	gap	LocalTxMonitor message codecs
+protocol/localtxmonitor	NewServer	modelled	LocalTxMonitor client/server
+protocol/localtxsubmission	Client.Stop	modelled	LocalTxSubmission client/server
+protocol/localtxsubmission	Client.SubmitTx	modelled	LocalTxSubmission client/server
+protocol/localtxsubmission	NewClient	modelled	LocalTxSubmission client/server
+protocol/localtxsubmission	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/localtxsubmission	NewMsgFromCbor	gap	LocalTxSubmission reject codec and error text
+protocol/localtxsubmission	NewServer	modelled	LocalTxSubmission client/server
+protocol/localtxsubmission	TransactionRejectedError.Error	gap	LocalTxSubmission reject codec and error text
+protocol/messagesubmission	Client.GetPendingMessageIDs	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Client.Init	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Client.ReplyMessageIds	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Client.ReplyMessages	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Client.Stop	modelled	MessageSubmission client/server window
+protocol/messagesubmission	MsgReplyMessages.MarshalCBOR	gap	MessageSubmission codec
+protocol/messagesubmission	NewClient	modelled	MessageSubmission client/server window
+protocol/messagesubmission	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/messagesubmission	Server.AddMessage	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Server.GetAvailableMessageIDs	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Server.GetAvailableMessages	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Server.GetMessagesByIDs	modelled	MessageSubmission client/server window
+protocol/messagesubmission	Server.RequestMessages	modelled	MessageSubmission client/server window
+protocol	New	modelled	Engine lifecycle (New/Start/register/done/SendError)
+protocol/peersharing	Client.GetPeers	modelled	PeerSharing client
+protocol/peersharing	MsgSharePeers.UnmarshalCBOR	gap	PeerSharing address codecs
+protocol/peersharing	NewClient	modelled	PeerSharing client
+protocol/peersharing	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/peersharing	NewMsgFromCbor	gap	PeerSharing address codecs
+protocol/peersharing	NewMsgSharePeers	gap	PeerSharing address codecs
+protocol/peersharing	PeerAddress.MarshalCBOR	gap	PeerSharing address codecs
+protocol/peersharing	PeerAddress.UnmarshalCBOR	gap	PeerSharing address codecs
+protocol/perasvotes	Client.Done	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	Client.RequestObjectIDs	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	Client.RequestObjects	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	Client.Start	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	Client.Sync	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	MsgReplyObjectIDs.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	MsgReplyObjects.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	MsgRequestObjects.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/perasvotes	NewMsgFromCbor	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	PerasVotes.Start	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	PerasVotes.Stop	modelled	PerasVotes client/lifecycle
+protocol/perasvotes	VoteCert.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VoteCert.UnmarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VoteID.UnmarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	Vote.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VoteObject.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VoteObject.UnmarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VoteObject.VoteID	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	Vote.UnmarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	Vote.Validate	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VRFCert.MarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol/perasvotes	VRFCert.UnmarshalCBOR	gap	PerasVotes vote/cert codecs and Vote.Validate
+protocol	Protocol.CancelRestart	modelled	Engine CancelRestart (stopped server releases carried ingress)
+protocol	Protocol.EnsureRegistered	modelled	Engine lifecycle (New/Start/register/done/SendError)
+protocol	Protocol.IsDone	modelled	Engine lifecycle (New/Start/register/done/SendError)
+protocol	Protocol.IsInTerminalOrIdleState	gap	Engine idle/terminal classification of connection close
+protocol	Protocol.Logger	gap	Engine Logger accessor
+protocol	Protocol.SendError	modelled	Engine lifecycle (New/Start/register/done/SendError)
+protocol	Protocol.SendMessageContextAndWait	modelled	Engine send-and-wait
+protocol	Protocol.Start	modelled	Engine lifecycle (New/Start/register/done/SendError)
+protocol	Protocol.WaitSendQueueDrained	gap	Engine WaitSendQueueDrained (2 ms polling, no internal caller)
+protocol/txsubmission	Client.Init	modelled	TxSubmission client init and server requests
+protocol/txsubmission	Client.Start	gap	TxSubmission client Start/Stop
+protocol/txsubmission	Client.Stop	gap	TxSubmission client Start/Stop
+protocol/txsubmission	MsgReplyTxIds.MarshalCBOR	gap	TxSubmission codecs (TxId, MsgReply*)
+protocol/txsubmission	MsgReplyTxs.MarshalCBOR	gap	TxSubmission codecs (TxId, MsgReply*)
+protocol/txsubmission	MsgRequestTxs.MarshalCBOR	gap	TxSubmission codecs (TxId, MsgReply*)
+protocol/txsubmission	NewClient	modelled	TxSubmission client init and server requests
+protocol/txsubmission	NewConfig	caller-contract	Mini-protocol Config/options (all protocols)
+protocol/txsubmission	NewMsgFromCbor	gap	TxSubmission codecs (TxId, MsgReply*)
+protocol/txsubmission	Server.RequestTxIds	modelled	TxSubmission client init and server requests
+protocol/txsubmission	Server.RequestTxs	modelled	TxSubmission client init and server requests
+protocol/txsubmission	TxId.UnmarshalCBOR	gap	TxSubmission codecs (TxId, MsgReply*)
+vrf	KeyGen	vectors	ECVRF-ED25519-SHA512-Elligator2 (draft-03)
+vrf	MkInputVrfFromNonce	vectors	VRF input builders
+vrf	MkInputVrf	vectors	VRF input builders
+vrf	MkSeedTPraosFromNonce	vectors	VRF input builders
+vrf	MkSeedTPraos	vectors	VRF input builders
+vrf	ProofToHash	vectors	ECVRF-ED25519-SHA512-Elligator2 (draft-03)
+vrf	Prove	vectors	ECVRF-ED25519-SHA512-Elligator2 (draft-03)
+vrf	VerifyAndHash	vectors	ECVRF-ED25519-SHA512-Elligator2 (draft-03)
+vrf	Verify	vectors	ECVRF-ED25519-SHA512-Elligator2 (draft-03)
+.	WithHandshakeTimeout	caller-contract	Connection options (handshake timeout)
