@@ -701,3 +701,19 @@ At 4f710823 the outbound's StMessages refused it, closing the connection
 (`MessageSubmissionV{1,2}PipelinedBug`, `HonestNeverRefused` violated). The
 fix holds the request until the reply is sent and then checks it
 (`MessageSubmissionV{1,2}Pipelined`, pass).
+
+`OutAdmitsPipelinedBodies` adds the rest of the pipelined requester: after
+collecting one reply with others still owed, it may send a request for bodies
+while a non-blocking request for ids, or another request for bodies, is
+unanswered (`pipelinedDispatch` in DMQ/SigSubmissionV2/Inbound.hs; V1's
+serverReqTxs, serverReqTxIds, serverIdle). At b6b0cfd1 only StMessages held a
+request, and only one for ids, so that request closed the connection
+(`MessageSubmissionV{1,2}PipelinedBodiesBug`, `HonestNeverRefused` violated).
+The fix holds a request for ids or for bodies in both StMessageIdsNonBlocking
+and StMessages; the `Pipelined` configs set both constants and pass.
+
+`MessageSubmissionV1InRepeats.cfg` lets the V1 Server ask again for a body the
+peer omitted, against a V1 outbound that refuses a repeat only within one
+request (ouroboros-network TxSubmission/Outbound.hs 106-220): the safety
+questions pass, and `MessageSubmissionV1InRepeatsProbeBug.cfg` shows the
+repeat is served.
