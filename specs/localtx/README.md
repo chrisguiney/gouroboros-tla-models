@@ -374,3 +374,11 @@ the other waiting calls (`StopCancelsWait`;
 `TestStopDoesNotWaitForPeer/GetMeasures` failed "Stop waited for the node to
 answer" on the merge before it). #3133 (`43090651`) conflicted only in
 `protocol/peersharing/README.md`.
+
+`ReuseAfterClose` and `CloseConnection` cover a Stop that abandons a
+submission the node still holds. At ffc14012 Stop closed the protocol
+without MsgDone but left the connection open; a new client on the same
+connection then believed StIdle while the server was still in StBusy
+(`LocalTxSubmissionReuseAfterCloseBug`, `NeverBothHaveAgency` violated). The
+fix stops the muxer as well, closing the connection
+(`LocalTxSubmissionReuseAfterClose`, 302 states, passes).
