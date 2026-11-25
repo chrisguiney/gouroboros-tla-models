@@ -175,8 +175,8 @@ ChainDB add-block queue in ouroboros-consensus.
 | Backpressure | `addBlockToAdd` blocks when the queue is full [R1] | `Submit` waits on pending capacity and retained-CBOR budget | equivalent |
 | Invalid block | recorded; it and successors ignored, thread continues [R3] | pipeline stops (fatal) | stricter; documented in chain-sync's `Config.Pipeline` |
 | Close with blocks queued | every queued block gets `FailedToAddBlock` [R4] | blocks dropped; waiting `Fence` gets `ErrPipelineStopped` | aggregate report only |
-| Rollback | part of chain selection, serialised with adds | caller's job after `WaitForDrain` | defect during `Stop` (fixed on a branch) |
-| Result consumption | promises are optional to read; followers pull | unread `Results` stalls the runner | defect (fixed on a branch: bounded, drop-oldest, never blocks commits) |
+| Rollback | part of chain selection, serialised with adds | caller's job after `WaitForDrain` | defect during `Stop`, fixed on main by #3161 (`1559924b`); #3233 keeps the fix (merge `5cb98604`) |
+| Result consumption | promises are optional to read; followers pull | unread `Results` stalls the runner | defect, fixed on main by #3161 (`1559924b`: bounded, drop-oldest, never blocks commits) |
 | Decode-only `Results` (header-only, trusted decode-only) | n/a: ChainDB always applies | PR #3161 at `805d32abd`: drop-oldest like full mode, so a slow reader lost committed blocks; PR head `0dbc3775`: always lossless | defect on the PR, fixed at `0dbc3775` |
 
 ## CBOR: preserved bytes and decoder limits
@@ -325,8 +325,8 @@ context cancel, with each goroutine (submitter, decode worker, apply runner,
 result forwarder, metrics collector, Stop and its runner-joining helper, a
 `Results` reader, a `WaitForDrain` caller) as its own process. `ApplyFunc`
 may return, block forever, call `Stop`, or call `WaitForDrain`. Switch
-`PR3161` swaps in open PR #3161's forwarder, `Stop` and `WaitForDrain`
-(`0dbc3775`). Read at gOuroboros `5c4f31c1`; `pipeline/` is unchanged since
+`PR3161` swaps in PR #3161's forwarder, `Stop` and `WaitForDrain`
+(`0dbc3775`), which is gOuroboros main from `1559924b`. Read at gOuroboros `5c4f31c1`; `pipeline/` is unchanged since
 the inventory's `d8f5bc2a`. Deadlock checking is on: a state where nothing
 moves while an API call (`Stop`, `Submit`, `WaitForDrain`) is still waiting is
 a deadlock; one where only parked goroutines remain is judged by
@@ -425,3 +425,42 @@ context, so it keeps the committed prefix for the `Results` reader until
 cancel. `Stop(ctx)` in the model is `StopSignal` plus `StopWaitTd`. A caller
 that gives up on its context leaves the teardown running; `StopTimeout`
 covers that.
+
+### #3233 on main (`PR3161` with `NewStop` and `CancelCleanup`)
+
+#3233 (`fix/pipeline-lifecycle`) folds the two fix branches together, and
+merging main (`5e91f77c`, with #3161) into it gives merge `5cb98604`: one
+`BlockItem.ApplyContext`, `Stop(ctx)` with its teardown goroutine and parent
+watcher, and #3161's forwarder, lossless `Results` and drain. `WaitForDrain`
+during `Stop` waits for the apply runner (`drainDuringStop`), unless it is
+called with this pipeline's `ApplyContext`, when it returns nil; before
+`Stop` that call returns `ErrWaitForDrainInApplyFunc`.
+
+The model needed three changes to say what the combined code does. The
+watcher (`watchParentCancel`) no longer runs `Stop`'s steps itself: with
+`NewStop` it calls `requestStop(false)`, which starts the teardown goroutine
+unless one has started, and returns (`WatchWake`). A waiting `Stop(ctx)` joins
+the watcher after the teardown (`StopWaitTd`, `watcherDone`). `stopping` is
+published only by the `requestStop` call that starts the teardown, so a `Stop`
+after a parent-cancel teardown leaves it false (`StopSignal`); a drainer then
+gets the cancellation error, as on the branch. `JoinedAfterStop` now asks the
+watcher to have exited only once a `Stop` caller has returned
+(`CallerReturned`): the teardown goroutine finishing does not join it.
+`ASSUME ~(NewStop /\ CancelCleanup)` is gone.
+
+| Config | Result | Distinct states |
+| --- | --- | --- |
+| `PipelineLifecycleMain.cfg` (2 blocks, reader, owner and second `Stop`, parent cancel) | passes | 48,192 |
+| `PipelineLifecycleMainDrain.cfg` (a drainer) | passes, with `NoCommitAfterDrain` | 127,616 |
+| `PipelineLifecycleMainNoReader.cfg` (3 blocks, no reader) | passes | 32,404 |
+| `PipelineLifecycleMainApplyCallsStop.cfg` | passes | 50,332 |
+| `PipelineLifecycleMainApplyCallsDrain.cfg` (and a drainer) | passes, with `NoCommitAfterDrain` | 127,616 |
+| `PipelineLifecycleMainStopTimeout.cfg` (`ApplyFunc` stops with another context, which ends) | passes | 22,682 |
+| `PipelineLifecycleMainDrainPre3161Bug.cfg` (#3233 before the merge) | `NoCommitAfterDrain` violated | 9,295 |
+| `PipelineLifecycleMainNoMarkerBug.cfg` (no `ApplyContext` check) | `NoLeakWhenQuiescent` violated: `ApplyFunc`'s `Stop` waits for itself | 6,040 |
+| `PipelineLifecycleMainNoWatchJoinBug.cfg` (mutation) | `JoinedAfterStop` violated | 12,876 |
+
+Every passing config also checks `NoLeakWhenQuiescent` and
+`MuNotHeldAcrossApply`. The resolution is a merge: no new behaviour beyond
+the two sides, so the Go tests are both sides' (`go test -race ./pipeline`
+passes at `5cb98604`).

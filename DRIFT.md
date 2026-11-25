@@ -134,9 +134,9 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [L12](#l12) | ledger | CBOR nesting limit | No nesting limit | 16,384 levels for blocks and ledger data; 1,024 for peer messages | RFC 8949 sets none | conforms | Just above what a 16,384-byte transaction can nest; raising `maxTxSize` would let a valid transaction nest deeper than gOuroboros accepts |
 | [P1](#p1) | pipeline | An invalid block in the pipeline | ChainDB records it, ignores it and its successors, and carries on | The pipeline stops (fatal) | Silent | conforms (implementation choice) | Documented in chain-sync's `Config.Pipeline` |
 | [P2](#p2) | pipeline | Closing with blocks queued | Every queued block is answered `FailedToAddBlock` | Dropped; a waiting `Fence` gets `ErrPipelineStopped` | Silent | conforms (implementation choice) | Recorded (model `pipeline-cbor`) |
-| [P3](#p3) | pipeline | `WaitForDrain` during `Stop` | Rollback is part of chain selection, serialised with adds | main: returns once `Stop` begins while a block may still commit after the caller's rollback; PR: waits for the apply runner | Silent | conforms | Open PR #3161. Library defect; not reached through chain-sync or Dingo today |
-| [P4](#p4) | pipeline | An unread `Results` channel | Chain selection never waits on a follower | main: stalls the apply runner; PR: never blocks commits, drops the oldest result for a reader that falls behind (counted in `ResultsDropped`) | Silent | conforms | Open PR #3161 |
-| [P5](#p5) | pipeline | `WithLosslessResults` | none | Opt-in with an `ApplyFunc`; always on in header-only and trusted decode-only modes: `Results` delivers every committed block and commits wait for the reader | Silent | conforms (implementation choice) | On PR #3161 at `0dbc3775` (decode-only modes are lossless by default; Dingo's opt-in is now redundant). Wire: a slower commit only delays chain-sync's next request, which the protocol allows; ledger: unchanged |
+| [P3](#p3) | pipeline | `WaitForDrain` during `Stop` | Rollback is part of chain selection, serialised with adds | main before `1559924b`: returns once `Stop` begins while a block may still commit after the caller's rollback; now: waits for the apply runner | Silent | conforms | Merged #3161 (`1559924b`); kept by #3233 (merge `5cb98604`). Library defect; not reached through chain-sync or Dingo today |
+| [P4](#p4) | pipeline | An unread `Results` channel | Chain selection never waits on a follower | main before `1559924b`: stalls the apply runner; now: never blocks commits, drops the oldest result for a reader that falls behind (counted in `ResultsDropped`) | Silent | conforms | Merged #3161 (`1559924b`) |
+| [P5](#p5) | pipeline | `WithLosslessResults` | none | Opt-in with an `ApplyFunc`; always on in header-only and trusted decode-only modes: `Results` delivers every committed block and commits wait for the reader | Silent | conforms (implementation choice) | Merged with #3161 (`1559924b`; decode-only modes are lossless by default; Dingo's opt-in is now redundant). Wire: a slower commit only delays chain-sync's next request, which the protocol allows; ledger: unchanged |
 
 ## Network
 
@@ -1049,7 +1049,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../Storage/ChainDB/Impl/Background.hs` 127 (`addBlockRunner`)
 - **gOuroboros.** gOuroboros `d0b95845` `pipeline/pipeline.go` 1071; PR #3161 head `805d32abd` same file 1117
 - **Verdict.** conforms
-- **Status.** Open PR #3161. Library defect; not reached through chain-sync or Dingo today
+- **Status.** Merged #3161 (gOuroboros `1559924b`); #3233 keeps it after merging main (`5cb98604`, model `PipelineLifecycleMainDrain.cfg`). Library defect; not reached through chain-sync or Dingo today
 
 ### P4
 
@@ -1060,7 +1060,7 @@ The ledger calls this `PreferCandidateWithDensity`; at `d0b95845` the entry poin
 - **Reference.** ouroboros-consensus `ec239d57f618` `.../Storage/ChainDB/Impl/Background.hs` 127 (`addBlockRunner`; followers read the chain themselves)
 - **gOuroboros.** gOuroboros `d0b95845` `pipeline/pipeline.go` 701; PR #3161 head `805d32abd` same file 1006-1010
 - **Verdict.** conforms
-- **Status.** Open PR #3161
+- **Status.** Merged #3161 (gOuroboros `1559924b`)
 
 ### P5
 
