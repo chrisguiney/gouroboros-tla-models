@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep engine-lifecycle connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-block-overlay models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep engine-lifecycle connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-rewards ledger-block-overlay models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -182,6 +182,9 @@ consensus-tachys: ## Check the Tachys public leader schedule model (CIP-0177)
 
 ledger-ppup-mir: ## Check the parameter-update (PPUP) and MIR model (proposals, quorum, pots)
 	@scripts/run-model.sh specs/ledger-ppup-mir
+
+ledger-rewards: ## Check the reward pots model (reserves, treasury, pool reward split)
+	@scripts/run-model.sh specs/ledger-rewards
 
 models: ## Check every config of every model, Bug ones expected to fail (slow)
 	@set -e; for d in specs/*/; do scripts/run-model.sh "$${d%/}"; done

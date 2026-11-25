@@ -457,13 +457,13 @@ ledger/common	ByronAddressAttributes.ExtraSize	gap	Bootstrap address attribute s
 ledger/common	ByronAddressAttributes.MarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	ByronAddressAttributes.UnmarshalCBOR	vectors	Address parse/encode, accessors, pointer range, withdrawal address checks
 ledger/common	ByronTxFeePolicy.MinFee	modelled	Byron min fee policy
-ledger/common	CalculateAdaPots	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	CalculateAdaPots	modelled	Reward update arithmetic
 ledger/common	CalculateEpochNonce	modelled	Nonce combination, rolling and epoch nonce
 ledger/common	CalculateExecutionUnitsFee	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/common	CalculateMinFee	vectors	Fees, size and minimum coin (cardano-ledger goldens)
 ledger/common	CalculateOptimalPoolCount	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
 ledger/common	CalculatePoolSaturation	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
-ledger/common	CalculateRewards	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	CalculateRewards	modelled	Reward update arithmetic
 ledger/common	CalculateRollingNonce	modelled	Nonce combination, rolling and epoch nonce
 ledger/common	CertificateLogicalKey	gap	Duplicate certificate/pool-owner detection
 ledger/common	CertificateWrapper.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
@@ -664,7 +664,7 @@ ledger/common	RegistrationDrepCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	ResignCommitteeColdCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	ResignCommitteeColdCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	ResolveInputUtxo	modelled	ResolveInputUtxo (input existence)
-ledger/common	RewardService.CalculateEpochRewards	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	RewardService.CalculateEpochRewards	modelled	Reward update arithmetic
 ledger/common	RewardService.ValidateRewardDistribution	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
 ledger/common	ScheduleGenesisDelegation	gap	Genesis delegation scheduling within a block
 ledger/common/script	AvailablePlutusScripts	modelled	Needed scripts, script purposes, native-script env, required redeemers
@@ -759,7 +759,7 @@ ledger/common	UnwrapLedgerState	caller-contract	UnwrapLedgerState capability loo
 ledger/common	UpdateCommitteeGovAction.MarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	UpdateCommitteeGovAction.ToPlutusData	vectors	ToPlutusData of ledger types (address, credential, value, DRep, voter, gov actions, cost models)
 ledger/common	UpdateCommitteeGovAction.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
-ledger/common	UpdateCommitteeGovAction.Validate	gap	UpdateCommitteeGovAction.Validate
+ledger/common	UpdateCommitteeGovAction.Validate	vectors	Conway GOV rules reached by the rules-only replay
 ledger/common	UpdateDrepCertificate.UnmarshalCBOR	vectors	Ledger CBOR codecs (certificates, values, credentials, datums, gov, redeemers, scripts, witnesses, strict decode helpers)
 ledger/common	UpdateDrepCertificate.Utxorpc	gap	UTxO RPC conversions
 ledger/common	UsedPlutusVersions	modelled	UTXOW witness rules (vkey/bootstrap sigs, required keys incl. pool owners, scripts, redeemers, datums, collateral witnesses, native scripts)
@@ -801,7 +801,7 @@ ledger/common	ValidatePlutusScriptResult	modelled	UTXO rule helpers: IsValid res
 ledger/common	ValidatePlutusScriptsWellFormed	vectors	Script well-formedness and native constructor support
 ledger/common	ValidatePoolMargin	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	ValidatePoolMetadataForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
-ledger/common	ValidatePoolPledge	gap	Reward arithmetic (ada pots, pool rewards, saturation, pledge, reward service)
+ledger/common	ValidatePoolPledge	modelled	Reward update arithmetic
 ledger/common	ValidatePoolRegistrationOwners	gap	Duplicate certificate/pool-owner detection
 ledger/common	ValidatePoolRelaysForProtocolVersion	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
 ledger/common	ValidatePreConwayCertificateTypes	gap	Pool registration field rules (metadata/relay limits by pv, margin, reward account, pre-Conway cert types)
@@ -917,7 +917,7 @@ ledger/conway	TreasuryWithdrawalReturnAccountsDoNotExistError.Error	gap	Errors: 
 ledger/conway	UnknownGovActionIdError.Error	gap	Errors: Error() strings
 ledger/conway	UtxoValidateBootstrapAllowedGovActions	gap	Conway governance rules not pinned by vectors
 ledger/conway	UtxoValidateBootstrapVotingRestrictions	gap	Conway voter-x-action restrictions
-ledger/conway	UtxoValidateCCVotingRestrictions	gap	Conway voter-x-action restrictions
+ledger/conway	UtxoValidateCCVotingRestrictions	vectors	Conway GOV rules reached by the rules-only replay
 ledger/conway	UtxoValidateCertificateDeposits	modelled	Conway balance, deposits, withdrawals, disjointness
 ledger/conway	UtxoValidateCollateralContainsNonAda	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateCommitteeCertificates	vectors	Conway rules exercised by Blueprint vectors
@@ -929,9 +929,9 @@ ledger/conway	UtxoValidateEmptyTreasuryWithdrawals	vectors	Conway rules exercise
 ledger/conway	UtxoValidateExtraneousRedeemers	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateExUnitsTooBigUtxo	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateFeeTooSmallUtxo	modelled	Conway reference-script fee and size
-ledger/conway	UtxoValidateGovActionWellFormedness	gap	Conway governance rules not pinned by vectors
-ledger/conway	UtxoValidateGuardrailsScriptHash	gap	Conway governance rules not pinned by vectors
-ledger/conway	UtxoValidateHardForkCanFollow	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateGovActionWellFormedness	vectors	Conway GOV rules reached by the rules-only replay
+ledger/conway	UtxoValidateGuardrailsScriptHash	vectors	Conway GOV rules reached by the rules-only replay
+ledger/conway	UtxoValidateHardForkCanFollow	vectors	Conway GOV rules reached by the rules-only replay
 ledger/conway	UtxoValidateInsufficientCollateral	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateIsValidFlag	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateMalformedReferenceScripts	vectors	Conway rules exercised by Blueprint vectors
@@ -945,7 +945,7 @@ ledger/conway	UtxoValidateProposalAncestry	modelled	Conway governance ancestry a
 ledger/conway	UtxoValidateProposalDeposit	gap	Conway governance rules not pinned by vectors
 ledger/conway	UtxoValidateProposalNetworkIds	gap	Conway governance rules not pinned by vectors
 ledger/conway	UtxoValidateProposalProcedures	vectors	Conway rules exercised by Blueprint vectors
-ledger/conway	UtxoValidateProposalReturnAccounts	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateProposalReturnAccounts	vectors	Conway GOV rules reached by the rules-only replay
 ledger/conway	UtxoValidateRedeemerAndScriptWitnesses	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateRefScriptSizePerTx	modelled	Conway reference-script fee and size
 ledger/conway	UtxoValidateScriptDataHash	vectors	Conway rules exercised by Blueprint vectors
@@ -955,12 +955,12 @@ ledger/conway	UtxoValidateTooManyCollateralInputs	vectors	Conway rules exercised
 ledger/conway	UtxoValidateTransactionNetworkId	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	UtxoValidateUnelectedCommitteeVoters	gap	Conway governance rules not pinned by vectors
 ledger/conway	UtxoValidateUnknownGovActionIds	modelled	Conway governance ancestry and live-vote lookup
-ledger/conway	UtxoValidateUnknownVoters	gap	Conway governance rules not pinned by vectors
+ledger/conway	UtxoValidateUnknownVoters	vectors	Conway GOV rules reached by the rules-only replay
 ledger/conway	UtxoValidateValueNotConservedUtxo	modelled	Conway balance, deposits, withdrawals, disjointness
 ledger/conway	UtxoValidateVotingOnExpiredGovAction	caller-contract	Conway vote expiry
 ledger/conway	UtxoValidateWithdrawals	modelled	Conway balance, deposits, withdrawals, disjointness
 ledger	ConwayUtxowFailure.UnmarshalCBOR	gap	ApplyTxError / UTXO(W) failure CBOR codecs and Error strings
-ledger/conway	ValidateCommitteeTerm	gap	Conway governance rules not pinned by vectors
+ledger/conway	ValidateCommitteeTerm	caller-contract	ValidateCommitteeTerm ratification predicate
 ledger/conway	ValidateConwayFeaturesWithPlutusV1V2	vectors	Conway rules exercised by Blueprint vectors
 ledger/conway	ValidateHeaderProtocolVersion	modelled	Conway header protocol version
 ledger/conway	ValidateProtocolParameterUpdateNonZeroFields	vectors	Conway rules exercised by Blueprint vectors

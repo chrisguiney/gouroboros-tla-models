@@ -59,6 +59,8 @@ closes. A PR can draw on more than one model.
 | `connection` (`ConnectionTeardown`, `ConnectionCloseConcurrent`), `engine` (`EngineLifecycle`) | #3239 (teardown during Dial, late forwarder, Close before setup, protocol-loop join; merge 5 of 12; review at `f60a0213`: concurrent `CloseContext` mutual wait and conn left open with no muxer, fixed at `c321f708`, models `ConnectionCloseConcurrent*.cfg`, `ConnectionTeardownCloseOpenConnBug.cfg`) | #3236, #3237, #3238 | open |
 | `connection` (`ConnectionTeardown`, Muxer.Stop join) | ouroboros-mock #370 (Stop and Close with either signature; released before merge 6) | ouroboros-mock #369 | open |
 | `ledger-hash-cache` | #3234 (scoped-memo panic retried; folds `test/ledger-hash-cache-model`; merge 4 of 12) | #3229 | open |
+| `ledger-rewards` | local branch `fix/ledger-rewards-reference` (`9675856a`, `bdba9c8b`, `203f3624`; reward pots and pool split as cardano-ledger; pledge owners as a set), not yet published | | local |
+| `ledger-governance` | local branch `test/conway-gov-reference` (`7c2f2013`; ledger vectors replayed through gOuroboros rules alone, network-id and return-address tables), not yet published | | local |
 
 ## Held: merges 6 to 12 of 12 (merge 6 waits for the ouroboros-mock release and closes #3187)
 
