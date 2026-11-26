@@ -2,8 +2,10 @@
 (***************************************************************************)
 (* The block pipeline's goroutines, locks and channels, one Go operation   *)
 (* per step: how Submit, Stop, WaitForDrain, a parent-context cancel and   *)
-(* the user's ApplyFunc interleave. BlockPipeline.tla checks what the      *)
-(* pipeline decides (order, failure, drain); this module checks whether    *)
+(* the user's ApplyFunc interleave, and what a panic in a stage does       *)
+(* (StagePanic, checked against gOuroboros 7cd17437). BlockPipeline.tla    *)
+(* checks what the pipeline decides (order, failure, drain); this module   *)
+(* checks whether                                                          *)
 (* every goroutine can finish, whether Stop joins them, and whether the    *)
 (* retained-CBOR budget comes back.                                        *)
 (*                                                                         *)
@@ -91,6 +93,10 @@ CONSTANTS
     StopTimeout,   \* TRUE: a waiting Stop(ctx) caller's ctx may end, so it returns
     CancelCleanup, \* TRUE: the fix on fix/pipeline-cancel-cleanup: a watcher started by
                    \*   Start tears the pipeline down when the parent context ends
+    StagePanic,    \* where a stage may panic, for any block (see "Stage panics" below):
+                   \*   "none"; "decode": the decode stage (or the BlockTypeResolver
+                   \*   it calls); "apply": ApplyFunc (or the chain-context and
+                   \*   ordered validators, guarded the same way)
     Mutation       \* "None", or a deliberate defect:
                    \*   "CloseBeforeJoin": Stop closes decodedChan without joining the workers
                    \*   "SkipRunnerJoin": Stop does not wait for the runner
@@ -104,11 +110,19 @@ CONSTANTS
                    \*      starts the teardown publishes stopping, so a Stop after
                    \*      the watcher's teardown leaves it false (requestStop
                    \*      returning at teardownStarted before p.stopping.Store)
+                   \*   "PanicUnmarked": a contained stage panic leaves the item
+                   \*      looking decoded (no markUnresolvedPhase)
+                   \*   "PanicLosesItem": the panicking worker exits without
+                   \*      forwarding its item (recover around the loop, not the call)
+                   \*   "PanicNotFatal": the runner reports a panicked item as an
+                   \*      ordinary error and goes on to the next block
 
 ASSUME ApplyMode \in {"returns", "blocks", "callsStop", "callsDrain", "callsStopOther"}
 ASSUME Mutation \in {"None", "CloseBeforeJoin", "SkipRunnerJoin",
                      "NoReleaseActive", "ReleaseTwice", "MarkerForAll", "NoWatchJoin",
-                     "LateStopUnpublished"}
+                     "LateStopUnpublished", "PanicUnmarked", "PanicLosesItem",
+                     "PanicNotFatal"}
+ASSUME StagePanic \in {"none", "decode", "apply"}
 
 \* In English: the goroutines that may run Stop's steps: the owner, a
 \* second goroutine, ApplyFunc itself ("cb"), the teardown goroutine of
@@ -160,14 +174,22 @@ VARIABLES
     dTarget,    \* the Fence boundary the drainer captured
     dBoundary,  \* blocks below this must not commit after the drainer's success
     lateCommit, \* a block below dBoundary committed after the drainer succeeded
-    panicked    \* a send on a closed channel, or a double close
+    panicked,   \* a send on a closed channel, or a double close
+    bad,        \* blocks whose stage panicked: the item carries ErrStagePanic
+    fatal,      \* the runner recorded a fatal error (setFatalError) and cancelled
+    parentDone, \* the context given to Start has ended
+    commitLog   \* the blocks ApplyFunc committed, in commit order
 
-\* Literally: "vars is defined as the tuple of all thirty-four variables."
+\* Literally: "stV is defined as the tuple of bad, fatal, parentDone and
+\*   commitLog."
+stV == <<bad, fatal, parentDone, commitLog>>
+
+\* Literally: "vars is defined as the tuple of all thirty-eight variables."
 vars == <<budget, active, subPc, subSeq, subHeld, gate, mu, submitQ,
           submitClosed, decQ, decClosed, resQ, resQClosed, resultsClosed,
           wPc, wItem, rPc, rItem, completed, fPc, fItem, fPending, readerPc,
           stopPc, waiterPc, metricsPc, canceled, stopping, stopped,
-          dPc, dTarget, dBoundary, lateCommit, panicked>>
+          dPc, dTarget, dBoundary, lateCommit, panicked, stV>>
 
 \* Variable groups, so each step can say what it leaves alone.
 \* Literally: "subV is defined as the tuple of subPc, subSeq and subHeld."
@@ -215,6 +237,7 @@ TypeOK ==
     /\ mu \in {"none"} \cup StopIds
     /\ gate \in {"none", "sub", "drain"}
     /\ Len(submitQ) <= Cap /\ Len(decQ) <= Cap /\ Len(resQ) <= Cap
+    /\ bad \subseteq Seqs
 
 \* In English: the pipeline has just been started: every goroutine is
 \* waiting for work and nothing is held.
@@ -246,6 +269,7 @@ Init ==
     /\ canceled = FALSE /\ stopping = FALSE /\ stopped = FALSE
     /\ dPc = "idle" /\ dTarget = 0 /\ dBoundary = 0 /\ lateCommit = FALSE
     /\ panicked = FALSE
+    /\ bad = {} /\ fatal = FALSE /\ parentDone = FALSE /\ commitLog = <<>>
 
 ---------------------------------------------------------------------------
 (* The submitter: one goroutine calling Submit for blocks 0..N-1. A Submit *)
@@ -258,7 +282,7 @@ Init ==
 SubCall ==
     /\ subPc = "idle" /\ subSeq < N
     /\ subPc' = "reserve"
-    /\ UNCHANGED <<subSeq, subHeld, budV, gate, mu, chanV, wV, rV, fV, lifeV, dV, panicked>>
+    /\ UNCHANGED <<subSeq, subHeld, budV, gate, mu, chanV, wV, rV, fV, lifeV, dV, panicked, stV>>
 
 \* In English: [G] reserveRawCborBytes: take a block's worth of budget if
 \* there is room; otherwise wait until some is freed or a context ends,
@@ -275,7 +299,7 @@ SubReserve ==
           /\ budget' = budget + 1 /\ subHeld' = TRUE /\ subPc' = "gate"
        \/ /\ canceled                                  \* <-p.ctx.Done()
           /\ subPc' = "done" /\ UNCHANGED <<budget, subHeld>>
-    /\ UNCHANGED <<subSeq, active, gate, mu, chanV, wV, rV, fV, lifeV, dV, panicked>>
+    /\ UNCHANGED <<subSeq, active, gate, mu, chanV, wV, rV, fV, lifeV, dV, panicked, stV>>
 
 \* In English: [G] lockSubmit: take submitGate, or return an error (and
 \* the deferred release of the reservation) once the context is done.
@@ -294,7 +318,7 @@ SubGate ==
        \/ /\ canceled
           /\ budget' = budget - 1 /\ subHeld' = FALSE /\ subPc' = "done"
           /\ UNCHANGED gate
-    /\ UNCHANGED <<subSeq, active, mu, chanV, wV, rV, fV, lifeV, dV, panicked>>
+    /\ UNCHANGED <<subSeq, active, mu, chanV, wV, rV, fV, lifeV, dV, panicked, stV>>
 
 \* In English: [G] waitForPendingCapacity, holding the gate: go on once
 \* fewer than MaxPending blocks are accepted but not completed, or give up
@@ -313,7 +337,7 @@ SubCapacity ==
        \/ /\ canceled
           /\ gate' = "none" /\ budget' = budget - 1 /\ subHeld' = FALSE
           /\ subPc' = "done"
-    /\ UNCHANGED <<subSeq, active, mu, chanV, wV, rV, fV, lifeV, dV, panicked>>
+    /\ UNCHANGED <<subSeq, active, mu, chanV, wV, rV, fV, lifeV, dV, panicked, stV>>
 
 \* In English: [G] the cancellation and stopping checks, then trackItem:
 \* the reservation now belongs to the item, in activeItems.
@@ -333,7 +357,7 @@ SubTrack ==
               /\ subPc' = "done" /\ UNCHANGED active
          ELSE /\ active' = active \cup {subSeq} /\ subHeld' = FALSE
               /\ subPc' = "send" /\ UNCHANGED <<gate, budget>>
-    /\ UNCHANGED <<subSeq, mu, chanV, wV, rV, fV, lifeV, dV, panicked>>
+    /\ UNCHANGED <<subSeq, mu, chanV, wV, rV, fV, lifeV, dV, panicked, stV>>
 
 \* In English: [G] select { submitChan <- item; <-ctx.Done() }, then the
 \* deferred unlock of the gate. A send on a closed submitChan would panic.
@@ -353,16 +377,16 @@ SubSend ==
     /\ \/ /\ ~submitClosed /\ Len(submitQ) < Cap
           /\ submitQ' = Append(submitQ, subSeq)
           /\ subSeq' = subSeq + 1 /\ subPc' = "idle"
-          /\ UNCHANGED <<budV, panicked>>
+          /\ UNCHANGED <<budV, panicked, stV>>
        \/ /\ submitClosed                          \* a send on a closed channel
           /\ panicked' = TRUE /\ subPc' = "done"
           /\ UNCHANGED <<submitQ, subSeq, budV>>
        \/ /\ canceled
           /\ Release(subSeq) /\ subPc' = "done"     \* deferred item.Release
-          /\ UNCHANGED <<submitQ, subSeq, panicked>>
+          /\ UNCHANGED <<submitQ, subSeq, panicked, stV>>
     /\ gate' = "none"                              \* deferred unlockSubmit
     /\ UNCHANGED <<subHeld, mu, submitClosed, decQ, decClosed, resQ, resQClosed,
-                   resultsClosed, wV, rV, fV, lifeV, dV>>
+                   resultsClosed, wV, rV, fV, lifeV, dV, stV>>
 
 ---------------------------------------------------------------------------
 (* The decode worker. *)
@@ -380,10 +404,31 @@ WorkerRecv ==
     /\ wPc = "recv"
     /\ \/ /\ submitQ /= <<>>
           /\ wItem' = Head(submitQ) /\ submitQ' = Tail(submitQ) /\ wPc' = "send"
+          /\ UNCHANGED bad
        \/ /\ (submitQ = <<>> /\ submitClosed) \/ canceled
-          /\ wPc' = "exited" /\ UNCHANGED <<wItem, submitQ>>
+          /\ wPc' = "exited" /\ UNCHANGED <<wItem, submitQ, bad>>
     /\ UNCHANGED <<subV, budV, gate, mu, submitClosed, decQ, decClosed, resQ,
-                   resQClosed, resultsClosed, rV, fV, lifeV, dV, panicked>>
+                   resQClosed, resultsClosed, rV, fV, lifeV, dV, panicked,
+                   fatal, parentDone, commitLog>>
+
+\* In English: [G worker_pool.go process, panic.go markUnresolvedPhase]
+\* the decode stage panics on the item the worker holds. The deferred
+\* recover turns the panic into this item's decode error (ErrStagePanic),
+\* offers it to the errors channel without waiting, and the worker goes
+\* on to forward the item like any other. With "PanicLosesItem" the worker
+\* dies holding it (the item stays in activeItems). ("PanicUnmarked" is
+\* in RunnerCheck: the runner cannot see the panic.)
+\* Literally: "WorkerPanic is defined as: StagePanic equals "decode", and
+\*   wPc equals "send", and wItem is not a member of bad, and bad in the
+\*   next state equals bad with wItem added, and wPc in the next state
+\*   equals (if Mutation equals "PanicLosesItem" then "exited", else
+\*   "send"), and every other variable is unchanged."
+WorkerPanic ==
+    /\ StagePanic = "decode" /\ wPc = "send" /\ wItem \notin bad
+    /\ bad' = bad \cup {wItem}
+    /\ wPc' = IF Mutation = "PanicLosesItem" THEN "exited" ELSE "send"
+    /\ UNCHANGED <<subV, budV, gate, mu, chanV, wItem, rV, fV, lifeV, dV,
+                   panicked, fatal, parentDone, commitLog>>
 
 \* In English: [G worker_pool.go 148-151] select { output <- item;
 \* <-ctx.Done() }. A send on a closed output panics; on ctx.Done the worker
@@ -403,9 +448,9 @@ WorkerSend ==
        \/ /\ decClosed
           /\ panicked' = TRUE /\ wPc' = "exited" /\ UNCHANGED decQ
        \/ /\ canceled
-          /\ wPc' = "exited" /\ UNCHANGED <<decQ, panicked>>
+          /\ wPc' = "exited" /\ UNCHANGED <<decQ, panicked, stV>>
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, submitClosed, decClosed, resQ,
-                   resQClosed, resultsClosed, wItem, rV, fV, lifeV, dV>>
+                   resQClosed, resultsClosed, wItem, rV, fV, lifeV, dV, stV>>
 
 ---------------------------------------------------------------------------
 (* The apply runner. *)
@@ -425,25 +470,50 @@ RunnerRecv ==
        \/ /\ (decQ = <<>> /\ decClosed) \/ canceled
           /\ rPc' = "exited" /\ UNCHANGED <<rItem, decQ>>
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, submitClosed, decClosed, resQ,
-                   resQClosed, resultsClosed, wV, completed, fV, lifeV, dV, panicked>>
+                   resQClosed, resultsClosed, wV, completed, fV, lifeV, dV, panicked, stV>>
+
+\* In English: [G apply_stage.go run, ApplyStageRunner.fail] a rejected
+\* item, here one whose stage panicked, is fatal: the runner records the
+\* error (setFatalError, which Fence, WaitForDrain and Submit then
+\* return), cancels the pipeline context, and returns, closing done. It
+\* does not end the context given to Start, so the pipeline is torn
+\* down only by Stop or by that context ending. With "PanicNotFatal" the
+\* runner reports the error and takes the next item instead.
+\* Literally: "RunnerFail is defined as: if Mutation equals
+\*   "PanicNotFatal", then (rPc in the next state equals "recv", and
+\*   canceled and fatal are unchanged), else (canceled in the next state
+\*   equals TRUE, and fatal in the next state equals TRUE, and rPc in the
+\*   next state equals "exited")."
+RunnerFail ==
+    IF Mutation = "PanicNotFatal"
+      THEN rPc' = "recv" /\ UNCHANGED <<canceled, fatal>>
+      ELSE canceled' = TRUE /\ fatal' = TRUE /\ rPc' = "exited"
 
 \* In English: [G apply_stage.go 321-326] applyPending checks the context
 \* first: if it is done the item is dropped (it stays in activeItems) and
-\* the runner goes back to its select. Otherwise ApplyFunc is called; with
-\* ApplyMode "callsStop" or "callsStopOther" it calls Stop as goroutine "cb".
+\* the runner goes back to its select. [G apply_stage.go maybeApply] An
+\* item that carries a stage error, here a contained panic, is rejected
+\* before any callback runs (RunnerFail). Otherwise ApplyFunc is called;
+\* with ApplyMode "callsStop" or "callsStopOther" it calls Stop as
+\* goroutine "cb".
 \* Literally: "RunnerCheck is defined as: rPc equals "check", and if
-\*   canceled, then (rPc in the next state equals "recv", and stopPc is
-\*   unchanged), else (rPc in the next state equals, in the case ApplyMode
+\*   canceled, then (rPc in the next state equals "recv", and stopPc,
+\*   canceled and fatal are unchanged), else if rItem is a member of bad
+\*   and Mutation does not equal "PanicUnmarked", then (RunnerFail, and
+\*   stopPc is unchanged), else (rPc in the next state equals, in the case ApplyMode
 \*   is a member of the set containing "callsStop" and "callsStopOther",
 \*   "applyStop"; in the case ApplyMode equals "callsDrain", "applyDrain";
 \*   in every other case, "apply"; and stopPc in the next state equals (if
 \*   ApplyMode is a member of that set, then stopPc except that its "cb"
-\*   entry is (if NewStop then "signal" else "lockMu"), else stopPc)); and
-\*   every other variable is unchanged."
+\*   entry is (if NewStop then "signal" else "lockMu"), else stopPc; and
+\*   canceled and fatal are unchanged); and every other variable is
+\*   unchanged."
 RunnerCheck ==
     /\ rPc = "check"
     /\ IF canceled
-         THEN /\ rPc' = "recv" /\ UNCHANGED stopPc
+         THEN /\ rPc' = "recv" /\ UNCHANGED <<stopPc, canceled, fatal>>
+         ELSE IF rItem \in bad /\ Mutation /= "PanicUnmarked"
+         THEN /\ RunnerFail /\ UNCHANGED stopPc
          ELSE /\ rPc' = CASE ApplyMode \in {"callsStop", "callsStopOther"} -> "applyStop"
                           [] ApplyMode = "callsDrain" -> "applyDrain"
                           [] OTHER -> "apply"
@@ -451,8 +521,10 @@ RunnerCheck ==
                              THEN [stopPc EXCEPT !["cb"] =
                                      IF NewStop THEN "signal" ELSE "lockMu"]
                              ELSE stopPc
+              /\ UNCHANGED <<canceled, fatal>>
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, completed, fV,
-                   waiterPc, metricsPc, canceled, stopping, stopped, dV, panicked>>
+                   waiterPc, metricsPc, stopping, stopped, dV, panicked,
+                   bad, parentDone, commitLog>>
 
 \* In English: ApplyFunc returns and the block is committed: markProcessed
 \* advances completedSequence. If a drainer has already reported success
@@ -464,6 +536,7 @@ RunnerCheck ==
 Commit ==
     /\ completed' = rItem + 1
     /\ lateCommit' = (lateCommit \/ (dPc = "ok" /\ rItem < dBoundary))
+    /\ commitLog' = Append(commitLog, rItem)
     /\ rPc' = "forward"
 
 \* In English: ApplyFunc returns. With ApplyMode "blocks" it never does.
@@ -473,7 +546,21 @@ RunnerApply ==
     /\ rPc = "apply" /\ ApplyMode = "returns"
     /\ Commit
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, fV, lifeV,
-                   dPc, dTarget, dBoundary, panicked>>
+                   dPc, dTarget, dBoundary, panicked, bad, fatal, parentDone>>
+
+\* In English: [G apply_stage.go callApplyFunc] ApplyFunc panics. The
+\* deferred panics.Guard turns the panic into the item's apply error, so
+\* the block is not committed and the item is rejected (RunnerFail).
+\* Literally: "RunnerApplyPanic is defined as: StagePanic equals "apply",
+\*   and rPc equals "apply", and bad in the next state equals bad with
+\*   rItem added, and RunnerFail, and every other variable is unchanged."
+RunnerApplyPanic ==
+    /\ StagePanic = "apply" /\ rPc = "apply"
+    /\ bad' = bad \cup {rItem}
+    /\ RunnerFail
+    /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, completed, fV,
+                   stopPc, waiterPc, metricsPc, stopping, stopped, dV,
+                   panicked, parentDone, commitLog>>
 
 \* In English: ApplyFunc's own call to Stop has returned (joined, only
 \* signalled, or given up when its ctx ended); ApplyFunc then returns.
@@ -485,7 +572,7 @@ RunnerApplyStop ==
     /\ rPc = "applyStop" /\ stopPc["cb"] \in {"returned", "requested", "timedOut"}
     /\ Commit
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, fV, lifeV,
-                   dPc, dTarget, dBoundary, panicked>>
+                   dPc, dTarget, dBoundary, panicked, bad, fatal, parentDone>>
 
 \* In English: ApplyFunc's own WaitForDrain returns, then ApplyFunc
 \* returns. Its Fence boundary includes the block being applied, so the
@@ -509,7 +596,7 @@ RunnerApplyDrain ==
          [] OTHER -> canceled \/ stopping
     /\ Commit
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rItem, fV, lifeV,
-                   dPc, dTarget, dBoundary, panicked>>
+                   dPc, dTarget, dBoundary, panicked, bad, fatal, parentDone>>
 
 \* In English: [G apply_stage.go 615-635] forwardItem: send to
 \* resultsQueue if it has room (tried first), else wait for room or for
@@ -530,10 +617,10 @@ RunnerForward ==
        \/ /\ resQClosed
           /\ panicked' = TRUE /\ UNCHANGED resQ
        \/ /\ ~(Len(resQ) < Cap) /\ ~resQClosed /\ canceled
-          /\ UNCHANGED <<resQ, panicked>>
+          /\ UNCHANGED <<resQ, panicked, stV>>
     /\ rPc' = "recv"
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, submitClosed, decQ, decClosed,
-                   resQClosed, resultsClosed, wV, rItem, completed, fV, lifeV, dV>>
+                   resQClosed, resultsClosed, wV, rItem, completed, fV, lifeV, dV, stV>>
 
 ---------------------------------------------------------------------------
 (* forwardResults, and the Results reader. *)
@@ -558,7 +645,7 @@ FwdSelect ==
           /\ fPc' = "exited" /\ resultsClosed' = TRUE
           /\ UNCHANGED <<fItem, resQ>>
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, submitClosed, decQ, decClosed,
-                   resQClosed, wV, rV, fPending, readerPc, lifeV, dV, panicked>>
+                   resQClosed, wV, rV, fPending, readerPc, lifeV, dV, panicked, stV>>
 
 \* In English: [G 700-705] the unbuffered hand-off: the reader, or a Stop
 \* that is draining, takes the item, and its reservation is returned
@@ -586,7 +673,7 @@ FwdHandoff ==
                             ELSE b
     /\ fPc' = "select"
     /\ UNCHANGED <<subV, gate, mu, chanV, wV, rV, fItem, fPending, readerPc,
-                   lifeV, dV, panicked>>
+                   lifeV, dV, panicked, stV>>
 
 \* In English: PR #3161's forwarder: accept a queued result at once,
 \* returning its reservation; hand the oldest accepted result to the
@@ -617,7 +704,7 @@ FwdPR ==
           /\ fPending' = <<>> /\ fPc' = "exited" /\ resultsClosed' = TRUE
           /\ UNCHANGED <<budV, resQ>>
     /\ UNCHANGED <<subV, gate, mu, submitQ, submitClosed, decQ, decClosed,
-                   resQClosed, wV, rV, fItem, readerPc, lifeV, dV, panicked>>
+                   resQClosed, wV, rV, fItem, readerPc, lifeV, dV, panicked, stV>>
 
 \* In English: the reader's range over Results ends when it is closed.
 \* Literally: "ReaderExit is defined as: Reader, and readerPc equals
@@ -627,7 +714,7 @@ ReaderExit ==
     /\ Reader /\ readerPc = "recv" /\ resultsClosed
     /\ readerPc' = "exited"
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fPc, fItem, fPending,
-                   lifeV, dV, panicked>>
+                   lifeV, dV, panicked, stV>>
 
 ---------------------------------------------------------------------------
 (* Stop, the goroutine it starts, the metrics collector, and the parent   *)
@@ -646,7 +733,7 @@ StopCall(s) ==
     /\ stopPc[s] = "idle"
     /\ stopPc' = [stopPc EXCEPT ![s] = IF NewStop THEN "signal" ELSE "lockMu"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc,
-                   metricsPc, canceled, stopping, stopped, dV, panicked>>
+                   metricsPc, canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 959-964] p.mu.Lock(); a pipeline already stopped
 \* unlocks at once, and then (CancelCleanup) waits for the watcher; the
@@ -664,7 +751,7 @@ StopLock(s) ==
               /\ UNCHANGED mu
          ELSE /\ mu' = s /\ stopPc' = [stopPc EXCEPT ![s] = "cancel"]
     /\ UNCHANGED <<subV, budV, gate, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 968-971] stopping, then cancel. The cancel watcher does
 \* not set stopping: no explicit Stop was asked for, so a drain still
@@ -679,7 +766,7 @@ StopCancel(s) ==
     /\ stopping' = (stopping \/ s /= "watch") /\ canceled' = TRUE
     /\ stopPc' = [stopPc EXCEPT ![s] = "gate"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc,
-                   metricsPc, stopped, dV, panicked>>
+                   metricsPc, stopped, dV, panicked, stV>>
 
 \* In English: [G 975-979] take the gate (so no Submit is mid-send), set
 \* stopped, close submitChan, give the gate back.
@@ -697,7 +784,7 @@ StopGate(s) ==
     /\ stopPc' = [stopPc EXCEPT ![s] = "joinDecode"]
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, decQ, decClosed, resQ,
                    resQClosed, resultsClosed, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, dV>>
+                   canceled, stopping, dV, stV>>
 
 \* In English: [G 982-983] decodePool.Stop joins the workers, then
 \* decodedChan is closed. CloseBeforeJoin does not wait.
@@ -714,7 +801,7 @@ StopJoinDecode(s) ==
     /\ stopPc' = [stopPc EXCEPT ![s] = IF PR3161 THEN "joinRunner" ELSE "spawn"]
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, submitClosed, decQ, resQ,
                    resQClosed, resultsClosed, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 994-998] start the goroutine that joins the runner.
 \* Literally: "StopSpawn of s is defined as: stopPc of s equals "spawn",
@@ -726,7 +813,7 @@ StopSpawn(s) ==
     /\ waiterPc' = "waiting"
     /\ stopPc' = [stopPc EXCEPT ![s] = "drainApply"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G apply_stage.go 457, 464] the helper's applyRunner.Stop
 \* returns once the runner has closed done; then it closes applyDone.
@@ -737,7 +824,7 @@ WaiterDone ==
     /\ waiterPc = "waiting" /\ rPc = "exited"
     /\ waiterPc' = "exited"
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, stopPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 999-1009] Stop leaves its draining loop once applyDone is
 \* closed (the hand-offs it takes meanwhile are FwdHandoff steps). With
@@ -754,7 +841,7 @@ StopJoinRunner(s) ==
        \/ stopPc[s] = "joinRunner" /\ (rPc = "exited" \/ Mutation = "SkipRunnerJoin")
     /\ stopPc' = [stopPc EXCEPT ![s] = "closeQueue"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 1014] close(resultsQueue).
 \* Literally: "StopCloseQueue of s is defined as: stopPc of s equals
@@ -769,7 +856,7 @@ StopCloseQueue(s) ==
     /\ stopPc' = [stopPc EXCEPT ![s] = "drainDone"]
     /\ UNCHANGED <<subV, budV, gate, mu, submitQ, submitClosed, decQ, decClosed,
                    resQ, resultsClosed, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV>>
+                   canceled, stopping, stopped, dV, stV>>
 
 \* In English: [G 1015-1025] keep draining until resultsDone is closed
 \* (the forwarder has exited).
@@ -781,7 +868,7 @@ StopDrainDone(s) ==
     /\ stopPc[s] = "drainDone" /\ fPc = "exited"
     /\ stopPc' = [stopPc EXCEPT ![s] = "releaseActive"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 1029, 439-449] releaseActiveItems: every item still
 \* holding its reservation returns it (items stranded in the channels by
@@ -799,7 +886,7 @@ StopReleaseActive(s) ==
          ELSE /\ budget' = budget - Cardinality(active) /\ active' = {}
     /\ stopPc' = [stopPc EXCEPT ![s] = "wgWait"]
     /\ UNCHANGED <<subV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 1035-1037] wg.Wait for the metrics collector, then the
 \* unlock of mu. The watcher and the teardown goroutine are then done; a
@@ -815,7 +902,7 @@ StopReturn(s) ==
     /\ mu' = IF mu = s THEN "none" ELSE mu
     /\ stopPc' = [stopPc EXCEPT ![s] = IF s \in {"watch", "td"} THEN "returned" ELSE "joinWatch"]
     /\ UNCHANGED <<subV, budV, gate, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [fix/pipeline-cancel-cleanup] after unlocking mu, Stop waits
 \* for the cancel watcher to exit, so the watcher is joined too. Without
@@ -830,16 +917,19 @@ StopJoinWatch(s) ==
     /\ stopPc["watch"] \in {"idle", "exited", "returned"} \/ Mutation = "NoWatchJoin"
     /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [fix/pipeline-cancel-cleanup] the watcher wakes when the
 \* pipeline context is done. If an explicit Stop has begun it exits;
 \* otherwise it runs Stop's teardown itself. With NewStop (PR #3233,
 \* watchParentCancel and requestStop(false)) it never runs the teardown
 \* itself: it starts the teardown goroutine unless an explicit Stop has
-\* begun or the teardown has already started, and exits.
+\* begun or the teardown has already started, and exits. It watches the
+\* context given to Start and Stop's signal, not the pipeline context, so
+\* a fatal error's cancel alone does not wake it.
 \* Literally: "WatchWake is defined as: stopPc of "watch" equals
-\*   "watchWait", and canceled is true, and stopPc in the next state equals:
+\*   "watchWait", and canceled is true, and (fatal is not true, or
+\*   parentDone is true, or stopping is true), and stopPc in the next state equals:
 \*   if NewStop, then stopPc except that its "watch" entry is "exited" and
 \*   its "td" entry is (if stopping or the old entry does not equal "idle"
 \*   then the old entry else "gate"); else stopPc except that its "watch"
@@ -847,12 +937,13 @@ StopJoinWatch(s) ==
 \*   variable is unchanged."
 WatchWake ==
     /\ stopPc["watch"] = "watchWait" /\ canceled
+    /\ ~fatal \/ parentDone \/ stopping      \* a fatal cancel alone does not wake it
     /\ stopPc' = IF NewStop
                    THEN [stopPc EXCEPT !["watch"] = "exited",
                                        !["td"] = IF stopping \/ @ /= "idle" THEN @ ELSE "gate"]
                    ELSE [stopPc EXCEPT !["watch"] = IF stopping THEN "exited" ELSE "lockMu"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [fix/pipeline-callback-stop] Stop(ctx) signals: stopping,
 \* cancel, and start the one teardown goroutine if it has not started. A
@@ -882,7 +973,7 @@ StopSignal(s) ==
                              THEN "requested" ELSE "waitTd",
                     !["td"] = IF @ = "idle" THEN "gate" ELSE @]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   stopped, dV, panicked>>
+                   stopped, dV, panicked, stV>>
 
 \* In English: [fix/pipeline-callback-stop] a waiting Stop(ctx) returns nil
 \* once the teardown goroutine has finished, or ctx.Err() once its ctx
@@ -903,7 +994,7 @@ StopWaitTd(s) ==
           /\ stopPc' = [stopPc EXCEPT ![s] = "returned"]
        \/ StopTimeout /\ stopPc' = [stopPc EXCEPT ![s] = "timedOut"]
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, waiterPc, metricsPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: [G 1097-1107] the metrics collector exits once the context
 \* is done.
@@ -914,17 +1005,21 @@ MetricsExit ==
     /\ metricsPc = "running" /\ canceled
     /\ metricsPc' = "exited"
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, stopPc, waiterPc,
-                   canceled, stopping, stopped, dV, panicked>>
+                   canceled, stopping, stopped, dV, panicked, stV>>
 
 \* In English: the context given to Start is cancelled, without Stop.
-\* Literally: "CancelParent is defined as: ParentCancel, and canceled is
-\*   not true, and canceled in the next state equals TRUE, and every other
-\*   variable is unchanged."
+\* A fatal error has already cancelled the pipeline context but not this
+\* one, so after a fatal error it can still end.
+\* Literally: "CancelParent is defined as: ParentCancel, and parentDone is
+\*   not true, and (canceled is not true, or fatal is true), and canceled
+\*   and parentDone in the next state equal TRUE, and every other variable
+\*   is unchanged."
 CancelParent ==
-    /\ ParentCancel /\ ~canceled
-    /\ canceled' = TRUE
+    /\ ParentCancel /\ ~parentDone /\ (~canceled \/ fatal)
+    /\ canceled' = TRUE /\ parentDone' = TRUE
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, stopPc, waiterPc,
-                   metricsPc, stopping, stopped, dV, panicked>>
+                   metricsPc, stopping, stopped, dV, panicked, bad, fatal,
+                   commitLog>>
 
 ---------------------------------------------------------------------------
 (* The drainer: WaitForDrain(Background), then a rollback. *)
@@ -959,7 +1054,7 @@ DrainCall ==
     /\ IF stopping THEN DrainStopped
                    ELSE dPc' = "fenceGate" /\ UNCHANGED dBoundary
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, lifeV, dTarget,
-                   lateCommit, panicked>>
+                   lateCommit, panicked, stV>>
 
 \* In English: [G 866-875] Fence takes the gate, reads sequenceCounter as
 \* its target and gives the gate back (no wait in between); or the
@@ -975,7 +1070,7 @@ DrainGate ==
           /\ dTarget' = subSeq /\ dPc' = "fenceWait" /\ UNCHANGED dBoundary
        \/ /\ canceled /\ DrainStopped /\ UNCHANGED dTarget
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, lifeV,
-                   lateCommit, panicked>>
+                   lateCommit, panicked, stV>>
 
 \* In English: [G 880-899] the Fence returns once completedSequence reaches
 \* its target (success, with that boundary, unless Stop has begun), or
@@ -993,7 +1088,7 @@ DrainWait ==
                ELSE DrainOK(dTarget)
        \/ canceled /\ DrainStopped
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, lifeV, dTarget,
-                   lateCommit, panicked>>
+                   lateCommit, panicked, stV>>
 
 \* In English: [PR] waitForApplyRunner returns once the runner has exited.
 \* Literally: "DrainWaitRunner is defined as: dPc equals "waitRunner", and
@@ -1003,7 +1098,7 @@ DrainWaitRunner ==
     /\ dPc = "waitRunner" /\ rPc = "exited"
     /\ DrainOK(N)
     /\ UNCHANGED <<subV, budV, gate, mu, chanV, wV, rV, fV, lifeV, dTarget,
-                   lateCommit, panicked>>
+                   lateCommit, panicked, stV>>
 
 ---------------------------------------------------------------------------
 
@@ -1039,6 +1134,7 @@ CallersFinished ==
 Progress ==
     \/ SubCall \/ SubReserve \/ SubGate \/ SubCapacity \/ SubTrack \/ SubSend
     \/ WorkerRecv \/ WorkerSend
+    \/ WorkerPanic \/ RunnerApplyPanic
     \/ RunnerRecv \/ RunnerCheck \/ RunnerApply \/ RunnerApplyStop
     \/ RunnerApplyDrain \/ RunnerForward
     \/ FwdSelect \/ FwdHandoff \/ FwdPR \/ ReaderExit
@@ -1126,12 +1222,19 @@ JoinedAfterStop ==
 NoCommitAfterDrain == ~lateCommit
 
 \* In English: when nothing can move and the context is done, the
-\* forwarder has exited and no item holds a reservation.
+\* forwarder has exited and no item holds a reservation. A fatal error
+\* alone does not count: by design [G watchParentCancel] the pipeline
+\* then keeps its committed results, and the items it held, until Stop
+\* or the end of the context given to Start (MainFatalHoldsProbeBug shows it).
+\* Literally: "CancelEnded is defined as: canceled is true, and (fatal is
+\*   not true, or parentDone is true, or stopping is true)."
+CancelEnded == canceled /\ (~fatal \/ parentDone \/ stopping)
+
 \* Literally: "NoLeakWhenQuiescent is defined as: if Progress is not
-\*   enabled and canceled is true, then fPc equals "exited" and active
-\*   equals the empty set."
+\*   enabled and CancelEnded, then fPc equals "exited" and active equals
+\*   the empty set."
 NoLeakWhenQuiescent ==
-    (~ENABLED Progress /\ canceled) => (fPc = "exited" /\ active = {})
+    (~ENABLED Progress /\ CancelEnded) => (fPc = "exited" /\ active = {})
 
 \* In English: Stop never holds mu while it waits for a runner that is
 \* inside ApplyFunc. Expected to be violated: this is how Stop works.
@@ -1170,5 +1273,42 @@ StopPublished ==
     NewStop =>
         \A s \in {"owner", "second", "cb"} :
             stopPc[s] \in {"waitTd", "requested", "returned", "timedOut"} => stopping
+
+---------------------------------------------------------------------------
+(* Stage panics.                                                           *)
+
+\* In English: ApplyFunc commits blocks in submission order, each once.
+\* Literally: "AppliedInOrderOnce is defined as: for every i in 1 through
+\*   the length of commitLog, entry i of commitLog equals i minus 1."
+AppliedInOrderOnce ==
+    \A i \in 1 .. Len(commitLog) : commitLog[i] = i - 1
+
+\* In English: no block whose stage panicked is committed, and no block
+\* after it is either.
+\* Literally: "NoApplyAfterPanic is defined as: for every b in bad and
+\*   every i in 1 through the length of commitLog, entry i of commitLog is
+\*   less than b."
+NoApplyAfterPanic ==
+    \A b \in bad : \A i \in 1 .. Len(commitLog) : commitLog[i] < b
+
+\* In English: Fence and WaitForDrain never report success over a block
+\* whose stage panicked; the panic reaches the caller as their error.
+\* (Once Stop has begun, WaitForDrain succeeds without a boundary.)
+\* Literally: "PanicFailsDrain is defined as: if dPc equals "ok" and
+\*   stopping is not true, then every b in bad is at least dBoundary."
+PanicFailsDrain ==
+    (dPc = "ok" /\ ~stopping) => \A b \in bad : b >= dBoundary
+
+\* In English: a probe: a panicked block reaches the runner and is
+\* reported, so the properties above are not vacuous.
+\* Literally: "ProbeNoFatalPanic is defined as: fatal is not true."
+ProbeNoFatalPanic == ~fatal
+
+\* In English: a probe: after a fatal panic with no Stop and no parent
+\* cancel, nothing moves and items still hold their reservations, the
+\* documented hold until Stop.
+\* Literally: "ProbeNothingHeldWhenStuck is defined as: if Progress is
+\*   not enabled and canceled is true, then active equals the empty set."
+ProbeNothingHeldWhenStuck == (~ENABLED Progress /\ canceled) => active = {}
 
 =============================================================================
