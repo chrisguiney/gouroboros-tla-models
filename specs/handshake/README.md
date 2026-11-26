@@ -59,6 +59,17 @@ gOuroboros (`origin/main` at `61046085`):
 11. Does every receiver reject a version table whose recognised keys are
     not in ascending order (`UnorderedMapsRejected`), and accept one with
     an unrecognised key anywhere (`UnknownKeysTolerated`)?
+    In a simultaneous open too (`HandshakeSimOpenKeyOrder*.cfg`)?
+12. Version data (`HandshakeVersionData.tla`): does each version carry the
+    fields the reference's codec for it expects, so two honest sides with a
+    common version connect (`HonestPairsConnect`)? Does gOuroboros combine
+    diffusion mode, peer sharing, query and Peras support as the reference
+    does, for Cardano and DMQ node-to-node (`AgreementMatchesReference`),
+    and does each side end with that agreement (`BothEndAgreed`)?
+13. Does a gOuroboros server answer any proposal, and a gOuroboros client
+    any accept, as the reference would: refuse what it refuses, skip what
+    it skips (`ServerMatchesReference`, `ClientMatchesReference`), and
+    never agree a version neither side proposed (`NeverAgreesUnproposed`)?
 
 ## The answers
 
@@ -96,6 +107,19 @@ client table (288) against every server table (24), 6,912 starting pairs
 | `HandshakeSimOpenDeliveryCloseBug.cfg` (`8461ae3a`, the connection closes on refusal) | | **fails** `EndsWithOwnDecision` |
 | `HandshakeSimOpenDeliveryCommonBug.cfg` (`8461ae3a`, a common version) | | **deadlock** (in Go, until the handshake timeout) |
 | `HandshakeSimOpenDeliveryDropBug.cfg` (`8461ae3a`) | | **fails** `NoDroppedProposal` |
+| `HandshakeSimOpenKeyOrder.cfg` (reference; each proposal in any wire order) | 44,736 | passes |
+| `HandshakeSimOpenKeyOrderUnknown.cfg` (reference; an unrecognised key anywhere) | 17,344 | passes, no failures |
+| `HandshakeSimOpenKeyOrderBug.cfg` (no key-order check) | | **fails** `UnorderedMapsRejected` |
+| `HandshakeSimOpenKeyOrderEveryBug.cfg` (every key must ascend) | | **fails** `UnknownKeysTolerated` |
+| `HandshakeVersionData.cfg` (Cardano node-to-node, reference main; gOuroboros with Peras at 17 and the fixes) | 803,520 | passes |
+| `HandshakeVersionDataDMQ.cfg` (DMQ node-to-node, dmq-node; gOuroboros with the fixes) | 36,288 | passes |
+| `HandshakeVersionDataReleased.cfg` (reference release; gOuroboros's table as it is, Peras at 16) | 181,440 | passes |
+| `HandshakeVersionDataPerasV16Bug.cfg`, `...PerasV16ConnectBug.cfg` (gOuroboros `7cd17437` against reference main) | | **fail** `ClientMatchesReference`; `HonestPairsConnect` |
+| `HandshakeVersionDataDMQRuleBug.cfg` (`7cd17437`: Cardano rule for DMQ) | | **fails** `ClientMatchesReference` |
+| `HandshakeVersionDataPeerSharingRangeBug.cfg` (`7cd17437`: peer sharing 2 decodes) | | **fails** `ClientMatchesReference` |
+| `HandshakeVersionDataClientRawBug.cfg`, `...ClientRawEndBug.cfg` (`7cd17437`: the client keeps the accept's data) | | **fail** `ClientMatchesReference`; `BothEndAgreed` |
+| `HandshakeVersionDataWideKeyBug.cfg` (`7cd17437`: a key above 65535 fails the message) | | **fails** `ServerMatchesReference` |
+| `HandshakeVersionDataGouroborosBug.cfg` (`7cd17437` as it is, against the release) | | **fails** `ClientMatchesReference` |
 | `HandshakeTable.cfg`, `HandshakeTableGouroboros.cfg` | | print the receive table |
 
 The gOuroboros failure is short: the client proposes only version 1 with the
@@ -160,6 +184,9 @@ reset"), and the refusing side closes the connection.
 | `HandshakeAcceptOwnDataBug.cfg` | sending the agreed data | `AcceptCarriesNegotiatedData` |
 | `HandshakeKeyOrderBug.cfg` | the key-order check | `UnorderedMapsRejected` |
 | `HandshakeKeyOrderEveryBug.cfg` | skipping unrecognised keys | `UnknownKeysTolerated` |
+| `HandshakeVersionDataDiffusionAndBug.cfg` | initiator-only if either side is | `ClientMatchesReference` (the first TLC reports) |
+| `HandshakeVersionDataPerasOrBug.cfg` | Peras only if both support it | `ClientMatchesReference` (the first TLC reports) |
+| `HandshakeVersionDataLowestBug.cfg` | the highest common version | `ServerMatchesReference` |
 
 Reachability probes, each expected to fail, show the passing configs reach
 every answer: `HandshakeProbeAcceptBug.cfg`, `HandshakeProbeQueryBug.cfg`,
@@ -175,6 +202,69 @@ The first rogue run failed `RefusalReasonsRight`. The rogue peer had sent its
 own `MsgProposeVersions` before the client's, and the server answered that
 one; the invariants compared the answer with the client's table. They now
 compare it with the proposal the server actually answered (`heard`).
+
+## Version data
+
+`HandshakeVersionData.tla` is a layer under `Handshake.tla`: one handshake,
+in which Init picks the two sides (the reference, gOuroboros, a client that
+sends anything, or an old gOuroboros server that sends its own data), their
+settings (diffusion mode, peer sharing, Peras) and the versions each offers;
+the server answers and the client ends. The magic and the query reply are
+left to `Handshake.tla`. Versions 14 to 17 stand for Cardano node-to-node
+(gOuroboros's 7 to 13 are outside every reference table at this revision),
+1 and 2 for DMQ; `UnknownKey` (100) is a version nobody knows, `WideKey`
+(70000) a key gOuroboros cannot hold in a `uint16`.
+
+What it found, at gOuroboros `7cd17437`:
+
+- **Peras at 16** (DRIFT N63). Reference main moved the Peras field to the
+  new version 17 and made 16 four fields [V1][V2]; gOuroboros follows the
+  release, where 16 has it. `HandshakeVersionDataPerasV16ConnectBug.cfg`:
+  a main client offers only 16, the gOuroboros server refuses it with
+  DecodeError. Against the release everything passes
+  (`HandshakeVersionDataReleased.cfg`). Recorded, not changed.
+- **DMQ peer sharing** (N64). dmq-node disables peer sharing when the
+  agreed mode is initiator-only [V4]; gOuroboros applied the Cardano rule.
+  Fixed on `fix/handshake-dmq-peer-sharing`.
+- **Peer sharing range** (N65). From version 13 only 0 and 1 decode [V1][V4];
+  gOuroboros accepted any number. Fixed on `fix/handshake-peer-sharing-range`.
+- **The client's end data** (N66). The reference client ends with its own
+  agreement of its data with the accept's [V6]; gOuroboros kept the
+  accept's data, which differs only against a server that does not send the
+  agreement, such as gOuroboros before #3194
+  (`HandshakeVersionDataClientRawEndBug.cfg`). Fixed on
+  `fix/handshake-client-agreed-data`.
+- **Keys a uint16 cannot hold** (N67). The reference skips them [V5];
+  gOuroboros failed the whole message. Fixed on
+  `fix/handshake-skip-wide-version-keys`.
+
+`ClientMatchesReference` is checked for every version and wire data at each
+state, so it is the first invariant most Bug configs break; the configs
+ending `ConnectBug` and `EndBug` check one invariant each, to show the
+outcome. `AgreementMatchesReference` reads no variable; it is joined to
+`Done` because TLC reports a constant invariant that is false as an error,
+not as a violation.
+
+Simultaneous open now sends each proposal in a chosen wire order and checks
+the order on `MsgReplyVersions` as on `MsgProposeVersions` (the reference
+decodes both with `decodeVersions` [R10]). gOuroboros's simultaneous-open
+branch decodes the reply with the same `NewMsgFromCbor`, so the merged
+key-order check covers it: no Go change.
+
+### Version gates in the mini-protocols
+
+Checked at the same time, from a reviewer's question, without a model: the
+helpers that turn a feature on by negotiated version. The node-to-client
+ones (local-state-query client and server flags, `shelleyQuerySupported`,
+`withoutSRVRelays`, local-tx-monitor `supportsGetMeasures`) subtract the
+`0x8000` offset from a `uint16`, so version 0, a protocol built without a
+negotiated version, reads as the newest; the code says so and its tests use
+it. The node-to-node ones (tx-submission's clamp, message submission V2,
+block-fetch compression) read version 0 as the oldest. `connection.go`
+always passes the negotiated version, and no Dingo code builds these
+protocols itself, so neither reading is reachable there; the reference has
+no unset version. Not a defect; the gates are pinned by table tests on
+`test/handshake-versions`.
 
 ## The receive table
 
@@ -356,14 +446,23 @@ unless noted.
 | R9 | `Server.hs` 42-44 | `MsgAcceptVersion` carries `encodeData vNumber agreedData`. |
 | R10 | `Codec.hs` 197-241 | `decodeVersions`: unrecognised keys skipped (235); recognised keys strictly ascending, else "unordered version" (237-240). |
 | S7 | `docs/network-spec/miniprotocols.tex` 572-573, 653-656 | "the negotiated version data is sent back using MsgAcceptVersion"; keys "unique and appear in ascending order". |
+| V1 | `cardano-diffusion/api/lib/Cardano/Network/NodeToNode/Version.hs` 86-117, 134-149, 158-236 | Versions 14-17; `acceptableVersion`; `minPerasVersion = NodeToNodeV_17`; four fields plus Peras from 17; peer sharing 0 or 1. |
+| V2 | `cardano-diffusion/changelog.d/20261008_170232_coot_tx_submission_leios.md`; `cardano-diffusion/CHANGELOG.md` 49-53 | Peras moved from 16 to 17 on main; the 1.1.0.0 to 1.3.0.1 releases have it at 16. |
+| V3 | `ouroboros-network/api/lib/Ouroboros/Network/PeerSelection/PeerSharing.hs` 19-31; `DiffusionMode.hs` 24-27; `PerasSupport.hs` 21-23 | `Disabled <> _ = Disabled`; the orders `min` uses. |
+| V4 | IntersectMBO/dmq-node `67a1a1e5a579` `dmq-node/src/DMQ/NodeToNode/Version.hs` 41-44, 98-116, 148-168 | DMQ versions 1, 2; peer sharing disabled for an initiator-only agreement; four fields. |
+| V5 | `Codec.hs` 168-175, 210-241 | An accept with an unknown version fails to decode; an unrecognised table key is skipped. |
+| V6 | `Client.hs` 147-172, 191-218 | The client ends with its own agreement; `acceptOrRefuse`. |
+| V7 | `Server.hs` 42-44 | The accept carries the agreed data. |
 | G1 | gOuroboros `protocol/handshake/{handshake,client,server}.go`, `connection.go` 746-800, `muxer/muxer.go` `readLoop` | The code compared. |
 
 ## Not modelled
 
-Peer sharing and Peras flags in the agreed data (one diffusion-mode flag
-stands for every combined field); key order in `HandshakeSimOpen.tla`;
-version numbers gOuroboros cannot decode; the 20 s delay before the reference closes
-a query connection; the connection-wide handshake timeout in `connection.go`.
+The 20 s delay before the reference closes a query connection; the
+connection-wide handshake timeout in `connection.go` (see
+`specs/connection`); node-to-node versions 7 to 13, which no reference
+table at this revision has; a `MsgRefuse` `VersionMismatch` listing a
+version number above 65535, which the reference keeps as a mismatch and
+gOuroboros reports as a malformed refusal (the handshake fails either way).
 
 ## After merging main into #3127
 
@@ -398,6 +497,8 @@ for c in HandshakeSimOpenGouroborosBug HandshakeSimOpenAsymmetricBug \
          HandshakeSimOpenProbeRefusedBug HandshakeSimOpenEarlyReadBug; do
   ../../bin/tlc -config $c.cfg HandshakeSimOpen.tla
 done
+# HandshakeSimOpenKeyOrder*.cfg and HandshakeVersionData*.cfg: the configs
+# without Bug pass, every *Bug.cfg fails.
 # HandshakeSimOpenDelivery*.cfg: the plain, Close and Common configs pass,
 # every *Bug.cfg fails; scripts/run-model.sh specs/handshake runs them all.
 ```

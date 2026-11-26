@@ -117,6 +117,11 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N60](#n60) | network | Message submission V2: the responder after the requester's `MsgDone` | The responder is restarted in its initial state; dmq-node's V2 inbound sends `MsgDone` on demotion and runs again on the same connection when the peer is promoted | `7cd17437`: the V2 `Client` (the responder) stays in `StDone`, so the next run's first request is never answered | "should be restarted in its initial state" | does not conform | Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR (model `dmq` `DmqRestartSubmissionV2NoRestartBug.cfg`) |
 | [N61](#n61) | network | Local-tx-monitor `Release()` with no snapshot acquired | Not expressible: the typed client offers `MsgRelease` only while acquired | `7cd17437`: sends `MsgRelease` from `Idle`; the send loop refuses it and the connection is torn down while `Release` returns nil | `MsgRelease` only from `StAcquired` | does not conform | Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR (model `localtx` `LocalTxMonitorClientCallsReleaseIdleBug.cfg`) |
 | [N62](#n62) | network | DMQ: a message accepted by another connection between this one's prepare and commit | A held message is dropped as a duplicate before validation, so its counter is never checked | `7cd17437`: commit re-checks the counter first, so the duplicate is refused "opcert number went backwards" once a later message of the pool raised the counter, closing a node-to-node connection | Silent | does not conform | Fixed on local branch `fix/dmq-commit-duplicate-counter` `9af342c1`, no PR (model `dmq` `AuthOpCertCacheCounterFirstBug.cfg`) |
+| [N63](#n63) | network | Node-to-node version 16 data carries the Peras field | `7cd17437`: version 16 sends and requires five fields, the fifth Peras support; version 17 unknown | Main: 16 has four fields (tx-submission outbound V2), Peras moved to 17; the release (cardano-diffusion 1.3.0.1): 16 with the Peras field | Version 17 "Experimental, support Peras mini-protocols" | conforms to the release, not to main | Recorded, not changed (model `handshake` `HandshakeVersionDataPerasV16Bug.cfg`, `HandshakeVersionDataReleased.cfg`); gOuroboros already treats 16 as tx-submission outbound V2 |
+| [N64](#n64) | network | DMQ node-to-node agreed peer sharing | Disabled when the agreed diffusion mode is initiator-only | `7cd17437`: Cardano rule only, peer sharing kept for an initiator-only agreement | CIP-0137 silent | does not conform | Fixed on local branch `fix/handshake-dmq-peer-sharing` `1c208857`, no PR (model `handshake` `HandshakeVersionDataDMQRuleBug.cfg`) |
+| [N65](#n65) | network | Peer sharing value outside 0 and 1 (node-to-node from 13, DMQ) | Decode failure: `MsgRefuse` DecodeError, a client error | `7cd17437`: any unsigned integer accepted, read as enabled | CDDL `peerSharing = 0..1` | does not conform | Fixed on local branch `fix/handshake-peer-sharing-range` `50a554d5`, no PR (model `handshake` `HandshakeVersionDataPeerSharingRangeBug.cfg`) |
+| [N66](#n66) | network | Data a handshake client ends with on `MsgAcceptVersion` | Its own agreement of its data with the accept's data | `7cd17437`: the accept's data as sent | Silent | conforms (no wrong outcome against a server that sends the agreed data) | Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR (model `handshake` `HandshakeVersionDataClientRawEndBug.cfg`); matters against gOuroboros servers from before #3194 |
+| [N67](#n67) | network | Version-table keys a uint16 cannot hold | Skipped like any key the codec does not recognise | `7cd17437`: the whole `MsgProposeVersions` or `MsgQueryReply` fails to decode | Keys are version numbers | does not conform | Fixed on local branch `fix/handshake-skip-wide-version-keys` `ccf4f845`, no PR (model `handshake` `HandshakeVersionDataWideKeyBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -881,6 +886,61 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/common/authentication.go` `prepare` (commit closure 427-494); `TestPrepareCommitDuplicateAfterCounterRises`, `TestConcurrentCommitsKeepCounterInvariants`
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/dmq-commit-duplicate-counter` `9af342c1`, no PR: commit treats a message accepted meanwhile as a duplicate before the counter re-check (model `dmq` `AuthOpCertCache.cfg`)
+
+### N63
+
+**Node-to-node version 16 data carries the Peras field** (kind 2: follows the reference release, not main)
+
+- **What differs.** Reference main: `NodeToNodeV_16` is tx-submission outbound V2 with four data fields, and the Peras field and mini-protocols moved to the experimental `NodeToNodeV_17`; main's changelog says the new 16 "is not compatible with NodeToNodeV_16 of previous releases". gOuroboros: version 16 encodes and decodes five fields (`VersionDataNtN16andUp`) and has no 17, matching cardano-diffusion 1.1.0.0 to 1.3.0.1. Against a main node that offers 16, both directions fail: a main server refuses gOuroboros's 16 with DecodeError, and a gOuroboros server refuses a main client's 16 the same way. A reference node proposes 16 only with experimental protocols enabled (ouroboros-consensus `latestReleasedNodeVersion` is `NodeToNodeV_15`).
+- **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex` line 2231: version 17 "Experimental, support Peras mini-protocols"
+- **Reference.** ouroboros-network `5f356486ab3e` `cardano-diffusion/api/lib/Cardano/Network/NodeToNode/Version.hs` 86-117, 158-236 (`minPerasVersion = NodeToNodeV_17`); `cardano-diffusion/changelog.d/20261008_170232_coot_tx_submission_leios.md`; `cardano-diffusion/CHANGELOG.md` 49-53 (1.1.0.0 added 16 with `perasSupport`); ouroboros-consensus `136122cc666c` `Ouroboros/Consensus/Cardano/Node.hs` 328-357
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/versions.go` (version 16, `GetProtocolVersionMapWithPerasSupport`), `protocol/versiondata.go` `VersionDataNtN16andUp`; `protocol/txsubmission/txsubmission.go` `txOutboundClampVersion = 16` already follows main's meaning of 16
+- **Verdict.** conforms to the release; does not conform to main
+- **Status.** Recorded, not changed: moving Peras to 17 breaks gOuroboros against released nodes that enable 16, so it waits for the reference release. `TestNodeToNodeVersionsMatchReference` (branch `test/handshake-versions`) pins the released shape
+
+### N64
+
+**DMQ node-to-node agreed peer sharing** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: dmq-node's `acceptableVersion` sets peer sharing to `PeerSharingDisabled` whenever the agreed diffusion mode is initiator-only. gOuroboros: `agreedVersionData` combines DMQ node-to-node data (the Cardano `VersionDataNtN13andUp` type) by the Cardano rule, so an initiator-only agreement keeps peer sharing enabled in `MsgAcceptVersion` and in `FinishedFunc`.
+- **Spec.** CIP-0137 does not state the agreement
+- **Reference.** dmq-node `67a1a1e5a579` `dmq-node/src/DMQ/NodeToNode/Version.hs` 98-116
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/handshake/version_data.go` `agreedVersionData`; Dingo offers no DMQ peer sharing (`dmq/peer.go` passes `false`), so it is not affected
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/handshake-dmq-peer-sharing` `1c208857`, no PR: the agreement takes the version and applies the DMQ rule to DMQ node-to-node versions. `TestServerAgreesDMQPeerSharingAsReference` fails 6 of 32 cases without it
+
+### N65
+
+**Peer sharing value outside 0 and 1** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: node-to-node (from 13) and DMQ node-to-node decoders accept peer sharing 0 or 1 only; anything else fails to decode, so a server refuses with DecodeError and a client fails. gOuroboros: `NewVersionDataNtN13andUpFromCbor` and `NewVersionDataNtN16andUpFromCbor` accept any unsigned integer, and `PeerSharing()` reads it as enabled.
+- **Spec.** ouroboros-network `5f356486ab3e` `cardano-diffusion/protocols/cddl/specs/node-to-node-version-data-v14.cddl` (`peerSharing = 0..1`)
+- **Reference.** ouroboros-network `5f356486ab3e` `cardano-diffusion/api/lib/Cardano/Network/NodeToNode/Version.hs` 221-224; dmq-node `67a1a1e5a579` `DMQ/NodeToNode/Version.hs` 149-168
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/versiondata.go`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/handshake-peer-sharing-range` `50a554d5`, no PR; versions 11 and 12 keep their three modes
+
+### N66
+
+**Data a handshake client ends with on `MsgAcceptVersion`** (kind 2: differs; both within the spec)
+
+- **What differs.** Reference: the client decodes the accept's data and ends with `acceptVersion vData vData'`, its own agreement. gOuroboros: `handleAcceptVersion` passes the accept's data to `FinishedFunc` as sent. Against a server that sends the agreed data the two are equal (the agreement is idempotent); against a gOuroboros server from before #3194, which sends its own data, an initiator-only client without peer sharing ends as full duplex with peer sharing. `connection.go` and Dingo combine each flag with the local setting again, so no wrong outcome was found there.
+- **Spec.** silent
+- **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Client.hs` 147-172
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/handshake/client.go` `handleAcceptVersion`
+- **Verdict.** conforms
+- **Status.** Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR; `TestClientEndsWithItsAgreement` fails without it. It calls `agreedVersionData` with the two-argument form; merged after N64's branch it must pass the version
+
+### N67
+
+**Version-table keys a uint16 cannot hold** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: `decodeVersions` skips any key its version codec does not recognise, whatever the term. gOuroboros: the table is decoded into `map[uint16]`, so a key above 65535, a negative integer, a string or a tagged number fails the whole `MsgProposeVersions` or `MsgQueryReply`, and the connection, where the reference negotiates among the other versions.
+- **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex` 653-656 (keys are version numbers)
+- **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/framework/lib/Ouroboros/Network/Protocol/Handshake/Codec.hs` 210-241; `NodeToNode/Version.hs` 112-117
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/handshake/collection_decode.go` `validateVersionMapMessage`, `messages.go` `NewMsgFromCbor`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/handshake-skip-wide-version-keys` `ccf4f845`, no PR; only a broken or hostile peer, or a future encoding, sends such a key
 
 ## Consensus
 

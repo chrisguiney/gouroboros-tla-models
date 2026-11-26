@@ -93,23 +93,27 @@ SimInit ==
     /\ rogueLeft = 0
     /\ data = [r \in Roles |-> NoParams]
 
-\* In English: "Side r in StPropose sends its table to its peer and moves
-\* to StConfirm."
+\* In English: "Side r in StPropose sends its table to its peer, its keys in
+\* one of the wire orders ClientKeyOrders allows, and moves to StConfirm."
 \* Literally: "SimPropose of r is defined as: view of r equals "StPropose", and
 \*   view in the next state equals view except that its r entry is "StConfirm",
-\*   and inbox in the next state equals inbox except that its Peer of r entry
-\*   is the old entry with Msg of "MsgProposeVersions", table of r, 0,
-\*   NoParams, "None" and FALSE appended, and table, result, heard,
-\*   rogueLeft and data are unchanged."
+\*   and there exists a k in KeyOrders of table of r such that inbox in the
+\*   next state equals inbox except that its Peer of r entry is the old entry
+\*   with MsgK of "MsgProposeVersions", table of r, 0, NoParams, "None",
+\*   FALSE and k appended, and table, result, heard, rogueLeft and data are
+\*   unchanged."
 SimPropose(r) ==
     /\ view[r] = "StPropose"                         \* r has not proposed yet
     /\ view' = [view EXCEPT ![r] = "StConfirm"]      \* r now waits for an answer
-    /\ inbox' = [inbox EXCEPT ![Peer(r)] =           \* the peer receives r's table
-                   Append(@, Msg("MsgProposeVersions", table[r], 0, NoParams, "None", FALSE))]
+    /\ \E k \in KeyOrders(table[r]) :                \* the keys' wire order
+         inbox' = [inbox EXCEPT ![Peer(r)] =         \* the peer receives r's table
+                     Append(@, MsgK("MsgProposeVersions", table[r], 0, NoParams, "None", FALSE, k))]
     /\ UNCHANGED <<table, result, heard, rogueLeft, data>> \* nothing else changes
 
 \* In English: "Side r in StConfirm reads the peer's proposal. If it is not
-\* legal there (gOuroboros), r hangs up. Otherwise r is done, with the
+\* legal there (gOuroboros), or (reference) its recognised keys are out of
+\* order, as decodeVersions checks MsgReplyVersions too (Codec.hs 160-167,
+\* [R10]), r hangs up. Otherwise r is done, with the
 \* result of negotiating its own table against the peer's [R2], and, if it
 \* accepted, the data EndData gives it."
 \* Literally: "SimRecv of r is defined as: view of r equals "StConfirm", and
@@ -128,7 +132,7 @@ SimRecv(r) ==
     /\ view[r] = "StConfirm"
     /\ inbox[r] /= <<>>
     /\ LET m == Head(inbox[r]) IN
-       IF ~IsLegal("StConfirm", m.type)
+       IF ~IsLegal("StConfirm", m.type) \/ BadKeyOrder(m)
        THEN /\ view' = [view EXCEPT ![r] = "Violation"]
             /\ UNCHANGED <<result, data>>
        ELSE LET d == ClientJudge(table[r], m) IN
