@@ -7,7 +7,8 @@
 (*   GetCurrentTip   takes an operation slot, starts a worker goroutine    *)
 (*                   and waits for the worker's answer or DoneChan, then   *)
 (*                   joins the worker. The worker locks busyMutex          *)
-(*                   (blocking), returns if the client stopped, registers  *)
+(*                   (Lock, or lockBusy ending on StopChan with the fix),  *)
+(*                   returns if the client stopped, registers              *)
 (*                   for an intersect answer, sends MsgFindIntersect with  *)
 (*                   no points and waits for its own answer or DoneChan.   *)
 (*                   It does not check that the protocol is idle: the      *)
@@ -17,6 +18,12 @@
 (*                   then MsgRequestNext until the first block after the   *)
 (*                   intersection arrives, and waits until every request   *)
 (*                   is retired before it releases busyMutex.              *)
+(*   Jump            locks busyMutex (blocking), takes a slot, refuses if  *)
+(*                   a MsgRequestNext is unanswered, sends                 *)
+(*                   MsgFindIntersect and waits for its answer or          *)
+(*                   DoneChan. The handler runs IntersectFoundFunc before  *)
+(*                   it hands Jump the answer, so Jump holds busyMutex     *)
+(*                   until that callback returns.                          *)
 (*   Stop            marks the client Stopping, then polls TryLock on      *)
 (*                   busyMutex every 10 ms for up to 5 s (stopRunning),    *)
 (*                   then sends MsgDone if it can (finishStop), signals    *)
@@ -33,7 +40,9 @@
 (*   - Does Stop honour its ctx and the callback marker while it waits for *)
 (*     busyMutex, as its doc comment says?                                 *)
 (*   - Does Stop always return, including when a callback is the caller   *)
-(*     of GetCurrentTip?                                                   *)
+(*     of GetCurrentTip, and when that callback is IntersectFoundFunc, so  *)
+(*     the worker waits for busyMutex held by the Jump the callback        *)
+(*     blocks?                                                             *)
 (*                                                                         *)
 (* Sources:                                                                *)
 (*   Specification, IntersectMBO/ouroboros-network 5f356486ab3e,           *)
@@ -44,7 +53,8 @@
 (*   [P1] 2180-2208: replies come back in request order.                   *)
 (*   gOuroboros, blinklabs-io/gouroboros 7cd17437:                         *)
 (*   [G1] protocol/chainsync/client.go: GetCurrentTip (worker),            *)
-(*        GetAvailableBlockRange, prepareIdleProtocol,                     *)
+(*        GetAvailableBlockRange, Jump, findIntersect, lockBusy,           *)
+(*        prepareIdleProtocol, handleIntersectFound,                       *)
 (*        waitRequestNextRetired, Stop, stopRunning, finishStop,           *)
 (*        abandonIfOwed, messageHandler and its handlers.                  *)
 (*   [G2] protocol/protocol.go: a queued message waits for agency          *)
@@ -79,6 +89,10 @@ CONSTANTS
                        \* ends on ctx and does not wait at all in a callback
     TipWatchesStop,    \* FALSE today. TRUE: GetCurrentTip and its worker also
                        \* return on StopChan, not only DoneChan
+    WorkerLockWatchesStop, \* FALSE today. TRUE: the worker takes busyMutex
+                       \* with lockBusy, which also ends on StopChan
+    WithJump,          \* TRUE: a goroutine calls Jump, and its
+                       \* IntersectFoundFunc calls GetCurrentTip
     RangeWaitsRetired, \* TRUE in the code; FALSE is a mutation
     TipJoinsWorker     \* TRUE in the code; FALSE is a mutation
 
@@ -86,6 +100,7 @@ CONSTANTS
 \* sync's roll callback."
 ASSUME /\ ~(WithTip /\ CallbackCallsTip)
        /\ ~(CallbackCallsTip /\ StopFrom = "callback")
+       /\ WithJump => ~WithTip /\ ~CallbackCallsTip /\ ~WithRange
        /\ StopFrom \in {"none", "outside", "callback"}
        /\ Deadline \in Nat
 
@@ -96,7 +111,8 @@ None == "none"
 Msg(k, f) == [k |-> k, f |-> f]
 
 VARIABLES
-    busy,          \* who holds busyMutex: None, "worker", "range" or "stop"
+    busy,          \* who holds busyMutex: None, "worker", "range", "jump"
+                   \* or "stop"
     life,          \* lifecycleState: "running", "stopping", "stopped"
     ops,           \* operation slots held (activeOperations)
     opc,           \* GetCurrentTip's next step
@@ -130,13 +146,16 @@ VARIABLES
     doneSent,      \* TRUE once MsgDone is on the wire
     closed,        \* TRUE once abandonIfOwed closed the connection
     stopSig,       \* TRUE once StopChan is closed
-    recvExited     \* TRUE once recvLoop returned (DoneChan closes)
+    recvExited,    \* TRUE once recvLoop returned (DoneChan closes)
+    jpc,           \* Jump's next step
+    jAns,          \* TRUE once Jump's own answer was handed to it
+    jres           \* what Jump returned: "none", "ok", "inprogress", "err"
 
 vars == <<busy, life, ops, opc, wpc, wAns, wres, tres, gpc, gIF, gTip, gFirst,
           gres, backed, wantIF, wantTip, wantFB, ready, outstanding, sendQ,
           inflight, toClient, hpc, hmsg, misrouted, orphan, spc, stopHeld,
           ticks, ticksAfterCtx, ctxDone, doneSent, closed, stopSig,
-          recvExited>>
+          recvExited, jpc, jAns, jres>>
 
 \* In English: "Variables grouped by owner, so each action can say which
 \* groups it leaves alone."
@@ -147,6 +166,7 @@ wireVars  == <<sendQ, inflight, toClient>>
 stopVars  == <<spc, stopHeld, ticks, ticksAfterCtx, ctxDone, doneSent, closed,
                stopSig>>
 handVars  == <<hpc, hmsg, misrouted, orphan, recvExited>>
+jumpVars  == <<jpc, jAns, jres>>
 
 \* In English: "Is this Stop called from the sync's roll callback?"
 CallbackStop == StopFrom = "callback"
@@ -176,6 +196,8 @@ Init ==
     /\ stopHeld = FALSE /\ ticks = 0 /\ ticksAfterCtx = 0 /\ ctxDone = FALSE
     /\ doneSent = FALSE /\ closed = FALSE /\ stopSig = FALSE
     /\ recvExited = FALSE
+    /\ jpc = IF WithJump THEN "lock" ELSE "off"
+    /\ jAns = FALSE /\ jres = "none"
 
 -----------------------------------------------------------------------------
 (* GetCurrentTip, the calling goroutine [G1]. *)
@@ -195,6 +217,7 @@ TipBegin ==
     /\ UNCHANGED <<busy, life, wAns, wres>>
     /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
                    stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "GetCurrentTip takes the worker's result, or gives up when
 \* DoneChan closes (or, with the fix, StopChan)."
@@ -208,6 +231,7 @@ TipWait ==
     /\ UNCHANGED <<busy, life, ops, wpc, wAns, wres>>
     /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
                    stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "GetCurrentTip waits for its worker to exit (the deferred
 \* <-requestWorkerDone), then releases its slot and returns."
@@ -219,10 +243,12 @@ TipJoin ==
     /\ UNCHANGED <<busy, life, wpc, wAns, wres, tres>>
     /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
                    stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 (* GetCurrentTip's worker goroutine [G1]. *)
 
-\* In English: "The worker blocks on busyMutex until it is free."
+\* In English: "The worker takes busyMutex once it is free (Lock, or
+\* lockBusy's TryLock)."
 WorkerLock ==
     /\ wpc = "lock" /\ busy = None
     /\ busy' = "worker"
@@ -230,6 +256,18 @@ WorkerLock ==
     /\ UNCHANGED <<life, ops, opc, wAns, wres, tres>>
     /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
                    stopVars, handVars>>
+    /\ UNCHANGED jumpVars
+
+\* In English: "With the fix, the worker's wait for busyMutex also ends on
+\* StopChan and it reports ErrProtocolShuttingDown. Without it, Lock()
+\* waits for whoever holds busyMutex, however long that is."
+WorkerLockGiveUp ==
+    /\ wpc = "lock" /\ WorkerLockWatchesStop /\ stopSig
+    /\ wres' = "err"
+    /\ wpc' = "exited"
+    /\ UNCHANGED <<busy, life, ops, opc, wAns, tres>>
+    /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
+                   stopVars, handVars, jumpVars>>
 
 \* In English: "Holding busyMutex, the worker returns if the client is no
 \* longer running or the protocol is stopping (SendMessage fails);
@@ -249,6 +287,7 @@ WorkerSend ==
     /\ UNCHANGED <<life, ops, opc, wAns, tres, wantTip, wantFB>>
     /\ UNCHANGED <<rangeVars, ready, outstanding, inflight, toClient,
                    stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The worker reports its own answer, or exits when DoneChan
 \* closes (or, with the fix, StopChan), and releases busyMutex."
@@ -263,6 +302,7 @@ WorkerWait ==
     /\ UNCHANGED <<life, ops, opc, wAns, tres>>
     /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
                    stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 -----------------------------------------------------------------------------
 (* GetAvailableBlockRange [G1]. *)
@@ -285,6 +325,7 @@ RangeLock ==
     /\ UNCHANGED <<life, ops, tipVars, gIF, gTip, gFirst, gres, backed,
                    wantVars, ready, outstanding, wireVars, stopVars,
                    handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "It takes an operation slot, or returns an error if the client
 \* is not running."
@@ -300,6 +341,7 @@ RangeBegin ==
                /\ UNCHANGED ops
     /\ UNCHANGED <<life, tipVars, gIF, gTip, gFirst, backed, wantVars, ready,
                    outstanding, wireVars, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "prepareIdleProtocol: with a MsgRequestNext unanswered it
 \* returns ErrSyncInProgress; otherwise it discards stale ready signals,
@@ -319,6 +361,7 @@ RangeFind ==
                /\ UNCHANGED <<busy, ops, gres, wantTip, wantFB>>
     /\ UNCHANGED <<life, tipVars, gIF, gTip, gFirst, backed, outstanding,
                    inflight, toClient, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "It takes the intersect answer. At the tip it returns an
 \* empty range; otherwise it registers for the tip and the first block and
@@ -343,6 +386,7 @@ RangeAfterFind ==
           /\ UNCHANGED <<outstanding, sendQ>>
     /\ UNCHANGED <<life, tipVars, gIF, gTip, gFirst, backed, wantIF, ready,
                    inflight, toClient, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The receive loop: once both the tip and the first block
 \* arrived it moves on; a ready signal (from a roll back) makes it send the
@@ -368,6 +412,7 @@ RangeLoop ==
           /\ UNCHANGED <<ready, outstanding, sendQ>>
     /\ UNCHANGED <<life, tipVars, gIF, gTip, gFirst, backed, wantIF,
                    inflight, toClient, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "waitRequestNextRetired: it returns its range only once every
 \* MsgRequestNext it sent has been retired."
@@ -378,6 +423,68 @@ RangeRetire ==
        \/ /\ outstanding > 0 /\ DoneClosed
           /\ RangeReturn("err")
     /\ UNCHANGED <<life, tipVars, gIF, gTip, gFirst, backed, wantIF, ready,
+                   outstanding, wireVars, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
+
+-----------------------------------------------------------------------------
+(* Jump [G1]. *)
+
+\* In English: "Jump returns with result r: it releases busyMutex and its
+\* slot (the deferred function)."
+JumpReturn(r) ==
+    /\ jres' = r
+    /\ jpc' = "returned"
+    /\ busy' = None
+    /\ ops' = ops - 1
+
+\* In English: "Jump blocks on busyMutex until it is free."
+JumpLock ==
+    /\ jpc = "lock" /\ busy = None
+    /\ busy' = "jump"
+    /\ jpc' = "begin"
+    /\ UNCHANGED <<life, ops, jAns, jres, tipVars, rangeVars, wantVars, ready,
+                   outstanding, wireVars, stopVars, handVars>>
+
+\* In English: "Jump takes an operation slot, or unlocks and returns an
+\* error if the client is not running."
+JumpBegin ==
+    /\ jpc = "begin"
+    /\ IF life = "running"
+          THEN /\ ops' = ops + 1
+               /\ jpc' = "find"
+               /\ UNCHANGED <<busy, jres>>
+          ELSE /\ busy' = None
+               /\ jres' = "err"
+               /\ jpc' = "returned"
+               /\ UNCHANGED ops
+    /\ UNCHANGED <<life, jAns, tipVars, rangeVars, wantVars, ready,
+                   outstanding, wireVars, stopVars, handVars>>
+
+\* In English: "prepareIdleProtocol, then findIntersect: with a
+\* MsgRequestNext unanswered Jump returns ErrSyncInProgress; otherwise it
+\* registers for the intersect answer and queues MsgFindIntersect."
+JumpFind ==
+    /\ jpc = "find"
+    /\ IF outstanding > 0
+          THEN /\ JumpReturn("inprogress")
+               /\ UNCHANGED <<wantIF, sendQ>>
+          ELSE IF stopSig
+          THEN /\ JumpReturn("err")                 \* SendMessage fails
+               /\ UNCHANGED <<wantIF, sendQ>>
+          ELSE /\ wantIF' = "jump"
+               /\ sendQ' = Append(sendQ, Msg("FI", "jump"))
+               /\ jpc' = "wait"
+               /\ UNCHANGED <<busy, ops, jres>>
+    /\ UNCHANGED <<life, jAns, tipVars, rangeVars, wantTip, wantFB, ready,
+                   outstanding, inflight, toClient, stopVars, handVars>>
+
+\* In English: "findIntersect waits for Jump's own answer or DoneChan; it
+\* does not watch StopChan."
+JumpWait ==
+    /\ jpc = "wait"
+    /\ \/ jAns /\ JumpReturn("ok")
+       \/ ~jAns /\ DoneClosed /\ JumpReturn("err")
+    /\ UNCHANGED <<life, jAns, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, stopVars, handVars>>
 
 -----------------------------------------------------------------------------
@@ -395,11 +502,13 @@ EngineSend ==
     /\ sendQ' = Tail(sendQ)
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, toClient, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The server's reply to message m."
 Reply(m) ==
     CASE m.k = "RN" /\ m.f = "sync"   -> {Msg("Roll", "sync")}
       [] m.k = "FI" /\ m.f = "worker" -> {Msg("NotFound", "worker")}
+      [] m.k = "FI" /\ m.f = "jump"   -> {Msg("Found", "jump")}
       [] m.k = "FI" /\ m.f = "range"  -> {Msg("Found", "range"),
                                           Msg("FoundAtTip", "range")}
       [] m.k = "RN" /\ m.f = "range"  ->
@@ -415,6 +524,7 @@ ServerReply ==
     /\ inflight' = Tail(inflight)
     /\ UNCHANGED <<busy, life, ops, tipVars, gpc, gIF, gTip, gFirst, gres,
                    wantVars, ready, outstanding, sendQ, stopVars, handVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "ServerReply for anything but the sync's request at the tip,
 \* which may never come (used only for fairness)."
@@ -434,6 +544,7 @@ HandleTake ==
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, sendQ, inflight, stopVars, misrouted, orphan,
                    recvExited>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "sendCurrentTip: if a channel is registered, it takes the tip
 \* and the slot empties."
@@ -458,6 +569,7 @@ HandleSyncRoll ==
                    ready, outstanding, wireVars, hmsg, misrouted, orphan,
                    recvExited, stopHeld, ticks, ticksAfterCtx, ctxDone,
                    doneSent, closed, stopSig>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The callback's call returned; the handler goes on."
 HandleCallbackDone ==
@@ -467,6 +579,7 @@ HandleCallbackDone ==
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, stopVars, hmsg, misrouted, orphan,
                    recvExited>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "A roll forward or back: the tip goes to sendCurrentTip; a
 \* roll forward also goes to a registered first-block channel; a roll back
@@ -484,6 +597,7 @@ HandleDeliver ==
     /\ UNCHANGED <<busy, life, ops, tipVars, gpc, gIF, gres, backed, wantIF,
                    outstanding, wireVars, stopVars, hmsg, misrouted, orphan,
                    recvExited>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "requestNextAnswered, after the handler returned."
 HandleRetire ==
@@ -492,6 +606,7 @@ HandleRetire ==
     /\ hpc' = "idle"
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    wireVars, stopVars, hmsg, misrouted, orphan, recvExited>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "An intersect answer: MsgIntersectNotFound gives its tip to
 \* sendCurrentTip, then fails the registered request (ignored if none);
@@ -499,6 +614,7 @@ HandleRetire ==
 \* The request registered should be the one that asked."
 HandleIntersect ==
     /\ hpc = "run" /\ hmsg.k \in {"NotFound", "Found", "FoundAtTip"}
+    /\ hmsg.f /= "jump"
     /\ IF hmsg.k = "NotFound" THEN GiveTip(hmsg.f)
                               ELSE UNCHANGED <<wantTip, gTip>>
     /\ IF wantIF = None
@@ -515,6 +631,36 @@ HandleIntersect ==
     /\ UNCHANGED <<busy, life, ops, opc, wpc, wres, tres, gpc, gFirst, gres,
                    backed, wantFB, ready, outstanding, wireVars, stopVars,
                    hmsg, recvExited>>
+    /\ UNCHANGED jumpVars
+
+\* In English: "Jump's MsgIntersectFound: handleIntersectFound takes the
+\* registered request, then runs IntersectFoundFunc, which calls
+\* GetCurrentTip; the handler waits for that call to return before it
+\* hands Jump its answer."
+HandleJumpFound ==
+    /\ hpc = "run" /\ hmsg = Msg("Found", "jump")
+    /\ IF wantIF = None
+          THEN /\ orphan' = TRUE
+               /\ hpc' = "idle"
+               /\ UNCHANGED <<wantIF, misrouted, opc>>
+          ELSE /\ wantIF' = None
+               /\ misrouted' = (misrouted \/ wantIF /= "jump")
+               /\ hpc' = "cbjump"
+               /\ opc' = "begin"
+               /\ UNCHANGED orphan
+    /\ UNCHANGED <<busy, life, ops, wpc, wAns, wres, tres, rangeVars, wantTip,
+                   wantFB, ready, outstanding, wireVars, stopVars, hmsg,
+                   recvExited, jumpVars>>
+
+\* In English: "IntersectFoundFunc returned: request.resultChan gets Jump's
+\* answer."
+HandleJumpAnswer ==
+    /\ hpc = "cbjump" /\ opc = "returned"
+    /\ jAns' = TRUE
+    /\ hpc' = "idle"
+    /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
+                   outstanding, wireVars, stopVars, hmsg, misrouted, orphan,
+                   recvExited, jpc, jres>>
 
 \* In English: "recvLoop sees StopChan between messages and returns, so
 \* DoneChan closes [G2]."
@@ -524,6 +670,7 @@ HandleExit ==
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, stopVars, hpc, hmsg, misrouted,
                    orphan>>
+    /\ UNCHANGED jumpVars
 
 -----------------------------------------------------------------------------
 (* Stop [G1]. *)
@@ -538,6 +685,7 @@ StopBegin ==
     /\ UNCHANGED <<busy, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, handVars, stopHeld, ticks,
                    ticksAfterCtx, ctxDone, doneSent, closed, stopSig>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "With the fix, Stop stops waiting for busyMutex once its ctx
 \* is done, and does not wait at all when called from a callback."
@@ -561,6 +709,7 @@ StopSpin ==
     /\ UNCHANGED <<life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, handVars, ctxDone, doneSent, closed,
                    stopSig>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The protocol is not in StIdle: something is queued, on the
 \* wire, or received but not yet taken by recvLoop, which applies a
@@ -586,6 +735,7 @@ StopFinish ==
     /\ UNCHANGED <<life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, toClient, handVars, stopHeld, ticks,
                    ticksAfterCtx, ctxDone>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "Stop returns: at once in a callback (waitStopped), once the
 \* client is Stopped, or once ctx is done."
@@ -596,6 +746,7 @@ StopReturn ==
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, handVars, stopHeld, ticks,
                    ticksAfterCtx, ctxDone, doneSent, closed, stopSig>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The goroutine finishStop starts: after DoneChan, and once
 \* every operation slot is released, the client is Stopped."
@@ -604,6 +755,7 @@ StopComplete ==
     /\ life' = "stopped"
     /\ UNCHANGED <<busy, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, handVars, stopVars>>
+    /\ UNCHANGED jumpVars
 
 \* In English: "The outside Stop's ctx may expire at any time while Stop
 \* runs."
@@ -614,6 +766,7 @@ CtxExpire ==
     /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
                    outstanding, wireVars, handVars, spc, stopHeld, ticks,
                    ticksAfterCtx, doneSent, closed, stopSig>>
+    /\ UNCHANGED jumpVars
 
 -----------------------------------------------------------------------------
 
@@ -621,6 +774,7 @@ CtxExpire ==
 AllDone ==
     /\ opc \in {"off", "returned"} /\ wpc \in {"off", "exited"}
     /\ gpc \in {"off", "returned"} /\ spc \in {"off", "returned"}
+    /\ jpc \in {"off", "returned"}
     /\ hpc = "idle"
 
 \* In English: "Once everything has returned, the system may stay as it is."
@@ -629,17 +783,19 @@ Finished == AllDone /\ UNCHANGED vars
 \* In English: "The steps of the calls and the handler: the ones that run
 \* on their own goroutines and must not stall for ever."
 TipSteps     == TipBegin \/ TipWait \/ TipJoin
-WorkerSteps  == WorkerLock \/ WorkerSend \/ WorkerWait
+WorkerSteps  == WorkerLock \/ WorkerLockGiveUp \/ WorkerSend \/ WorkerWait
 RangeSteps   == RangeLock \/ RangeBegin \/ RangeFind \/ RangeAfterFind
                 \/ RangeLoop \/ RangeRetire
 HandlerSteps == HandleTake \/ HandleSyncRoll \/ HandleCallbackDone
                 \/ HandleDeliver \/ HandleRetire \/ HandleIntersect
-                \/ HandleExit
+                \/ HandleJumpFound \/ HandleJumpAnswer \/ HandleExit
+JumpSteps    == JumpLock \/ JumpBegin \/ JumpFind \/ JumpWait
 StopSteps    == StopBegin \/ StopSpin \/ StopFinish \/ StopReturn
                 \/ StopComplete
 
 Next ==
     \/ TipSteps \/ WorkerSteps \/ RangeSteps \/ HandlerSteps \/ StopSteps
+    \/ JumpSteps
     \/ EngineSend \/ ServerReply \/ CtxExpire
     \/ Finished
 
@@ -647,7 +803,7 @@ Next ==
 \* answers every request except, at the tip, the sync's."
 Fairness ==
     /\ WF_vars(TipSteps) /\ WF_vars(WorkerSteps) /\ WF_vars(RangeSteps)
-    /\ WF_vars(HandlerSteps) /\ WF_vars(StopSteps)
+    /\ WF_vars(HandlerSteps) /\ WF_vars(StopSteps) /\ WF_vars(JumpSteps)
     /\ WF_vars(EngineSend) /\ WF_vars(ServerReplyPrompt)
 
 Spec == Init /\ [][Next]_vars /\ Fairness
@@ -660,6 +816,7 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 BusyHeldInCriticalSection ==
     /\ wpc \in {"check", "wait"} => busy = "worker"
     /\ gpc \in {"begin", "idle", "fiwait", "rnwait", "retire"} => busy = "range"
+    /\ jpc \in {"begin", "find", "wait"} => busy = "jump"
 
 \* In English: "GetCurrentTip has joined its worker when it returns."
 WorkerJoinedBeforeReturn ==
@@ -698,6 +855,9 @@ StopReturns == (spc /= "off") ~> (spc = "returned")
 
 \* In English: "Once GetCurrentTip has been called, it returns."
 TipReturns == (opc /= "off") ~> (opc = "returned")
+
+\* In English: "Once Jump has been called, it returns."
+JumpReturns == (jpc /= "off") ~> (jpc = "returned")
 
 (* Probes: each is EXPECTED to be violated, showing the state is reached. *)
 

@@ -481,6 +481,10 @@ Based on `protocol/chainsync/client.go` at gOuroboros `7cd17437`.
   not check that the protocol is idle: the engine holds the message until
   any `MsgRequestNext` already sent is answered. The caller waits for the
   worker's answer or `DoneChan`, then joins the worker.
+- **`Jump`** locks `busyMutex`, sends `MsgFindIntersect` and waits for its
+  answer or `DoneChan`. The handler runs `IntersectFoundFunc` before it
+  hands `Jump` the answer, so `Jump` holds `busyMutex` until that callback
+  returns.
 - **`GetAvailableBlockRange`** holds `busyMutex` throughout: it refuses while
   a `MsgRequestNext` is unanswered, sends `MsgFindIntersect`, then
   `MsgRequestNext` until the first block after the intersection arrives, and
@@ -504,7 +508,7 @@ Based on `protocol/chainsync/client.go` at gOuroboros `7cd17437`.
 | `FindOnlyWhenIdle` | is `MsgFindIntersect` on the wire with anything else outstanding? |
 | `StopHonoursCtxInvariant` | does `Stop` keep polling for `busyMutex` after its ctx is done? |
 | `CallbackStopDoesNotWait` | does a `Stop` from a callback poll for `busyMutex`? |
-| `StopReturns`, `TipReturns` | does every `Stop` and `GetCurrentTip` return (weak fairness; the server may withhold the sync's reply at the tip)? |
+| `StopReturns`, `TipReturns`, `JumpReturns` | does every `Stop`, `GetCurrentTip` and `Jump` return (weak fairness; the server may withhold the sync's reply at the tip)? |
 
 ### The answer
 
@@ -530,21 +534,29 @@ the server rolls back first or rolls forward at once.
    delivered on the goroutine running the callback, so it never comes;
    `GetCurrentTip` and its worker wait only for `DoneChan`, which closes only
    after that goroutine returns. `Stop` with no deadline then never returns
-   (TLC: deadlock).
+   (TLC: deadlock). Returning on `StopChan` as well is not enough when the
+   callback is `IntersectFoundFunc`: `Jump` holds `busyMutex` until that
+   callback returns, the worker waits in `busyMutex.Lock()`, and
+   `GetCurrentTip` joins the worker before it returns, so the callback,
+   `Jump` and `Stop` still never return (TLC: deadlock,
+   `ChainSyncTipWorkerJumpCallbackTipBug.cfg`).
 
 The fixes: the lock wait ends on ctx and is skipped in a callback; the
-worker and the caller also return on `StopChan`.
+worker and the caller also return on `StopChan`; and the worker takes
+`busyMutex` with `lockBusy`, whose wait also ends on `StopChan`.
 
 | Config | What | Result |
 | --- | --- | --- |
 | `ChainSyncTipWorker.cfg` | today, no ctx deadline: both queries with a sync at the tip, Stop | passes, 6,316 states |
 | `ChainSyncTipWorkerRange.cfg` | today, no sync, no Stop | passes, 218 states |
-| `ChainSyncTipWorkerFixed.cfg` | both fixes, ctx may expire | passes, 30,128 states |
-| `ChainSyncTipWorkerCallbackStop.cfg` | both fixes, Stop from the sync's roll callback | passes, 221 states |
-| `ChainSyncTipWorkerCallbackTip.cfg` | both fixes, GetCurrentTip from the roll callback, then Stop | passes, 707 states |
+| `ChainSyncTipWorkerFixed.cfg` | all fixes, ctx may expire | passes, 31,784 states |
+| `ChainSyncTipWorkerCallbackStop.cfg` | all fixes, Stop from the sync's roll callback | passes, 221 states |
+| `ChainSyncTipWorkerCallbackTip.cfg` | all fixes, GetCurrentTip from the roll callback, then Stop | passes, 707 states |
+| `ChainSyncTipWorkerJumpCallbackTip.cfg` | all fixes, GetCurrentTip from `Jump`'s `IntersectFoundFunc`, then Stop with no deadline | passes, 146 states |
 | `ChainSyncTipWorkerCtxBug.cfg` | today, ctx expires | **fails** `StopHonoursCtxInvariant` |
 | `ChainSyncTipWorkerCallbackStopBug.cfg` | today, Stop from a callback | **fails** `CallbackStopDoesNotWait` |
 | `ChainSyncTipWorkerCallbackTipBug.cfg` | today, GetCurrentTip from a callback | **fails**: deadlock, Stop never returns |
+| `ChainSyncTipWorkerJumpCallbackTipBug.cfg` | GetCurrentTip and its worker return on `StopChan`, but the worker still calls `busyMutex.Lock()`; GetCurrentTip from `Jump`'s `IntersectFoundFunc` | **fails**: deadlock, the worker waits for `busyMutex` held by `Jump` |
 | `ChainSyncTipWorkerNoRetireBug.cfg` | mutation: the range call skips `waitRequestNextRetired` | **fails** `RangeLeavesIdle` |
 | `ChainSyncTipWorkerNoJoinBug.cfg` | mutation: `GetCurrentTip` does not join its worker | **fails** `WorkerJoinedBeforeReturn` |
 
@@ -567,6 +579,7 @@ binds to:
 | `TestStopReturnsOnCtxWhileBusyMutexHeld` | `StopHonoursCtxInvariant` | fails: Stop returned after 3.0 s with a 20 ms ctx |
 | `TestStopFromCallbackDoesNotWaitForBusyMutex` | `CallbackStopDoesNotWait` | fails: 3.0 s in the callback |
 | `TestStopReleasesGetCurrentTipCalledFromCallback` | `StopReturns` | fails: GetCurrentTip never returns |
+| `TestStopReleasesGetCurrentTipWaitingForBusyMutexInCallback` | `StopReturns` (`ChainSyncTipWorkerJumpCallbackTipBug.cfg`) | fails with the worker's `busyMutex.Lock()`: GetCurrentTip never returns |
 | `TestGetAvailableBlockRangeReplyShapes` | `RangeFromOwnReplies`, `RangeLeavesIdle` | passes (allowed transitions) |
 
 ### Not in this slice
