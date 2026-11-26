@@ -11,6 +11,11 @@ Plain-language definitions, with a Go comparison where one helps.
 : Which side of a mini-protocol is allowed to send the next message. In each
   state exactly one side has agency, or neither does (the done state).
 
+**Agreed data** (Ouroboros term)
+: The version data both sides of a handshake end with: each field of the
+  two sides' data combined by a fixed rule (`acceptableVersion`), such as
+  "initiator-only if either side is". `specs/handshake/HandshakeVersionData.tla`.
+
 **Behavior**
 : One complete run of the system: a sequence of states from the initial state
   onwards. TLC checks every behavior.
