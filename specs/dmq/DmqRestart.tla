@@ -46,15 +46,37 @@
 (*        server.go's Done handler only logs (or, for notification, shuts  *)
 (*        the server down).                                                *)
 (*                                                                         *)
+(* Submission V2 [R1][R6]. The side that wants messages (the gOuroboros  *)
+(* messagesubmission Server type) is the initiator, holds agency in       *)
+(* StIdle and ends the run with MsgDone from there; the side that has     *)
+(* them (the gOuroboros Client type) is the responder. The model's       *)
+(* "Client" is always the side that ends a run and its "Server" the      *)
+(* responder the inbound governor restarts [R11], so for V2 the model's   *)
+(* Server is the gOuroboros Client type. dmq-node's V2 inbound sends      *)
+(* MsgDone when its control message says Terminate [R13], which a hot     *)
+(* peer's demotion does, and runs again on the same connection when the   *)
+(* peer is promoted, since sig submission is a hot, on-demand protocol    *)
+(* [R6]. gOuroboros 7cd17437 leaves the V2 Client in StDone              *)
+(* (DmqRestartSubmissionV2NoRestartBug.cfg); the fix on                   *)
+(* test/leios-dmq-lifecycle maps the Client's MsgDone back to StIdle,     *)
+(* which on the wire is a restarted responder (DmqRestartSubmissionV2.cfg).*)
+(*   [R1] dmq-node a267003c, DMQ/Protocol/SigSubmissionV2/Type.hs:       *)
+(*        V2 states and agency; MsgDone from StIdle by the initiator.     *)
+(*   [R13] dmq-node a267003c, DMQ/SigSubmissionV2/Inbound.hs 99-104,     *)
+(*        128-133: serverIdle sends SendMsgDone on Terminate.             *)
+(*   [G1] gOuroboros 7cd17437, protocol/messagesubmission/                *)
+(*        messagesubmission.go stateMapV2, client.go handleDone.          *)
+(*                                                                         *)
 (* Not modelled: message contents, the window rules (MessageSubmission.tla *)
-(* has them), V2 (whose MsgDone comes from the server).                    *)
+(* has them).                                                              *)
 (*                                                                         *)
 (* Symbols are explained in specs/keepalive/KeepAlive.tla's header.     *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
 
 CONSTANTS
-    Proto,          \* "LocalSubmission", "LocalNotification" or "SubmissionV1"
+    Proto,          \* "LocalSubmission", "LocalNotification", "SubmissionV1"
+                    \* or "SubmissionV2"
     MaxRuns,        \* how many runs the client may start on one connection
     MaxMsgs,        \* how many messages may be sent in all (keeps the model finite)
     ServerRestarts  \* TRUE: the server restarts after MsgDone [S5][R11]
@@ -76,6 +98,10 @@ Peer(r) == IF r = "Client" THEN "Server" ELSE "Client"
 \*   Submission V1: from StInit the client sends MsgInit; from StIdle the
 \*     server asks for ids (blocking or not) or for messages; the client
 \*     answers, and may end only in place of a reply to a blocking request.
+\*   Submission V2 [R1]: no StInit; from StIdle the requesting side (the
+\*     model's "Client") asks for ids (blocking or not) or for messages, or
+\*     ends; the other side answers, with MsgReplyNoIds only to a blocking
+\*     request.
 \* Literally: "Rows is defined as: in the case Proto equals "LocalSubmission",
 \*   the set containing these four tuples: <<"StIdle", "MsgSubmitMessage",
 \*   "StBusy">>, <<"StIdle", "MsgDone", "StDone">>, <<"StBusy",
@@ -92,7 +118,13 @@ Peer(r) == IF r = "Client" THEN "Server" ELSE "Client"
 \*   "MsgRequestMessages", "StMessages">>, <<"StIdsBlock", "MsgReplyIds",
 \*   "StIdle">>, <<"StIdsBlock", "MsgDone", "StDone">>, <<"StIdsNonBlock",
 \*   "MsgReplyIds", "StIdle">>, and <<"StMessages", "MsgReplyMessages",
-\*   "StIdle">>."
+\*   "StIdle">>; in the case Proto equals "SubmissionV2", the set containing
+\*   these eight tuples: <<"StIdle", "MsgRequestIdsBlocking", "StIdsBlock">>,
+\*   <<"StIdle", "MsgRequestIdsNonBlock", "StIdsNonBlock">>, <<"StIdle",
+\*   "MsgRequestMessages", "StMessages">>, <<"StIdle", "MsgDone", "StDone">>,
+\*   <<"StIdsBlock", "MsgReplyIds", "StIdle">>, <<"StIdsBlock",
+\*   "MsgReplyNoIds", "StIdle">>, <<"StIdsNonBlock", "MsgReplyIds",
+\*   "StIdle">>, and <<"StMessages", "MsgReplyMessages", "StIdle">>."
 Rows ==
     CASE Proto = "LocalSubmission" ->
            { <<"StIdle", "MsgSubmitMessage", "StBusy">>,
@@ -114,6 +146,15 @@ Rows ==
              <<"StIdsBlock",   "MsgDone",               "StDone">>,
              <<"StIdsNonBlock", "MsgReplyIds",          "StIdle">>,
              <<"StMessages",   "MsgReplyMessages",      "StIdle">> }
+      [] Proto = "SubmissionV2" ->
+           { <<"StIdle",        "MsgRequestIdsBlocking", "StIdsBlock">>,
+             <<"StIdle",        "MsgRequestIdsNonBlock", "StIdsNonBlock">>,
+             <<"StIdle",        "MsgRequestMessages",    "StMessages">>,
+             <<"StIdle",        "MsgDone",               "StDone">>,
+             <<"StIdsBlock",    "MsgReplyIds",           "StIdle">>,
+             <<"StIdsBlock",    "MsgReplyNoIds",         "StIdle">>,
+             <<"StIdsNonBlock", "MsgReplyIds",           "StIdle">>,
+             <<"StMessages",    "MsgReplyMessages",      "StIdle">> }
 
 \* In English: "Where a run starts."
 \* Literally: "InitState is defined as: if Proto equals "SubmissionV1" then
@@ -121,7 +162,7 @@ Rows ==
 InitState == IF Proto = "SubmissionV1" THEN "StInit" ELSE "StIdle"
 
 \* In English: "The client has agency in the states it sends from: the
-\* first state of each local protocol's rows, and V1's StInit and reply
+\* first state of each local protocol's rows and V2's StIdle, and V1's StInit and reply
 \* states. The server has the rest, and nobody has it in StDone."
 \* Literally: "ClientStates is defined as: in the case Proto equals
 \*   "SubmissionV1", the set containing "StInit", "StIdsBlock", "StIdsNonBlock"

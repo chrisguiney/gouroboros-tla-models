@@ -9,7 +9,8 @@ to local clients:
 | Message submission (node-to-node) | 11 | `protocol/messagesubmission` | `MessageSubmission.tla` |
 | Local message submission (node-to-client) | 14 | `protocol/localmessagesubmission` | `LocalMessageSubmission.tla` |
 | Local message notification (node-to-client) | 15 | `protocol/localmessagenotification` | `LocalMessageNotification.tla` |
-| All three, after `MsgDone` | | the three `server.go` files | `DmqRestart.tla` |
+| All three, after `MsgDone` (V2: the Client) | | the three `server.go` files; `messagesubmission/client.go` for V2 | `DmqRestart.tla` |
+| Replay caches shared by connections | 14, 15 | `localmessagenotification/client.go`, `server.go` (cleaner); `localmessagesubmission/server.go` | `DmqReplayShared.tla`, `LmsReplayTokens.tla` |
 | Message validity (all three) | | `protocol/common/authentication.go` | `MessageValidity.tla` |
 | Receiving messages (node-to-node) | 11 | `protocol/messagesubmission/server.go`, `authentication.go` | `MessageIngress.tla` |
 
@@ -310,10 +311,25 @@ a new run. `MaxRuns = 2`; `MaxMsgs` bounds the messages.
 | `DmqRestartLocalSubmission.cfg`: reference, two runs | 56 | passes |
 | `DmqRestartLocalNotification.cfg` | 73 | passes |
 | `DmqRestartSubmissionV1.cfg` | 68 | passes |
+| `DmqRestartSubmissionV2.cfg`: the V2 responder restarts | 115 | passes |
 | `DmqRestart*NoRestartBug.cfg` (three): gOuroboros `main` | 38-52 | **fails** `NewRunServed` |
-| `DmqRestart*ProbeNoSecondRunBug.cfg` (three): probe, a second run starts | 28-45 | violated, as expected |
+| `DmqRestartSubmissionV2NoRestartBug.cfg`: gOuroboros `7cd17437`, V2 | 78 | **fails** `NewRunServed` |
+| `DmqRestart*ProbeNoSecondRunBug.cfg` (four): probe, a second run starts | 28-53 | violated, as expected |
 
 The deviation is real for all three. The fixes are below.
+
+**V2.** In V2 the requesting side (the gOuroboros `Server` type) is the
+initiator and ends a run with `MsgDone` from `StIdle` [R1]; the gOuroboros
+`Client` type is the responder. The model's "Client" is the side that ends a
+run and its "Server" the responder, so for V2 the model's Server is the
+gOuroboros `Client`. dmq-node's V2 inbound sends `MsgDone` when its control
+message says `Terminate` [R13], which demoting a hot peer does, and runs again
+on the same connection when the peer is promoted: sig submission is a hot,
+on-demand protocol [R6]. The responder must restart for that run [R11]. At
+`7cd17437` the V2 `Client` stays in `StDone`, and the next run's first request
+is never answered. Fixed on `fix/leios-dmq-lifecycle` `95f5396d`: the V2
+Client's `MsgDone` leads back to `StIdle` and the run's outstanding ids are
+dropped, which on the wire is a restarted responder.
 
 ### Restart and an application wait (review of PR #3197)
 
@@ -526,6 +542,58 @@ whether a caller edited the decoded fields. Bytes are a pair
 | `MessagePayloadBytesRelayReencodeBug.cfg` | mutation: bytes kept for the check, re-encoded on relay | `RelayKeepsId` fails | a wide payload; the Go test's last assertion (the message encodes back to its wire bytes) kills it |
 | `MessagePayloadBytesProbeEditedBug.cfg` | fix, caller edits | `IdNamesContent` fails | an edited payload keeps the old bytes' id; `DmqMessagePayload`'s doc tells the caller to call `SetCbor(nil)` |
 
+## Part 8: replay caches shared across connections (`DmqReplayShared.tla`, `LmsReplayTokens.tla`)
+
+Hazards C22 and C23 (CONCURRENCY.md); coverage gap 110.
+
+### What the code does
+
+The local message notification client keeps the ids it has delivered in a
+cache owned by its `Config`, so every connection built from one `Config`
+shares it. A reply is checked under the cache's lock in one step: prune ids
+whose message has expired, drop ids already delivered, check the TTL,
+authenticate and commit, record the ids. `ReplyMessagesFunc` runs after the
+lock is released. The notification server's expiration cleaner is a goroutine
+`NewServer` starts; it ends on `Stop`, the connection's done channel or the
+muxer's, and `Stop` waits for it.
+
+The local message submission server reserves a submitted id, under the
+`Config`'s lock, with a fresh token, and runs `SubmitMessageFunc` without the
+lock. An accepted id stays reserved until its message expires; a rejected one
+is released, but only if the entry still carries the submitter's token.
+
+Time is whole seconds: a message is valid at `t` iff `t <= expiresAt`, and an
+id is pruned at `t` iff `t > expiresAt`, so an id is kept for as long as its
+message could be admitted again.
+
+### The answer
+
+| Config | States | Result |
+| --- | --- | --- |
+| `DmqReplayShared.cfg`: gOuroboros `7cd17437` | 450 | passes |
+| `DmqReplaySharedSplitLockBug.cfg`: mutation, lock released between check and record | 551 | **fails** `NoDuplicateDelivery` |
+| `DmqReplaySharedPruneAtExpiryBug.cfg`: mutation, pruned at `t >= expiresAt` | 143 | **fails** `NoDuplicateDelivery` |
+| `DmqReplaySharedStopNoWaitBug.cfg`: mutation, `Stop` does not wait for the cleaner | 117 | **fails** `CleanerJoinedOnStop` |
+| `DmqReplaySharedProbeBug.cfg`: probe, delivery at the last valid second | 324 | violated, as expected |
+| `LmsReplayTokens.cfg`: gOuroboros `7cd17437`, TTL validator on | 712 | passes |
+| `LmsReplayTokensNoTTL.cfg`: `NewNoOpTTLValidator`, an expired reservation re-reserved while its holder runs | 1,882 | passes |
+| `LmsReplayTokensNoTokenBug.cfg`: mutation, release without the token check | 334 | **fails** `ReleaseOnlyOwn` |
+| `LmsReplayTokensKeepRejectedBug.cfg`: mutation, a rejection keeps the reservation | 74 | **fails** `RejectedResubmittable` |
+| `LmsReplayTokensProbeBug.cfg`: probe, two callbacks on one id at once | 251 | violated, as expected |
+
+No defect. C22 stays by design: holding the lock across authentication is what
+makes check, authenticate and record one step across connections. C23 stays
+bounded: only a `Server` built with neither a connection nor a muxer, and
+never stopped, keeps its cleaner. The Go tests bound to these invariants are
+`TestClientsSharingConfigDeliverReplayOnce` and
+`TestClientKeepsReplayIDUntilMessageExpires` (new on `fix/leios-dmq-lifecycle`
+`59ec9259`; the second fails with the prune at `>=`), and the existing
+`TestServerRejectsConcurrentDuplicateSubmissions`,
+`TestSubmissionReplayStateReleaseKeepsNewerReservation`,
+`TestServerReleasesRejectedSubmission`, `TestServerStopJoinsExpirationCleaner`
+and `TestConnectionDoneCancelsBlockingRequestAndCleaner`, which now name the
+invariant they check.
+
 ## Go tests and fixes
 
 All on gOuroboros `61046085`, local branches only.
@@ -563,6 +631,7 @@ tests do not repeat them.
 | `fix/localmessagesubmission-server-restart` (from `d8f5bc2a`) | The server stays in `StDone` after `MsgDone` | `TestServerAnswersSubmitSentDuringRestart` and `TestServerAnswersBackToBackRestarts` time out on `main` ("no reply from restarted server"). The server is added to the connection's restarting servers and to `TestServerStopDuringRestartStopsServer` |
 | `fix/localmessagenotification-server-restart` (from `d8f5bc2a`) | `MsgClientDone` shuts the server down for good | `TestServerAnswersRequestSentDuringRestart` and `TestServerAnswersBackToBackRestarts` time out on `main`. The queue, acknowledged ids and expiry cleaner now outlast a run (the cleaner no longer watches the run's channels) and only `Stop` ends them; `TestServerStopDuringRestartStopsServer` covers Stop during a restart |
 | `fix/messagesubmission-server-restart` (from `d8f5bc2a`) | The server stays in `StDone` after the client's `MsgDone`, with the run's request still recorded | `TestServerRequestsAfterRestart` and `TestServerHandlesInitSentDuringRestart` fail on `main` ("the server never accepted a request for the next run"). The run's outstanding ids and requests are dropped once the new instance has started; the queue and delivered ids are kept. V1 only: in V2 `MsgDone` comes from the server |
+| `fix/leios-dmq-lifecycle` `95f5396d` (from `7cd17437`) | The V2 Client (the responder) stays in `StDone` after the requester's `MsgDone` | `TestV2ClientServesRunAfterMsgDone` fails on `7cd17437` ("run 1: the client never handled the request") and passes with the fix |
 | `fix/localmessagenotification-lost-wakeup` | An application `WaitForMessage` takes the wakeup meant for a blocking request | `TestAddMessageWakesBlockingRequestAndWaiter` (deterministic, `synctest`) fails 6 runs of 6 on `main`, either way round |
 
 The repeat fix records the ids asked for, per side, until they are
@@ -642,6 +711,7 @@ gOuroboros `61046085`.
 | R7 | [`dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` lines 68-78](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs#L68-L78) | V1 time limits |
 | R8 | [`dmq-node/src/DMQ/NodeToClient.hs` lines 155-185](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/NodeToClient.hs#L155-L185); `DMQ/Protocol/LocalMsgSubmission/Type.hs` 20-22 | local servers run with `runAnnotatedPeer`, no limits; local submission is `LocalTxSubmission` |
 | R9 | [`dmq-node/src/DMQ/Protocol/LocalMsgNotification/Codec.hs` lines 119-166](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/LocalMsgNotification/Codec.hs#L119-L166); `Type.hs` 45-77 | notification tags; an empty blocking reply fails to decode |
+| R13 | [`dmq-node/src/DMQ/SigSubmissionV2/Inbound.hs` lines 99-133](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/SigSubmissionV2/Inbound.hs#L99-L133) | the V2 inbound's `serverIdle` sends `SendMsgDone` on `Terminate` |
 | R11 | [`ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs` lines 455-470](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs#L455-L470); [`ouroboros-network/lib/Ouroboros/Network/Diffusion.hs` lines 402-418](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/lib/Ouroboros/Network/Diffusion.hs#L402-L418) | a responder that ended cleanly is run again; the node-to-client server runs under an inbound governor too |
 | R12 | [`dmq-node/app/Main.hs` line 270](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/app/Main.hs#L270) | dmq-node runs `Ouroboros.Network.Diffusion.run` |
 | S5 | [`docs/network-spec/connection-manager.tex` lines 492-496](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/connection-manager.tex#L492-L496) | the server side "should be restarted in its initial state" |
@@ -649,18 +719,17 @@ gOuroboros `61046085`.
 | G1 | gOuroboros `protocol/messagesubmission/` | `messagesubmission.go` (state maps, timeouts), `validation.go`, `client.go`, `server.go`, `messages.go` (tags) |
 | G2 | gOuroboros `protocol/localmessagesubmission/` | `localmessagesubmission.go` (state map, 300 s / 30 s), `client.go`, `server.go` |
 | G3 | gOuroboros `protocol/localmessagenotification/` | `server.go` (`AddMessage`, `WaitForMessage`, `handleBlockingRequest`), `client.go` |
+| G5 | gOuroboros `7cd17437` `protocol/common/authentication.go` (`ValidateMessageTTLAt`, `NewNoOpTTLValidator`), `dmq.go` (`IsValidAt`) | the TTL bound the replay caches meet |
 | G4 | gOuroboros `protocol/protocol.go` | `enqueueMessage`; role to muxer direction in `ensureRegistered`; timeouts only while the peer has agency |
 
 ## Not modelled
 
-The per-connection replay caches beyond what `MessageIngress.tla` keeps as
-the set of accepted ids; the opcert cold signature (a pure check, covered
+The replay caches' capacity bounds and batch admission (Go tests cover them); the opcert cold signature (a pure check, covered
 by Go tests); the payload bytes beyond `MessagePayloadBytes.tla`'s shapes; the
 pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
 time limits as durations (the 20 s V2 limit appears only as "an unanswered
 blocking request is a deadlock"); wire tags and list encodings, which the Go
-tests check byte for byte. Restarts are modelled only in `DmqRestart.tla`,
-and not for V2, whose `MsgDone` comes from the server.
+tests check byte for byte. Restarts are modelled only in `DmqRestart.tla`.
 
 ## Running it
 
@@ -679,7 +748,13 @@ cd specs/dmq
 ../../bin/tlc -config MessageValidityBatch.cfg MessageValidity.tla
 ../../bin/tlc -config MessageIngress.cfg MessageIngress.tla
 ../../bin/tlc -config MessagePayloadBytes.cfg MessagePayloadBytes.tla
+../../bin/tlc -config DmqRestartSubmissionV2.cfg DmqRestart.tla
+../../bin/tlc -config DmqReplayShared.cfg DmqReplayShared.tla
+for c in LmsReplayTokens LmsReplayTokensNoTTL; do ../../bin/tlc -config $c.cfg LmsReplayTokens.tla; done
 # expected to fail
+../../bin/tlc -config DmqRestartSubmissionV2NoRestartBug.cfg DmqRestart.tla
+for c in DmqReplayShared*Bug.cfg; do ../../bin/tlc -config $c DmqReplayShared.tla; done
+for c in LmsReplayTokens*Bug.cfg; do ../../bin/tlc -config $c LmsReplayTokens.tla; done
 ../../bin/tlc -config MessageSubmissionRepeatBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionServerRepeatBug.cfg MessageSubmission.tla
 ../../bin/tlc -config MessageSubmissionV2RolesBug.cfg MessageSubmission.tla

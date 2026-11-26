@@ -114,6 +114,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N57](#n57) | network | DMQ: bytes the message id and KES signature cover | The payload bytes as received | main: the payload re-encoded from its decoded fields; branch: the decoded bytes | `messageId` = Blake2b-256 of the CBOR payload | does not conform → conforms (for a non-canonical payload) | Fixed on local branch `fix/dmq-payload-preserved-bytes` (`d21d3969`), no PR (model `dmq` `MessagePayloadBytes`) |
 | [N58](#n58) | network | DMQ: what node-to-node receipt does with each message | Judged one at a time in `Validate.hs` order; expired, unregistered, not-initialised and duplicate dropped quietly; any other failure closes the connection after the valid ones are kept | main: any failure refuses the whole reply and closes the connection; pool checked before the KES window, signatures before the counter; branch: as the reference | Any failed step is "a protocol violation" (402) | does not conform → conforms | Fixed on local branch `fix/messagesubmission-reference-receipt` (`a12edd17`), no PR (model `dmq` `MessageIngressAllOrNothingBug.cfg`, `MessageIngressMainOrderBug.cfg`) |
 | [N59](#n59) | network | LeiosNotify: source consulted when requests are pipelined behind `MsgQuit` | Every outstanding request answered `MsgCanceled`, then `MsgDone`; silent on how often the source is consulted | main: every request answered; the source is asked zero or one time, by whether the handler runs before the read loop reaches `MsgQuit` | Not stated | conforms | Test assertion fixed on local branch `fix/leiosnotify-pipelined-cancel-flake`, no PR (model `leios-peras` `LeiosNotifyPipelinedQuitAssumptionBug.cfg`) |
+| [N60](#n60) | network | Message submission V2: the responder after the requester's `MsgDone` | The responder is restarted in its initial state; dmq-node's V2 inbound sends `MsgDone` on demotion and runs again on the same connection when the peer is promoted | `7cd17437`: the V2 `Client` (the responder) stays in `StDone`, so the next run's first request is never answered | "should be restarted in its initial state" | does not conform | Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR (model `dmq` `DmqRestartSubmissionV2NoRestartBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -846,6 +847,17 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** conforms
 - **Status.** Test fixed on a local branch, no PR. The server is unchanged
 
+### N60
+
+**Message submission V2: the responder after the requester's `MsgDone`** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: in V2 the requesting side (the initiator) ends a run with `MsgDone` from `StIdle`; dmq-node's inbound does so when its control message says `Terminate` (a hot peer demoted) and runs again on the same connection when the peer is promoted, and the inbound governor restarts the responder. gOuroboros: the V2 `Client` (the responder) enters `StDone` and stays there.
+- **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/connection-manager.tex`, lines 492-496: "should be restarted in its initial state"
+- **Reference.** ouroboros-network `5f356486ab3e` `.../InboundGovernor.hs` 455-470; dmq-node `a267003c` `DMQ/SigSubmissionV2/Inbound.hs` 99-133 (`SendMsgDone` on `Terminate`), `DMQ/NodeToNode.hs` (sig submission in the hot bundle, `StartOnDemandAny`)
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/messagesubmission/messagesubmission.go` `stateMapV2`, `client.go` `handleDone`; `TestV2ClientServesRunAfterMsgDone`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR: the V2 Client's `MsgDone` leads back to `StIdle` and the run's outstanding ids are dropped
+
 ## Consensus
 
 ### C1
@@ -1490,6 +1502,7 @@ These pull requests fix races, leaks and deadlocks inside gOuroboros. The wire b
 | #3274 | A9 | `engine` `EngineSendBeforeStartLostBug.cfg`, `EngineSendBeforeStartRaceBug.cfg` | `EngineSendBeforeStart.cfg` |
 | #3276 | C13, C14, C15 | `leios-peras` `PerasClientOpMuReentryBug.cfg`, `PerasClientOpMuDoneCtxBug.cfg`, `PerasClientOpMuAwaitPanicBug.cfg`, `PerasClientOpMuAwaitUnjoinedBug.cfg` | `PerasClientOpMu.cfg`, `PerasClientOpMuAnswered.cfg` |
 | local `fix/muxer-models` (no PR) | muxer 1, 3, 4 | `muxer` `MuxStartGateLostStartBug.cfg`, `MuxReceiverStopJoinBug.cfg`, `MuxReceiverStopReplaceBug.cfg` | `MuxStartGate.cfg`, `MuxReceiverStop.cfg` |
+| local `fix/leios-dmq-lifecycle` (no PR) | C18 across a restart; leios client `Sync` | `leios-peras` `LeiosNotifyServerRestartRetiredBug.cfg`, `LeiosVotesLifecycleRunLoopBug.cfg` | `LeiosNotifyServerRestart.cfg`, `LeiosVotesLifecycle.cfg` |
 
 ## Library boundary: contracts, not drift
 

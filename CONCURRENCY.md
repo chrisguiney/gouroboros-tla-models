@@ -2138,6 +2138,31 @@ evidence, branch or PR. Branches are local and unpushed.
   `internal/test/dmqinterop/dmq-submit/main.go:80` exits on `SubmitMessage`'s
   error, so a rejection now prints `ERROR:` and exits 1 instead of printing
   `REJECTED:`.
+- **C10, C11, C18, C21 at `7cd17437` (models `LeiosVotesLifecycle.tla`,
+  `LeiosNotifyServerRestart.tla`).** C10 bounded as above; C11 and C21
+  closed: `RunLoop` goroutines are in `Stop`'s join (`NoCallbackAfterStop`
+  passes in `LeiosVotesLifecycle.cfg`). Two defects found, both fixed on
+  `fix/leios-dmq-lifecycle`: (1) C18 across a restart: `Server.Stop` joined
+  only the current instance, so a source that ignores `QuitChan` on the
+  instance a `MsgQuit` restart retired reached `ResponseSentFunc` after
+  `Stop` returned (`LeiosNotifyServerRestartRetiredBug.cfg`;
+  `TestStopWaitsForSourceOfRetiredRun`; `bf0d7a47`, `handleQuit` records the
+  retired instance and `Stop` waits for it). (2) Both clients' `Sync` set the
+  loop flag before `RunLoop` and ignored its result, so once the connection
+  had begun to close `Sync` returned nil with no loop
+  (`LeiosVotesLifecycleRunLoopBug.cfg`; `TestSyncOutcomeFollowsLifecycle`,
+  `TestSyncReportsNotificationLoopThatCannotStart`; `3088a839`). Class
+  audit: of the restartable servers only leiosnotify runs user callbacks on
+  goroutines that can outlive the restart (perasvotes' await answers before
+  the client can send `MsgDone`).
+- **C19 at `7cd17437`:** still not reachable; `LeiosNotifyServerRestart.tla`
+  models one request per instance, which is what the engine allows.
+- **C22, C23 at `7cd17437` (models `DmqReplayShared.tla`,
+  `LmsReplayTokens.tla`).** No defect. `NoDuplicateDelivery`,
+  `AcceptedAtMostOnce`, `ReleaseOnlyOwn`, `RejectedResubmittable` and
+  `CleanerJoinedOnStop` pass; mutations (lock split, prune at `>=`, release
+  without token, keep on reject, `Stop` without join) each fail. C22 stays by
+  design, C23 bounded. New Go tests on `fix/leios-dmq-lifecycle` `59ec9259`.
 - **D1: covered** by `fix/ledger-scoped-memo-panic` `2c619f5d` (retries a
   build after a panic; `rules.go:250` path).
 - **D2: by design.** `<-entry.done` (`ledger/common/rules.go:241`) waits only
@@ -2262,8 +2287,8 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 12 | `KeepAliveClientTimer` | keepalive | A11 | Bounded (one extra fire), but `AfterFunc` callbacks are easy to get wrong when fixing it. |
 | 13 | `HashCacheSpin` | `ledger/common` | D1-D5 | Lock-free code with a panic path, on every hash of every block; today's `compute` functions are short and pure, so risk is low. |
 | 14 | `MuxEgress` | muxer | (none found) | Fairness between Praos and Leios senders. |
-| 15 | `LeiosVotesLifecycle`, `LeiosNotifyServerRestart` | leiosvotes, leiosnotify | C10, C11, C18, C19, C21 | Experimental protocols; unjoined loops. |
-| 16 | `DmqReplayShared`, `LmsReplayTokens` | DMQ local protocols | C22, C23 | Cross-connection shared state through one `Config`. |
+| 15 | `LeiosVotesLifecycle`, `LeiosNotifyServerRestart` | leiosvotes, leiosnotify | C10, C11, C18, C19, C21 | Experimental protocols; unjoined loops. **Modelled** (`specs/leios-peras`); two defects fixed on `fix/leios-dmq-lifecycle`. |
+| 16 | `DmqReplayShared`, `LmsReplayTokens` | DMQ local protocols | C22, C23 | Cross-connection shared state through one `Config`. **Modelled** (`specs/dmq`); no defect. |
 | 17 | `PeerSharingExchange`, `MuxStartGate`, `AuthOpCertCache` | peersharing, muxer, `protocol/common` | A5 | Small; A5 is ruled out by `Connection`'s ordering. |
 
 Status (2026-11-24, gOuroboros `5c4f31c1`): `PipelineLifecycle` is in

@@ -96,6 +96,11 @@ Plain-language definitions, with a Go comparison where one helps.
   [model `txsubmission`](../specs/txsubmission/README.md),
   `TxSubmissionServerLocks.tla`.
 
+**Leads to (`~>`)**
+: `P ~> Q` says that whenever `P` holds, `Q` holds then or at some later
+  point. A liveness property; TLC needs fairness to check it. See
+  [Specifying Systems, section 8.1](https://lamport.azurewebsites.net/tla/book.html).
+
 **Liveness**
 : A property that something good **eventually** happens ("every ping is
   eventually answered"). Contrast with safety. Checked with `PROPERTY` in a
