@@ -213,7 +213,13 @@ models: ## Check every config of every model, Bug ones expected to fail (slow)
 check: ## Check every model that is expected to pass
 	@set -e; for cfg in $(CONFIGS); do \
 	  dir=$$(dirname $$cfg); name=$$(basename $$cfg .cfg); \
-	  tla=$$(sed -n 's/^\\\* *SPEC: *//p' $$cfg); tla=$${tla:-$$name.tla}; \
+	  tla=$$(sed -n 's/^\\\* *SPEC: *//p' $$cfg); \
+	  if [ -z "$$tla" ] && [ ! -f $$dir/$$name.tla ]; then \
+	    for c in $$dir/*.tla; do b=$$(basename $$c .tla); \
+	      case $$name in $$b*) [ $${#b} -gt $${#tla} ] && tla=$$b.tla;; esac; \
+	    done; \
+	  fi; \
+	  tla=$${tla:-$$name.tla}; \
 	  echo "==> $$cfg"; \
 	  (cd $$dir && ../../bin/tlc -config $$name.cfg $$tla); \
 	done
