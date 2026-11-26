@@ -110,6 +110,40 @@ concurrency inventory's `d8f5bc2a`, so its line numbers still hold.
 Existing tests already cover the sequential retry after a panic, the
 first-fill value, a struct copy during a compute, and concurrent `Reset`.
 
+## The Plutus evaluation pools (`PooledEvalContext.tla`)
+
+`PooledEvalContext` (`ledger/common/plutus_machine_pool.go` at gOuroboros
+`7cd17437`) caches one `cek.EvalContext` per (language, protocol major, cost
+model list) in a bounded LRU cache, building on a miss with the lock released
+and keeping the first one stored. Machines are pooled per (language, weak
+pointer to the EvalContext) in a `sync.Map`; the goroutine that creates an
+entry registers `runtime.AddCleanup` to delete it once the EvalContext is
+collected. An EvalContext is read-only once built, so sharing it between
+concurrent evaluations is intended; a Machine must never be shared.
+
+The model has two evaluations under two tuples, a one-entry cache, a
+collector step that may free any EvalContext nothing holds (its address
+becomes reusable) and a later cleanup step. Questions: `MachineExclusive`,
+`NoCrossTupleMachine` (a Machine runs only for the tuple it was built for),
+`ContextMatchesTuple`, `CacheBounded`. The code at `7cd17437` passes; each
+mutation is a plausible mistake the invariants catch.
+
+| Config | Result | States |
+| --- | --- | --- |
+| `PooledEvalContext.cfg` (2 rounds each, 3 EvalContexts) | passes | 126,751 |
+| `PooledEvalContextDeep.cfg` (3 rounds, 4 EvalContexts: addresses reused across tuples; about a minute) | passes | 10,425,793 |
+| `PooledEvalContextKeyNoCostModelBug.cfg` (cache key without the cost models) | `ContextMatchesTuple` violated | |
+| `PooledEvalContextPoolByAddressBug.cfg` (pool keyed by address, not weak pointer) | `NoCrossTupleMachine` violated | |
+| `PooledEvalContextReleaseBeforeRunBug.cfg` (Machine released before `Run` returns) | `MachineExclusive` violated | |
+
+Go test, on `test/small-concurrency` `acce983c`:
+`TestPooledEvalContextConcurrentCostModels` (`ledger/conway`) evaluates the
+mainnet one-shot mint PlutusV3 script under the epoch 653 cost model and the
+same list doubled, 8 goroutines at once, each fetching its EvalContext per
+evaluation, and requires each budget to match a lone evaluation under its
+cost model. Killed mutations: a cache key without the cost models (the two
+budgets collide), and releasing the Machine before `Run` (`-race` reports).
+
 ## Not modelled
 
 The struct-copy case (inventory D5: a copy made before `Reset` shares the

@@ -116,6 +116,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N59](#n59) | network | LeiosNotify: source consulted when requests are pipelined behind `MsgQuit` | Every outstanding request answered `MsgCanceled`, then `MsgDone`; silent on how often the source is consulted | main: every request answered; the source is asked zero or one time, by whether the handler runs before the read loop reaches `MsgQuit` | Not stated | conforms | Test assertion fixed on local branch `fix/leiosnotify-pipelined-cancel-flake`, no PR (model `leios-peras` `LeiosNotifyPipelinedQuitAssumptionBug.cfg`) |
 | [N60](#n60) | network | Message submission V2: the responder after the requester's `MsgDone` | The responder is restarted in its initial state; dmq-node's V2 inbound sends `MsgDone` on demotion and runs again on the same connection when the peer is promoted | `7cd17437`: the V2 `Client` (the responder) stays in `StDone`, so the next run's first request is never answered | "should be restarted in its initial state" | does not conform | Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR (model `dmq` `DmqRestartSubmissionV2NoRestartBug.cfg`) |
 | [N61](#n61) | network | Local-tx-monitor `Release()` with no snapshot acquired | Not expressible: the typed client offers `MsgRelease` only while acquired | `7cd17437`: sends `MsgRelease` from `Idle`; the send loop refuses it and the connection is torn down while `Release` returns nil | `MsgRelease` only from `StAcquired` | does not conform | Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR (model `localtx` `LocalTxMonitorClientCallsReleaseIdleBug.cfg`) |
+| [N62](#n62) | network | DMQ: a message accepted by another connection between this one's prepare and commit | A held message is dropped as a duplicate before validation, so its counter is never checked | `7cd17437`: commit re-checks the counter first, so the duplicate is refused "opcert number went backwards" once a later message of the pool raised the counter, closing a node-to-node connection | Silent | does not conform | Fixed on local branch `fix/dmq-commit-duplicate-counter` `9af342c1`, no PR (model `dmq` `AuthOpCertCacheCounterFirstBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -870,6 +871,17 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR: `Release` returns `ErrNotAcquired` and sends nothing, as the local-state-query client already does
 
+### N62
+
+**DMQ: a message accepted by another connection between this one's prepare and commit** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: the mempool writer drops a message it already holds as `SigDuplicate` before validating it, and validation runs in one STM transaction, so a duplicate is never refused for its opcert counter. gOuroboros: `PrepareMessages`/`PrepareEach` verify against a snapshot and commit under the authenticator's lock; commit re-checked each message's counter before testing whether another connection had accepted the same message meanwhile, so once a later message of the pool raised the counter, the duplicate was refused and the node-to-node server closed the connection of an honest relaying peer.
+- **Spec.** CIP-0137 (Proposed) is silent on concurrent receipt.
+- **Reference.** ouroboros-network `4646039f` `.../TxSubmission/Mempool/Simple.hs` 183-245; dmq-node `a267003c14e9` `src/DMQ/Protocol/SigSubmission/Validate.hs` 115-212
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/common/authentication.go` `prepare` (commit closure 427-494); `TestPrepareCommitDuplicateAfterCounterRises`, `TestConcurrentCommitsKeepCounterInvariants`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/dmq-commit-duplicate-counter` `9af342c1`, no PR: commit treats a message accepted meanwhile as a duplicate before the counter re-check (model `dmq` `AuthOpCertCache.cfg`)
+
 ## Consensus
 
 ### C1
@@ -1516,6 +1528,8 @@ These pull requests fix races, leaks and deadlocks inside gOuroboros. The wire b
 | local `fix/muxer-models` (no PR) | muxer 1, 3, 4 | `muxer` `MuxStartGateLostStartBug.cfg`, `MuxReceiverStopJoinBug.cfg`, `MuxReceiverStopReplaceBug.cfg` | `MuxStartGate.cfg`, `MuxReceiverStop.cfg` |
 | local `fix/localtxmonitor-client-call-guards` (no PR) | local-tx-monitor `GetMeasures` after `Stop` | `localtx` `LocalTxMonitorClientCallsLateMeasuresBug.cfg` | `LocalTxMonitorClientCalls.cfg` |
 | local `fix/leios-dmq-lifecycle` (no PR) | C18 across a restart; leios client `Sync` | `leios-peras` `LeiosNotifyServerRestartRetiredBug.cfg`, `LeiosVotesLifecycleRunLoopBug.cfg` | `LeiosNotifyServerRestart.cfg`, `LeiosVotesLifecycle.cfg` |
+| local `fix/dmq-verify-with-slot-counter` (no PR) | `VerifyMessageWithSlot` records the counter of a message it refuses | `dmq` `AuthOpCertCacheDirectBug.cfg` | `AuthOpCertCache.cfg` |
+| local `fix/protocol-send-drained-written` (no PR) | `WaitSendQueueDrained` answers drained before the bearer took the bytes | `engine` `EngineSendDrainedEarlyBug.cfg` | `EngineSendDrained.cfg` |
 
 ## Library boundary: contracts, not drift
 
