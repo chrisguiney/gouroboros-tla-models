@@ -83,6 +83,13 @@ Plain-language definitions, with a Go comparison where one helps.
 : `CASE a -> x [] b -> y` is a switch statement. `CHOOSE t \in S : P(t)`
   picks an element of `S` satisfying `P`; use it only when exactly one does.
 
+**Lock-order inversion** (Go term)
+: Two code paths take the same two locks in opposite orders. With
+  `sync.RWMutex` even two *read* paths can deadlock this way, because a
+  writer waiting in `Lock` blocks every new `RLock`; see
+  [model `txsubmission`](../specs/txsubmission/README.md),
+  `TxSubmissionServerLocks.tla`.
+
 **Liveness**
 : A property that something good **eventually** happens ("every ping is
   eventually answered"). Contrast with safety. Checked with `PROPERTY` in a

@@ -761,6 +761,7 @@ None.
 - `txsubmission.Server.requestMu` -> `txsubmission.Server.stateMu` @ protocol/txsubmission/server.go:155, :250, :265 (RequestTxIds), :298, :343, :353 (RequestTxs)
 - `txsubmission.Server.requestMu` -> `protocol.Protocol.currentStateMu` @ protocol/txsubmission/server.go:249, :342 (SendMessage)
 - `txsubmission.Server.requestMu` -> `protocol.Protocol.pendingBytesMu` @ protocol/txsubmission/server.go:249, :342 (SendMessage)
+- `txsubmission.Server.stateMu` -> `txsubmission.Server.protocolMu`(R) @ protocol/txsubmission/server.go:517 (handleDone), :552 (handleInit), at `7cd17437`; the reverse of the edge above (hazard 2). Removed on branch `test/txsubmission-server-locks`.
 
 #### Hazards
 
@@ -770,6 +771,16 @@ None.
      `stateMu`. The package's own paths use `ProtocolInstance`, but promoted methods called
      from consumer goroutines read the pointer without a lock. Same interleaving as
      blockfetch hazard 6.
+2. **Server: `stateMu` -> `protocolMu` inversion deadlocks with `Stop`.**
+   - Kind: deadlock (lock-order inversion with `sync.RWMutex` writer preference).
+   - Lines (at `7cd17437`): protocol/txsubmission/server.go:552 (`handleInit`) and :517
+     (`handleDone`) call `ProtocolInstance()` while holding `stateMu`. G1 `RequestTxIds`
+     holds `protocolMu` (R) and waits for `stateMu`; G2 the handler holds `stateMu` and
+     calls `RLock`; G3 `Stop` waits in `Lock`, which blocks G2's new reader. Reachable
+     through `handleInit`; `handleDone`'s copy is not reachable alone (its caller holds
+     `requestMu`). Found by `TxSubmissionServerLocksDeadlockBug.cfg`; Go test
+     `TestServerInitDoesNotInvertLockOrder`; fixed on branch
+     `test/txsubmission-server-locks` by using the instance each handler already read.
 
 **Ruled out**
 
@@ -2231,7 +2242,7 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 7 | `LeiosFetchRangeDelivery` | leiosfetch | C8 | A permanent goroutine leak holding queued replies, on an ordinary caller cancel. |
 | 8 | `MuxReceiverStop` | muxer | (none found; checks the `sync.Cond` by machine) | The muxer carries all traffic; the hand check of the `Cond` and the stop/metrics callback order deserves a machine check. |
 | 9 | `ChainSyncTipWorker` | chainsync | B6, B7 | `GetCurrentTip` latency coupled to an unrelated query; `Stop`'s `TryLock` deadline. |
-| 10 | `TxSubmissionServerLocks` | txsubmission | (none found; three unmodelled locks) | Three nested locks and a one-slot handoff with a restart, all unmodelled. |
+| 10 | `TxSubmissionServerLocks` | txsubmission | hazard 2 (found by the model) | Written: `specs/txsubmission/TxSubmissionServerLocks.tla`. Found a stateMu -> protocolMu inversion in `handleInit`/`handleDone` that deadlocks with `Stop` and a caller; the one-slot handoff and restart-vs-`Stop` hold. |
 | 11 | `PerasClientOpMu` | perasvotes | C13, C14, C15 | Reentrancy deadlock and an uncontained panic, in an experimental protocol. |
 | 12 | `KeepAliveClientTimer` | keepalive | A11 | Bounded (one extra fire), but `AfterFunc` callbacks are easy to get wrong when fixing it. |
 | 13 | `HashCacheSpin` | `ledger/common` | D1-D5 | Lock-free code with a panic path, on every hash of every block; today's `compute` functions are short and pure, so risk is low. |

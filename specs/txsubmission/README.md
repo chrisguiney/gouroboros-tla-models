@@ -326,10 +326,75 @@ unless shown.
 | R8 | [`ouroboros-network/api/lib/Ouroboros/Network/ControlMessage.hs` 43-55](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/api/lib/Ouroboros/Network/ControlMessage.hs#L43-L55) | `timeoutWithControlMessage`: `Terminate` returns `Nothing`, which `Outbound.hs` 201 answers with `MsgDone`. |
 | G1-G4 | gOuroboros `protocol/txsubmission/` `txsubmission.go`, `client.go`, `server.go`, `validation.go` | `StateMap`; `handleRequestTxIds`, `handleRequestTxs`; `RequestTxIds`, `RequestTxs`, `handleReplyTxIds`, `handleReplyTxs`, `handleDone`; `reconcileTxIds`, `requestedTxIdsAreOutstanding`. |
 
+## The server's locks and restart (`TxSubmissionServerLocks.tla`)
+
+`TxSubmission.tla` answers which messages are legal. This module asks how
+the gOuroboros server (`protocol/txsubmission/server.go`, at `7cd17437`)
+moves a reply from its receive loop to the goroutine that asked for it,
+and how it restarts after `MsgDone` while `Stop` may run. It models:
+
+- **Callers** of `RequestTxIds`: `requestMu`, then `protocolMu` for reading,
+  then `stateMu`; record the pending request; unlock; send; wait on the
+  instance's one-slot result channel or its `DoneChan`. A caller that gets
+  `ErrStopServerProcess` may call again, on the restarted instance.
+- **The handler**, the current instance's receive loop: `handleInit`,
+  `handleReplyTxIds`, and `handleDone` with its restart
+  (`StopForRestart`, `initProtocol` under `protocolMu` then `stateMu`,
+  `Start`).
+- **The stopper**, `Server.Stop`: `protocolMu` for writing, set `stopped`,
+  read the instance, stop it, wait for its loops.
+
+`sync.RWMutex` gives a waiting writer preference: once `Stop` waits in
+`Lock`, a new `RLock` blocks. The model encodes that (`CanRLock`), and it
+is what turns the inversion below into a deadlock. Restart-vs-`Stop` muxer
+slot handling is `specs/keepalive/KeepAliveLifecycle.tla`, which stands
+for this server too, and is not repeated.
+
+Invariants: `OnePending`, `ResultSlotNeverFull` (the receive loop never
+finds the one slot taken), `NoInstallAfterStop`, `StopIsEffective`,
+`NoResultLost` (a caller woken by `DoneChan` still takes a result already
+delivered), `LockOrderRespected` (nobody waits for `protocolMu` while
+holding `stateMu`), TLC's deadlock check, and the liveness properties
+`CallerAlwaysReleased` and `StopTerminates` under weak fairness.
+
+| Config | What it is | Result |
+| --- | --- | --- |
+| `TxSubmissionServerLocks.cfg` | fixed server; 2 callers, 2 calls each, 1 restart, `Stop` | passes, 5,159 states, both liveness properties |
+| `TxSubmissionServerLocksRestarts.cfg` | fixed server; 2 restarts, no `Stop` | passes, 4,061 states |
+| `TxSubmissionServerLocksReadUnderStateBug.cfg` | gOuroboros at `7cd17437` | **fails** `LockOrderRespected` |
+| `TxSubmissionServerLocksDeadlockBug.cfg` | gOuroboros at `7cd17437`, deadlock check only | **deadlocks** in 7 steps |
+| `TxSubmissionServerLocksStopGuardBug.cfg` | mutation: `initProtocol` without the `stopped` check | **fails** `NoInstallAfterStop` |
+| `TxSubmissionServerLocksDrainBug.cfg` | mutation: no nested select after `DoneChan` | **fails** `NoResultLost` |
+
+**The defect.** `handleInit` and `handleDone` called `ProtocolInstance()`
+(read lock on `protocolMu`) while holding `stateMu`, the reverse of the
+order every other path uses. The deadlock trace: a caller takes
+`protocolMu` for reading; the handler, running `MsgInit`, takes
+`stateMu`; `Stop` starts waiting for `protocolMu`; the caller now waits
+for `stateMu`, the handler's read lock waits behind `Stop`, and `Stop`
+waits for the caller. `handleDone`'s copy of the inversion is not
+reachable alone in the code (the caller it answers holds `requestMu`, so
+no second caller holds the read lock), but it is the same order and was
+fixed with it. Bound in gOuroboros by
+`TestServerInitDoesNotInvertLockOrder`
+(`protocol/txsubmission/server_lock_order_internal_test.go`), which
+fails 10 of 10 before the fix and passes after.
+
+**What holds.** The one-slot handoff is safe: one result per pending
+request, cleared under `stateMu` before the send, and `DoneChan` closes
+only after the receive loop returns, so the nested select always finds a
+result that was delivered. `Stop` racing a restart installs nothing
+after `stopped` is set.
+
+The client lifecycle (`Start`/`Stop`/`Init`) is not in this model. Its
+restart after `MsgDone` and concurrent `Start`/`Stop` are covered by Go
+tests only (`TestClientRestartsAfterDone`,
+`TestClientStartStopConcurrent` in `client_restart_test.go`).
+
 ## Not modelled
 
-Transaction sizes and the size checks, byte limits, timeouts, the server's
-restart race after `MsgDone`, client `Stop`/`Start`, the reference server's
+Transaction sizes and the size checks, byte limits, timeouts, the client's
+`Start`/`Stop`/`Init` state machine (Go tests only), the reference server's
 pipelining depth, and duplicate ids within one reply.
 
 ## Running it
@@ -348,10 +413,15 @@ cd specs/txsubmission
 ../../bin/tlc -config TxSubmissionV16ClampRogue.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionV16ClampBlocking.cfg TxSubmission.tla
 ../../bin/tlc -config TxSubmissionTable.cfg TxSubmissionTable.tla | grep '^<<'
+../../bin/tlc -config TxSubmissionServerLocks.cfg TxSubmissionServerLocks.tla
+../../bin/tlc -config TxSubmissionServerLocksRestarts.cfg TxSubmissionServerLocks.tla
 # expected to fail
 for c in GouroborosBug EmptyReplyBug ServerBug ClientBug ClientBlockingBug \
          RogueClientBug V16Bug V16ClampBug V16ClampBlockingBug NoWindowBug \
          KeepsAckedBug ProbesBug ZeroClampProbeBug V16RefuseAckedBlockingBug; do
   ../../bin/tlc -config TxSubmission$c.cfg TxSubmission.tla || true
+done
+for c in ReadUnderStateBug DeadlockBug StopGuardBug DrainBug; do
+  ../../bin/tlc -config TxSubmissionServerLocks$c.cfg TxSubmissionServerLocks.tla || true
 done
 ```

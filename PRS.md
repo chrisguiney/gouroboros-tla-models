@@ -107,6 +107,7 @@ closes. A PR can draw on more than one model.
 | `consensus-nonce` (`EpochNonce`, GoBytes "Family") | #3334 (epoch nonce over whole chains) | #3330 | open |
 | `consensus-eras` (`EraHistoryDecode`, tagged reply) | #3336 (tagged era history refused) | #3335 | open |
 | `ledger-codec` (`TxSizeFraming`, L34) | local branch `fix/txsize-shelley-framing` (`aada8626`; Shelley-family transaction size measured from its parts), not yet published | #3337 | local |
+| `txsubmission` (`TxSubmissionServerLocks`) | local branch `test/txsubmission-server-locks` (handleInit/handleDone lock-order deadlock fix; client restart tests), not yet published | | local |
 
 ## Merges 6 to 12 of 12 published (2026-11-24)
 
