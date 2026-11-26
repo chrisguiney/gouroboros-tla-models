@@ -237,9 +237,11 @@ transaction reconstruction found no case.
 
 Metrics, the retained-CBOR byte budget (other than as a reason the stall comes
 sooner), validation in trusted decode-only and header-only modes (their
-`Results` delivery is modelled by `HasApplyFunc`), panics in stages (parent
-context cancellation without `Stop` is in `PipelineLifecycle.tla`), more than one client, and Leios or Peras
-messages in the reference queue.
+`Results` delivery is modelled by `HasApplyFunc`; a contained decode panic
+there is delivered as a result carrying the error, like any decode error,
+and is not modelled), more than one client, and Leios or Peras messages in
+the reference queue. Panics in stages are in `PipelineLifecycle.tla`
+(`StagePanic`, below).
 
 ## Lossless results (`WithLosslessResults`)
 
@@ -472,3 +474,78 @@ explicit `Stop` has signalled, `stopping` is set, so `Start` returns
 5cb98604 `requestStop` returned at `teardownStarted` before publishing it, so
 a `Stop` after the watcher's teardown left it false
 (`PipelineLifecycleMainLateStopBug`); the fix publishes it before that check.
+
+### Panics in stages (`StagePanic`, gOuroboros 7cd17437)
+
+Questions: does a panic in a stage or consumer callback stay contained and
+reach the caller as an error; is anything committed after it or out of
+order; does `Stop` still join every goroutine and return the retained-CBOR
+budget?
+
+What the code does. `StageWorkerPool.process` recovers a panic in a decode or
+validate stage (including the `BlockTypeResolver` and `Eta0Provider` they
+call), records it as the item's error for its unresolved phase
+(`markUnresolvedPhase`), offers it to `Errors` without waiting, and forwards
+the item. The runner rejects an item carrying an error before any callback
+(`maybeApply`), which is fatal: `setFatalError`, cancel the pipeline context,
+return. `ApplyFunc`, the chain-context validator and the ordered validator
+(`VerifyConfigProvider`) are each guarded where they are called, so their
+panics become the item's error and are fatal the same way, after the
+committed prefix is accounted and forwarded. The model adds `WorkerPanic`
+(a decode panic on any block), `RunnerApplyPanic` (an `ApplyFunc` panic on
+any block) and `RunnerFail`, and separates the parent context
+(`parentDone`) from the pipeline context: a fatal cancel does not wake the
+parent watcher, so the pipeline keeps its results and items until `Stop`
+or the parent context ends, as `watchParentCancel`'s doc says.
+`NoLeakWhenQuiescent` is therefore checked only once `Stop` or the parent
+context has ended it (`CancelEnded`).
+
+New invariants: `AppliedInOrderOnce` (commits are 0, 1, 2, ... each once),
+`NoApplyAfterPanic` (nothing at or after a panicked block commits) and
+`PanicFailsDrain` (`Fence`/`WaitForDrain` never succeed over a panicked
+block before `Stop`).
+
+| Config | Result | Distinct states |
+| --- | --- | --- |
+| `PipelineLifecycleMainDecodePanic.cfg` (3 blocks, drainer, `Stop`, parent cancel) | passes | 1,409,546 |
+| `PipelineLifecycleMainApplyPanic.cfg` (the same, `ApplyFunc` panics) | passes | 776,576 |
+| `PipelineLifecycleMainDecodePanicNoStop.cfg` (no `Stop`, no parent cancel) | passes | 6,709 |
+| `PipelineLifecycleMainPanicProbeBug.cfg` (probe) | `ProbeNoFatalPanic` violated: a panic reaches the runner | - |
+| `PipelineLifecycleMainFatalHoldsProbeBug.cfg` (probe) | `ProbeNothingHeldWhenStuck` violated: items held until `Stop` | - |
+| `PipelineLifecycleMainPanicUnmarkedBug.cfg` (mutation: item not marked) | `NoApplyAfterPanic` violated | - |
+| `PipelineLifecycleMainPanicUnmarkedDrainBug.cfg` (same mutation) | `PanicFailsDrain` violated | - |
+| `PipelineLifecycleMainPanicNotFatalBug.cfg` (mutation: runner continues) | `NoApplyAfterPanic` violated | - |
+| `PipelineLifecycleMainPanicSkipsBlockBug.cfg` (same mutation) | `AppliedInOrderOnce` violated | - |
+| `PipelineLifecycleMainPanicLosesItemBug.cfg` (mutation: worker dies holding the item) | deadlock: `Fence` never returns | - |
+
+Every passing config also checks `BudgetMatchesActive`,
+`AllReleasedAfterStop`, `JoinedAfterStop`, `NoLeakWhenQuiescent`,
+`StopPublished` and `NoCommitAfterDrain`. Result: the code at 7cd17437 is
+correct here; no defect. Existing configs set `StagePanic = "none"`, which
+leaves their state spaces unchanged.
+
+Go test (branch `test/pipeline-stages` from 7cd17437):
+`TestBlockPipelineStagePanicOutcome` panics, on the second block of three,
+in each of the block type resolver, the `Eta0Provider`, the chain-context
+validator, the `VerifyConfigProvider` and `ApplyFunc`, and checks that
+`Fence` and `WaitForDrain` return `ErrStagePanic`, only block 0 is applied
+and in `Results`, `Stop` returns, the budget and active items are zero, and
+no goroutine is left (goleak). It fails with `markUnresolvedPhase` removed
+(the decode and validate cases) and with the runner's panic and rejection
+errors made non-fatal (every case).
+
+The same branch closes two CBOR rows. `TestDecodeStageRejectsEveryWrongDeclaredType`
+declares every block type for every real era fixture in `internal/testdata`
+and checks the decode stage returns `BlockTypeMismatchError` with no typed
+decode unless the declared type is the authoritative one; for Shelley,
+Allegra and Mary the wrong era's decoder would accept the bytes, so the
+check is the only barrier (fails with the check disabled).
+`TestBlockPipelineResultsMatchSubmittedCbor` sends every fixture through a
+trusted decode-only pipeline and checks each delivered block re-encodes to
+the submitted bytes and that those bytes decode to the same hash,
+transaction ids and validity flags as the delivered value (fails when the
+decode stage appends to a Conway block's `InvalidTransactions` without
+clearing its CBOR). Audit for mutate-then-marshal: the pipeline never
+encodes a decoded value, and its callers in gOuroboros (chain-sync
+`SubmitNodeToClient`, block-fetch `Submit`) pass the raw wire bytes, so
+there is no such site on this path.
