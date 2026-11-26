@@ -117,9 +117,11 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncTipWorkerFixed.cfg ChainSyncTipWorker.tla
 	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackStop.cfg ChainSyncTipWorker.tla
 	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackTip.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerJumpCallbackTip.cfg ChainSyncTipWorker.tla
 	$(CHAINSYNC) -config ChainSyncTipWorkerCtxBug.cfg ChainSyncTipWorker.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackStopBug.cfg ChainSyncTipWorker.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackTipBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerJumpCallbackTipBug.cfg ChainSyncTipWorker.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorkerNoRetireBug.cfg ChainSyncTipWorker.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorkerNoJoinBug.cfg ChainSyncTipWorker.tla || true
 

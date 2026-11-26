@@ -725,7 +725,11 @@ reaches through `resolve`, the watcher at :606, or `Stop` through `releaseCurren
    - Interleaving: a roll callback calls `GetCurrentTip`; its answer needs the receive
      loop the callback is blocking. The call and its worker wait only for `DoneChan`,
      which closes after that loop returns, so `Stop` with no deadline never returns.
-     `ChainSyncTipWorkerCallbackTipBug.cfg`.
+     `ChainSyncTipWorkerCallbackTipBug.cfg`. Returning on `StopChan` alone is not
+     enough: from `IntersectFoundFunc`, the worker waits in `busyMutex.Lock()` behind
+     the `Jump` the callback blocks, and `GetCurrentTip` joins the worker; the worker
+     must take the lock with `lockBusy` on `StopChan`.
+     `ChainSyncTipWorkerJumpCallbackTipBug.cfg`.
 5. **Server: promoted methods race the restart.**
    - Kind: other (data race).
    - Lines: protocol/chainsync/server.go:125 writes `s.Protocol` under `protocolMu`; promoted
