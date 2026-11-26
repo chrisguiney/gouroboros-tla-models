@@ -71,6 +71,12 @@ Plain-language definitions, with a Go comparison where one helps.
   generation when a message started arriving with the generation when it is
   admitted tells the engine whether the state moved in between.
 
+**Ghost variable**
+: A variable that records history for an invariant to check, such as how
+  many turns in a row one class of writer got, and that no Go variable
+  matches. It never changes what the modelled code can do. Used in
+  `specs/muxer/MuxEgress.tla`.
+
 **Guard**
 : The conditions in an action that mention only current (unprimed)
   variables. The action can only happen when they are true.
@@ -145,6 +151,11 @@ Plain-language definitions, with a Go comparison where one helps.
 : An ordered list, used for inboxes. `Append(s, x)` adds to the end,
   `Head(s)` is the first element, `Tail(s)` is the rest, `Len(s)` the length,
   `<<>>` the empty one. Also used for tuples. Needs `EXTENDS Sequences`.
+
+**`SelectSeq(s, LAMBDA x : P(x))`**
+: The elements of sequence `s` for which `P` holds, in order: a filter.
+  `LAMBDA x : e` is an unnamed operator, like a Go function literal. Needs
+  `EXTENDS Sequences`.
 
 **Spec / specification**
 : A TLA+ description of a system. Also the name we give the top-level formula,

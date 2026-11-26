@@ -289,6 +289,21 @@ No cycle found: no path takes `reportMu` or `protocolReceiversMutex` while holdi
 1. muxer/muxer.go:1084-1098 with :1419-1427, **lost wakeup**. `Start` and `StartOnce` both do a non-blocking send into the capacity-1 `startChan`. If `StartOnce`'s `false` is still buffered when `Start()` is called, `Start`'s `true` is dropped. readLoop then takes `false`, reads one segment, and blocks at :1424 until `doneChan` closes. This cannot happen through `Connection`: `Start` (connection.go:1080) runs only after the handshake reply was read, and that read required readLoop to consume the `false`. It is a trap for direct users of the muxer API.
 2. muxer/muxer.go:1062-1075 and :1101-1106, **unjoined goroutine**. `Stop` only closes `doneChan`. Teardown (closing the conn, waiting for readLoop, forwarders and senders, closing `errorChan`) happens on the unjoined cleanup goroutine. **Muxer Stop never blocks on a goroutine stuck in conn Read/Write.** It does not wait at all, and the `conn.Close` at :1067 unblocks a pending Read or Write for a standard `net.Conn`. With a `net.Conn` whose `Close` does not unblock I/O, readLoop or a sender stays blocked, `errorChan` is never closed, and the goroutines leak. Nothing deadlocks, because `Connection`'s forwarder returns on its own `doneChan`.
 
+3. muxer/muxer.go `readLoop` deferred function, **unjoined goroutine**
+   (found by `specs/muxer/MuxReceiverStop.tla`, `MuxReceiverStopJoinBug.cfg`).
+   It calls `waitGroup.Done()` before its sweep of the receivers, so the
+   cleanup goroutine's `Wait`, and `Stop` with it, can return while the read
+   loop is still sweeping under `protocolReceiversMutex`.
+4. muxer/muxer.go `RegisterProtocol`, **unjoined goroutine** (found by
+   `MuxReceiverStopReplaceBug.cfg`). Registering a role that is still
+   registered and not suspended makes a new receiver and overwrites the map
+   entry; nothing stops the old receiver or sender. The old `forward` parks on
+   the `Cond` for good, `waitGroup` never reaches zero, `ErrorChan` is never
+   closed and `Stop` never returns.
+
+Hazard 2 is out of date at `7cd17437`: `Stop` now waits for the cleanup
+goroutine (`cleanupDone`) unless called with `CallbackContext`.
+
 Ruled out:
 - Lock held across a wait: readLoop's sweep holds `protocolReceiversMutex` (:1398) across `stop` -> `<-forwarderDone` (:995). It cannot deadlock. `forward` never takes `protocolReceiversMutex`. `done` is already closed, so `forward` leaves both its selects (:889, :896). `stop` skips the wait when a metrics callback is running (:984-996), so a callback blocked in `RegisterProtocol`/`SetIngress*` on that mutex is not waited for. The cost is latency only: `Protocol.Start` and `EnsureRegistered` (under `lifecycleMu`) stall during the sweep.
 - Lost wakeup in backpressured `enqueue`: `sc.room` and `account.room` are fetched under the lock that their closers (`wakeEnqueueLocked` :671, `wakeLocked` :484) hold, so a wake after the check closes the channel that was fetched.
@@ -2257,6 +2272,13 @@ Status (2026-11-24, gOuroboros `5c4f31c1`): `PipelineLifecycle` is in
 find D3 unreachable from any caller, and add two hazards: an `ApplyFunc` that
 calls `Stop` deadlocks, and with PR #3161 one that calls `WaitForDrain` during
 `Stop` deadlocks.
+
+Status (2026-11-26, gOuroboros `7cd17437`): `MuxReceiverStop`,
+`MuxStartGate` and `MuxEgress` (ranks 8, 17 and 14) are in `specs/muxer`.
+The `Cond` loses no wakeup and egress has no defect; each has mutations that
+fail. `MuxStartGate` confirms muxer hazard 1. `MuxReceiverStop` adds muxer
+hazards 3 and 4 below; all three are fixed on the local branch
+`fix/muxer-models`.
 
 Status of the published fixes with no model before (2026-11-24): each now has
 a configuration that reproduces `main` and one that passes with the fix.

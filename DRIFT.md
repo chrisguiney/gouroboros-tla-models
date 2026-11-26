@@ -1489,6 +1489,7 @@ These pull requests fix races, leaks and deadlocks inside gOuroboros. The wire b
 | #3273 | C9, C12, C20 | `keepalive` `KeepAliveLifecycleReaderUnlockedBug.cfg` (same restart; loop joins under #3253) | `KeepAliveLifecycleReader.cfg` |
 | #3274 | A9 | `engine` `EngineSendBeforeStartLostBug.cfg`, `EngineSendBeforeStartRaceBug.cfg` | `EngineSendBeforeStart.cfg` |
 | #3276 | C13, C14, C15 | `leios-peras` `PerasClientOpMuReentryBug.cfg`, `PerasClientOpMuDoneCtxBug.cfg`, `PerasClientOpMuAwaitPanicBug.cfg`, `PerasClientOpMuAwaitUnjoinedBug.cfg` | `PerasClientOpMu.cfg`, `PerasClientOpMuAnswered.cfg` |
+| local `fix/muxer-models` (no PR) | muxer 1, 3, 4 | `muxer` `MuxStartGateLostStartBug.cfg`, `MuxReceiverStopJoinBug.cfg`, `MuxReceiverStopReplaceBug.cfg` | `MuxStartGate.cfg`, `MuxReceiverStop.cfg` |
 
 ## Library boundary: contracts, not drift
 

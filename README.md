@@ -42,6 +42,8 @@ protocol.
   gouroboros model, the Go tests it drove, and what it found.
 - [The connection](specs/connection/README.md): the
   multiplexer, and messages surviving a restart.
+- [The muxer](specs/muxer/README.md): the receiver goroutines and
+  how they stop, the start gate, and who writes next.
 - [The protocol engine](specs/engine/README.md): the code every
   mini-protocol runs on, starting with how it admits incoming messages.
 
