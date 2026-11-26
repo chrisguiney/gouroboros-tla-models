@@ -2194,6 +2194,20 @@ unpushed; `fix/protocol-callback-context` is based on
   `TestStopLeavesNoTimerArmed` fails with the old order ("Stop left a
   keep-alive timer armed"). Branch `fix/protocol-callback-context`
   `861f349b`.
+- **A4 and A11 re-checked on `7cd17437` (models `connection/HandshakeTimeout.tla`,
+  `keepalive/KeepAliveClientTimer.tla`).** A4's timer and error cases join
+  the handshake loops (`HandshakeTimeoutSerial.cfg` passes). Two residuals
+  are real: a concurrent `Close` between muxer creation and the unlocked
+  `c.handshake` write races shutdown's read and starts a handshake nothing
+  stops (`HandshakeTimeoutPublishBug.cfg`), and the `doneChan` case returns
+  before the handshake loops, so `FinishedFunc` can write `handshakeVersion`
+  after `Dial` fails (`HandshakeTimeoutFinishedBug.cfg`). Both fixed on
+  gOuroboros branch `test/keepalive-handshake-timers`. A11's fix is on main
+  (`KeepAliveClientTimerClearFirstBug.cfg` shows the old order); shutdown
+  leaves the timer to the unjoined `DoneChan` watcher, which bounds it to
+  one more fire that sends nothing. The model also found that a zero
+  `Period` re-arms the timer at once (a ping flood) and a zero `Timeout`
+  never times the answer; both now fall back to the defaults.
 - **C11, C18, C21 (owned elsewhere): covered by `fix/protocol-callback-context`
   `d84adf86`.** Goroutines started through `RunLoop` are now in the join of
   `Stop(ctx)` and `Close(ctx)`. `TestStopWaitsForRequestSource` (leios-notify)
@@ -2259,7 +2273,7 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 9 | `ChainSyncTipWorker` | chainsync | B6, B7 | `GetCurrentTip` latency coupled to an unrelated query; `Stop`'s `TryLock` deadline. |
 | 10 | `TxSubmissionServerLocks` | txsubmission | hazard 2 (found by the model) | Written: `specs/txsubmission/TxSubmissionServerLocks.tla`. Found a stateMu -> protocolMu inversion in `handleInit`/`handleDone` that deadlocks with `Stop` and a caller; the one-slot handoff and restart-vs-`Stop` hold. |
 | 11 | `PerasClientOpMu` | perasvotes | C13, C14, C15 | Reentrancy deadlock and an uncontained panic, in an experimental protocol. |
-| 12 | `KeepAliveClientTimer` | keepalive | A11 | Bounded (one extra fire), but `AfterFunc` callbacks are easy to get wrong when fixing it. |
+| 12 | `KeepAliveClientTimer` | keepalive | A11 | **Done**: `specs/keepalive/KeepAliveClientTimer.tla`. Bounded (one extra fire), but `AfterFunc` callbacks are easy to get wrong when fixing it. |
 | 13 | `HashCacheSpin` | `ledger/common` | D1-D5 | Lock-free code with a panic path, on every hash of every block; today's `compute` functions are short and pure, so risk is low. |
 | 14 | `MuxEgress` | muxer | (none found) | Fairness between Praos and Leios senders. |
 | 15 | `LeiosVotesLifecycle`, `LeiosNotifyServerRestart` | leiosvotes, leiosnotify | C10, C11, C18, C19, C21 | Experimental protocols; unjoined loops. |

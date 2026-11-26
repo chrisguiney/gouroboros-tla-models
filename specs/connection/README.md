@@ -432,6 +432,33 @@ closed as soon as `Close` returns). The third finding, a blocking receive on
 `CloseContext` with `Close(ctx)`, which calls the same `closeExcept(owner)`,
 so both fixes carry over unchanged.
 
+## Part 6: the handshake timeout (`HandshakeTimeout.tla`)
+
+`setupConnection` (gOuroboros `7cd17437`, `connection.go`) creates the
+handshake protocol, starts it, and waits on `doneChan`, a protocol error,
+`handshakeFinishedChan` or the connection-wide handshake timer. The model
+adds what `ConnectionTeardown.tla` leaves out: when `c.handshake` is
+published relative to shutdown's read of it under `protocolMu`, which case
+`setupConnection` returns through, and whether the handshake loops, which
+run `FinishedFunc`, have returned by then (CONCURRENCY.md A4).
+
+| Config | What it checks | Result |
+|---|---|---|
+| `HandshakeTimeoutSerial.cfg` | gOuroboros `7cd17437`, no concurrent `Close` | passes: the timer and error cases close once, join the handshake loops, and start no mini-protocol (`TimeoutTearsDown`, `TornDownOnce`, `NoProtocolStartAfterTeardown`, `NoFinishedAfterFailedDial`) |
+| `HandshakeTimeoutPublishBug.cfg` | gOuroboros `7cd17437`, a `Close` from another goroutine | **fails** `NoRacyHandshakeWrite`: `c.handshake` is written with no lock after shutdown read none |
+| `HandshakeTimeoutStartBug.cfg` | the same, seen from the instance | **fails** `NoHandshakeStartAfterTeardown`: a handshake nothing stops is started |
+| `HandshakeTimeoutFinishedBug.cfg` | gOuroboros `7cd17437`, a `Close` ending the wait | **fails** `NoFinishedAfterFailedDial`: Dial returns before the handshake loops, and `FinishedFunc` can still write `handshakeVersion` |
+| `HandshakeTimeout.cfg` | both fixes (`publishLocked`, `joinOnDone`) | passes every invariant |
+| `HandshakeTimeoutNoCloseBug.cfg` | mutation: the timer case returns without `Close` | **fails** `TimeoutTearsDown` |
+| `HandshakeTimeoutNoGuardBug.cfg` | mutation: `lockProtocolSetup` does not check `doneChan` | **fails** `NoProtocolStartAfterTeardown` |
+
+Run it with `make handshake-timeout`. Go tests (gOuroboros branch
+`test/keepalive-handshake-timers`,
+`connection_handshake_timeout_internal_test.go`):
+`TestHandshakeTimeoutTearsDownOnce`, `TestCloseBeforeHandshakeCreatesNone`
+(fails on `7cd17437`), `TestDialReturnsAfterTeardownOnClose` (fails on
+`7cd17437`).
+
 ## What model `connection` found
 
 - **Messages survive restarts.** Carrying the read buffer, admitting one
