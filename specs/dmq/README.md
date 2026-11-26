@@ -13,6 +13,7 @@ to local clients:
 | Replay caches shared by connections | 14, 15 | `localmessagenotification/client.go`, `server.go` (cleaner); `localmessagesubmission/server.go` | `DmqReplayShared.tla`, `LmsReplayTokens.tla` |
 | Message validity (all three) | | `protocol/common/authentication.go` | `MessageValidity.tla` |
 | Receiving messages (node-to-node) | 11 | `protocol/messagesubmission/server.go`, `authentication.go` | `MessageIngress.tla` |
+| The opcert counter under concurrent verification | | `protocol/common/authentication.go` | `AuthOpCertCache.tla` |
 
 Read [Model `chainsync`](../chainsync/README.md) first; the "does each answer reach
 the call that asked" and "does Stop abandon a request" questions come from
@@ -612,6 +613,50 @@ never stopped, keeps its cleaner. The Go tests bound to these invariants are
 and `TestConnectionDoneCancelsBlockingRequestAndCleaner`, which now name the
 invariant they check.
 
+## Part 9: the opcert counter under concurrent verification (`AuthOpCertCache.tla`)
+
+`MessageAuthenticator` keeps, under one mutex, a pool's last opcert counter,
+the ids of accepted messages and the time of the pool's last acceptance. It
+caches no verdict: every call re-checks the signatures, so what one message
+leaves for the next is only that state. Connections verify with
+`PrepareMessages`/`PrepareEach` (a snapshot, checks with the lock released,
+then a commit that re-checks under the lock); the deprecated
+`VerifyMessageWithSlot` ran the checks on the authenticator itself. The model
+has one pool with two messages under counters 1 and 2, two connections
+preparing and committing, an optional `VerifyMessageWithSlot` caller split at
+its lock sections, and a clock for the rate limit. Read at gOuroboros
+`7cd17437`.
+
+Questions: `DuplicateNeverRefused` (a message another connection accepted
+first is not refused: dmq-node drops a held message before validating it),
+`CacheIsMaxAccepted` (the recorded counter is the highest counter of an
+accepted message: a refused message records nothing), `CounterNeverBackwards`
+(no new acceptance under a counter below the recorded one), and the action
+property `CacheMonotonic`.
+
+| Config | Result | States |
+| --- | --- | --- |
+| `AuthOpCertCache.cfg` (both fixes) | passes | 1,560 |
+| `AuthOpCertCacheCounterFirstBug.cfg` (`7cd17437` commit order) | `DuplicateNeverRefused` violated | |
+| `AuthOpCertCacheDirectBug.cfg` (`7cd17437` `VerifyMessageWithSlot`) | `CacheIsMaxAccepted` violated | |
+| `AuthOpCertCacheNoRecheckBug.cfg` (mutation: commit skips the counter) | `CounterNeverBackwards` violated | |
+
+Two defects. Commit re-checked the counter before noticing that another
+connection had accepted the same message meanwhile, so once a later message
+of the pool raised the counter the duplicate was refused "opcert number went
+backwards", which closes a node-to-node connection (DRIFT N62).
+`MessageIngress.tla`'s `Commit` treats a message held at commit as a
+duplicate before any counter check, which is why it did not show this.
+`VerifyMessageWithSlot` wrote the counter in `verifyKESPeriodRotation` before
+`recordRate` re-checked the rate limit, so a message refused as too frequent
+still raised the pool's counter. Fixes: commit tests "accepted meanwhile"
+first; `VerifyMessageWithSlot` calls `VerifyMessage`.
+
+Not modelled: `RemoveKESOpCertCacheEntry` (documented to forget a pool), the
+once-a-minute pruning of expired ids (every caller checks expiry before
+authentication, so an expired id still held is never consulted), and the
+signatures.
+
 ## Go tests and fixes
 
 All on gOuroboros `61046085`, local branches only.
@@ -683,6 +728,13 @@ cross-branch test fix: `TestPrepareMessagesCommitRechecksEveryCounter` needs
 head (`4f710823`), its new `NewMsgReplyMessages(version, ...)` signature needs
 the two receipt tests updated; then the four DMQ packages and `protocol` pass
 with `-race`.
+
+Opcert counter under concurrency (`AuthOpCertCache.tla`), all from `7cd17437`:
+
+| Branch | Commit | Tests | Fails without the fix |
+| --- | --- | --- | --- |
+| `fix/dmq-commit-duplicate-counter` | `9af342c1` | `TestPrepareCommitDuplicateAfterCounterRises`, `TestPrepareCommitTransitions` (the model's commit outcomes), `TestConcurrentCommitsKeepCounterInvariants` (16 goroutines, `-race`) | "opcert number went backwards" for the duplicate; 46 refusals in 20 runs of the concurrent test |
+| `fix/dmq-verify-with-slot-counter` | `7094ca1b` | `TestVerifyMessageWithSlotRefusedRecordsNoCounter` (the other connection's acceptance runs from the stake lookup, where the lock is released) | counter 2 recorded for the refused message |
 
 ## Spec, reference, and gOuroboros
 

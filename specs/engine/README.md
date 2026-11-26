@@ -18,6 +18,7 @@ The engine is modelled in slices, simplest first:
 | 5 | `EngineSendBeforeStart.tla` | A message sent before or during `Start` |
 | 6 | `EngineIngressOwner.tla` | A stopped instance must not change the ingress settings of the instance registered after it |
 | 7 | `EngineRoundTripVerdict.tla` | What a test can observe when a client sends a second request before the server answers the first |
+| 8 | `EngineSendDrained.tla` | When `WaitSendQueueDrained` may report the send queue drained |
 
 Read [Model `keepalive`](../keepalive/README.md) first.
 
@@ -523,4 +524,40 @@ allows at most one handler call.
 
 ```sh
 bin/tlc -config specs/engine/EngineRoundTripVerdictStallBug.cfg specs/engine/EngineRoundTripVerdict.tla
+```
+
+## Slice 8: when the send queue is drained (`EngineSendDrained.tla`)
+
+`Protocol.WaitSendQueueDrained` polls every 2 ms: shutdown answers "not
+drained", `pendingSendBytes = 0` with an empty `sendQueueChan` answers
+"drained", the deadline answers "not drained". Dingo's block-fetch server
+calls it between blocks to pace its sends. A message passes through
+`enqueueMessage` (bytes counted, then queued), `sendLoop` (received, appended
+to the payload buffer, bytes subtracted), the hand-off to the muxer, and the
+muxer's write to the bearer, which blocks while the peer does not read. Read
+at gOuroboros `7cd17437`.
+
+Questions: `DrainedMeansWritten` (a drained answer means every message counted
+before the call was written) and `ReturnsAfterStop` (a waiting call returns
+once the instance stops; the deadline is not assumed to fire).
+
+| Config | Result |
+| --- | --- |
+| `EngineSendDrained.cfg` (the fix) | passes (1,894 states) |
+| `EngineSendDrainedEarlyBug.cfg` (`7cd17437`) | `DrainedMeansWritten` violated: bytes are subtracted when they enter the payload buffer |
+| `EngineSendDrainedReportOnHandoffBug.cfg` (mutation: the fix's count drops at the hand-off) | `DrainedMeansWritten` violated |
+| `EngineSendDrainedCountFailedBug.cfg` (mutation: a write abandoned on `Stop` also drops it) | `DrainedMeansWritten` violated: a waiter past the shutdown check answers drained |
+| `EngineSendDrainedProbeDrainedBug.cfg` (probe) | the fix can still answer drained |
+
+The fix (`fix/protocol-send-drained-written` `bb8c2ed9`): `sendLoop` moves the
+bytes it takes off the queue to `unwrittenSendBytes` in the same critical
+section, a new `muxer.Segment.SetWrittenFunc` hook subtracts them once the
+muxer has written the segment (not on a failed or abandoned write), and the
+waiter adds the two counts. `TestWaitSendQueueDrainedBlockedBearer` (a
+`net.Pipe` peer that reads nothing, then reads) fails on `7cd17437`;
+`TestWaitSendQueueDrainedReturnsOnStop` passes on both: the waiter never hung
+after shutdown.
+
+```sh
+make engine-send-drained
 ```

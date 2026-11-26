@@ -359,7 +359,7 @@ Ruled out:
 - protocol/protocol.go:2361 `transitionTimer` (`time.NewTimer`), owned only by stateLoop. It is armed in `setState` and stopped at :2290, :2379, :2418; the `!Stop() { <-C }` drains run only when the value was not received, and the receive at :2405 sets it to nil, so no drain can block (go.mod `go 1.26.11`, synchronous timer channels).
 - protocol/protocol.go:1690 and :2015 `time.NewTicker(time.Millisecond)`: 1 ms polling for admission and snapshot waits (by design; no wakeup channel).
 - protocol/protocol.go:1914 `time.After(time.Millisecond)`: 1 ms polling in `waitForPendingBudget`; allocates a timer per iteration.
-- protocol/protocol.go:652 `time.Sleep(2ms)` polling in `WaitSendQueueDrained`.
+- protocol/protocol.go:652 `time.Sleep(2ms)` polling in `WaitSendQueueDrained`. Modelled in `specs/engine/EngineSendDrained.tla`: it answered drained once the bytes left the queue, before the bearer took them; fixed on `fix/protocol-send-drained-written`.
 
 **Lock-order edges**
 
@@ -2335,7 +2335,7 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 14 | `MuxEgress` | muxer | (none found) | Fairness between Praos and Leios senders. |
 | 15 | `LeiosVotesLifecycle`, `LeiosNotifyServerRestart` | leiosvotes, leiosnotify | C10, C11, C18, C19, C21 | Experimental protocols; unjoined loops. **Modelled** (`specs/leios-peras`); two defects fixed on `fix/leios-dmq-lifecycle`. |
 | 16 | `DmqReplayShared`, `LmsReplayTokens` | DMQ local protocols | C22, C23 | Cross-connection shared state through one `Config`. **Modelled** (`specs/dmq`); no defect. |
-| 17 | `PeerSharingExchange`, `MuxStartGate`, `AuthOpCertCache` | peersharing, muxer, `protocol/common` | A5 | Small; A5 is ruled out by `Connection`'s ordering. |
+| 17 | `PeerSharingExchange`, `MuxStartGate`, `AuthOpCertCache` | peersharing, muxer, `protocol/common` | A5 | Small; A5 is ruled out by `Connection`'s ordering. `AuthOpCertCache` **modelled** (`specs/dmq`): two defects, fixed on `fix/dmq-commit-duplicate-counter` and `fix/dmq-verify-with-slot-counter`. |
 
 Status (2026-11-24, gOuroboros `5c4f31c1`): `PipelineLifecycle` is in
 `specs/pipeline-cbor` and `HashCacheSpin` and `TxScopedMemo` are in
@@ -2462,7 +2462,7 @@ Models read: keepalive/KeepAliveLifecycle.tla; connection/{ConnectionShutdown,Mu
 | root `connection.go` | ConnectionShutdown: `onceClose`/`doneChan`, both forwarders, `forwardError` vs close panic, shutdown order, Close waits `connClosedChan`, late `waitGroup.Go` as "a goroutine Wait no longer waits for" (logical form of hazard 2), `lockProtocolSetup`. KeepAliveLifecycle: `stopProtocols` vs server restart. | Hazard 1 (Close during Dial: the unsynchronized `doneChan`/`muxer`/`handshake` writes and the muxer never stopped); hazard 2 as a Go WaitGroup rule; hazard 3 (protocol and muxer goroutines outliving Close); the handshake timer path and `FinishedFunc` after timeout (hazard 4); `protocolMu` vs `Start` after unlock. |
 | `muxer` | MuxIngress: enqueue limits, connection budget, backpressure waits, forward returning budget. MuxHandover: suspend/resume, carry, tombstones, unregister on Stop, everything dropped on muxer stop. | `sync.Cond` Wait/Broadcast; `segmentChannel.stop` vs metrics callbacks (`callbackMu`, `callbacksDone`, `forwarderDone`); readLoop sweep under `protocolReceiversMutex`; `fenceRegistrations` vs `RegisterProtocol`; egress `acquire`/`release`/`remove` with `done`; `startChan` gating (hazard 1); `segmentSender` stop window; cleanup goroutine and conn close (hazard 2). |
 | `protocol` engine | EngineAdmission: snapshot/generation, `peerAgencyReserved`, 1 ms admission wait, recvLoop's peer-agency wait. EnginePipelining: `sendReadyChan` token, deferred transitions, `resolvePipelinedDequeue`, reply reservations, `waitForInboundSnapshot`. MuxHandover: `stop(true)` waiting on readLoop, carry. | Timers of any kind (known hazard 1); `lifecycleMu` Start/Stop/EnsureRegistered ordering; which loops `Stop`/`DoneChan` join (hazard 3); `MessageReceivedFunc` blocking `StopForRestart` (hazard 2); pre-Start `SendMessage` (hazard 4); `pendingRecvBytes` budget wait. |
-| `protocol/common` | none | `MessageAuthenticator.mu` snapshot/commit (no hazard found) |
+| `protocol/common` | AuthOpCertCache: snapshot, commit, the deprecated direct path (two defects: a duplicate refused for its counter at commit; a refused direct verification records its counter) | `RemoveKESOpCertCacheEntry`; expired-id pruning |
 | `protocol/handshake` | Handshake/HandshakeSimOpen: negotiation results, silent-peer timeout as an abstract "gives up" | the engine timer racing `handleProposeVersions`; `FinishedFunc` -> `handshakeFinishedChan` vs `handshakeTimer` in connection.go |
 | `protocol/keepalive` | KeepAlive: protocol rules. KeepAliveLifecycle: server `protocolMu`, `stopped`, StopForRestart -> Install -> StartNew vs Server.Stop and connection shutdown. | Client timer: `AfterFunc` callback, `timerMutex`, `cookieMutex`/`inFlight`, done watcher, `Client.Stop` window (hazard 1). |
 
