@@ -2168,7 +2168,10 @@ evidence, branch or PR. Branches are local and unpushed.
   instance a `MsgQuit` restart retired reached `ResponseSentFunc` after
   `Stop` returned (`LeiosNotifyServerRestartRetiredBug.cfg`;
   `TestStopWaitsForSourceOfRetiredRun`; `bf0d7a47`, `handleQuit` records the
-  retired instance and `Stop` waits for it). (2) Both clients' `Sync` set the
+  retired instance and `Stop` waits for it; review: that fix made `Stop`
+  from a callback wait for the other instances, and two callbacks in `Stop`
+  deadlock, `LeiosNotifyServerRestartCallbackStopDeadlockBug.cfg`; `97045bac`
+  makes a callback's `Stop` only signal). (2) Both clients' `Sync` set the
   loop flag before `RunLoop` and ignored its result, so once the connection
   had begun to close `Sync` returned nil with no loop
   (`LeiosVotesLifecycleRunLoopBug.cfg`; `TestSyncOutcomeFollowsLifecycle`,

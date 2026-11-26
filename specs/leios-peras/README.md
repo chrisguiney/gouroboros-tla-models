@@ -353,6 +353,10 @@ instance and waits for its goroutines.
 | `LeiosNotifyServerRestart.cfg`: the fix, `Stop` also waits for retired instances | 90 | passes |
 | `LeiosNotifyServerRestartQuitUnheldBug.cfg`: mutation, `MsgQuit` handled before the reply | 149 | **fails** `ReplyOnOwnInstance` |
 | `LeiosNotifyServerRestartProbeBug.cfg`: probe, `Stop` after the restart while the retired source runs | 90 | violated, as expected |
+| `LeiosNotifyServerRestartCallbackStopWaitsBug.cfg`: `bf0d7a47`, callbacks call `Stop` | 87 | **fails** `CallbackStopDoesNotWait` |
+| `LeiosNotifyServerRestartCallbackStopDeadlockBug.cfg`: `bf0d7a47`, without that invariant | 217 | **fails**: deadlock |
+| `LeiosNotifyServerRestartCallbackStop.cfg`: `97045bac`, a callback's `Stop` only signals | 305 | passes all five invariants, no deadlock |
+| `LeiosNotifyServerRestartCallbackStopProbeBug.cfg`: probe, both callbacks call `Stop` after the restart | 167 | violated, as expected |
 
 **Defect: `Stop` returns before a retired run's callbacks.** After a restart,
 `Stop` joins only the new instance. A source that ignores `QuitChan` is still
@@ -365,6 +369,21 @@ retired instance and `Stop` waits for it. `ReplyOnOwnInstance` and
 because `MsgQuit` is held back until the reply is sent, so the request
 goroutine's later `ProtocolInstance()` calls cannot reach the new instance
 with a send.
+
+**Defect in the fix: `Stop` from a callback waits (review of `bf0d7a47`).**
+`Stop`'s doc says that with a callback's `Context` it returns without
+waiting. At `bf0d7a47` it passed that context to every instance's join, and
+`Protocol.join` skips only the instance the callback belongs to, so a
+callback's `Stop` waited for the current and retired instances. With
+`CallbackStop` the first run's `ResponseSentFunc` (on the retired instance
+after the restart) and the second run's `RequestNextFunc` may each call
+`Stop` with their own context: at `bf0d7a47` (`"skipOwn"`) the first waits
+for the second instance and the second for the retired one, a deadlock; two
+retired runs whose callbacks call `Stop` form the same cycle. `97045bac`
+(`"signal"`): a callback context of the current or any retired instance only
+signals stop, and the user's `Stop` still waits for both instances
+(`NoCallbackAfterStop` now covers the second instance's source). Go:
+`TestStopFromCallbackDoesNotWaitForRetiredRun`.
 
 ## LeiosVotes and LeiosNotify client lifecycle (`LeiosVotesLifecycle.tla`)
 
@@ -468,8 +487,9 @@ ObjectDiffusion window rules (`TestObjectDiffusionWindowAndAgencyRules`).
 Byte and count limits, message validation (LeiosFetch reply binding, vote
 decoding), timeouts beyond the table above, LeiosFetch's range streams beyond
 one reply, Peras non-blocking requests and certificates.
-`LeiosNotifyServerRestart.tla` models one request of one run; a second
-restart and pipelined requests are not modelled.
+`LeiosNotifyServerRestart.tla` models one request of the first run and,
+with `CallbackStop`, the second run's source; a second restart and pipelined
+requests are not modelled.
 
 ## Running it
 

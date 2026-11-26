@@ -33,6 +33,22 @@
 (*   fix:       handleQuit records the retired instance and Stop waits for *)
 (*              it too (LeiosNotifyServerRestart.cfg).                     *)
 (*                                                                         *)
+(* Stop from a callback. Stop's doc says that with the Context of a        *)
+(* CallbackContext it returns without waiting, since it would wait for the *)
+(* goroutine running the callback. CallbackStop lets two callbacks call    *)
+(* Stop with their own context: the first run's ResponseSentFunc (request  *)
+(* or late goroutine, on the retired instance once the restart happened)   *)
+(* and the second run's RequestNextFunc (on the second instance).          *)
+(*   bf0d7a47:  Protocol.join skips only the instance whose callback       *)
+(*              context it gets, so a callback's Stop waits for every      *)
+(*              other instance, current and retired. Each of the two       *)
+(*              callbacks then waits for the other's instance: deadlock    *)
+(*              (LeiosNotifyServerRestartCallbackStopWaitsBug.cfg,         *)
+(*              LeiosNotifyServerRestartCallbackStopDeadlockBug.cfg). Two  *)
+(*              retired runs whose callbacks call Stop form the same cycle.*)
+(*   97045bac:  a callback context of the current or a retired instance    *)
+(*              only signals stop (LeiosNotifyServerRestartCallbackStop.cfg).*)
+(*                                                                         *)
 (* Granularity: one step per select choice, per send, per user callback    *)
 (* start and return, per lock-protected update.                            *)
 (*                                                                         *)
@@ -43,6 +59,8 @@
 (*                        instance, the one that read it.                  *)
 (*   ResponseSentOnce     ResponseSentFunc sees the notification at most   *)
 (*                        once.                                            *)
+(*   CallbackStopDoesNotWait  Stop called from a callback waits for no      *)
+(*                        instance.                                        *)
 (*                                                                         *)
 (* Sources (README.md has links):                                          *)
 (*   [G3] gOuroboros 7cd17437, protocol/protocol.go: a message whose state *)
@@ -68,8 +86,11 @@ EXTENDS Naturals
 CONSTANTS
     JoinRetired,    \* TRUE: Stop also waits for instances retired by a
                     \*   restart (the fix); FALSE: 7cd17437
-    HoldQuit        \* TRUE: MsgQuit is handled only once the request is
+    HoldQuit,       \* TRUE: MsgQuit is handled only once the request is
                     \*   answered [G3]; FALSE: a mutation that handles it at once
+    CallbackStop    \* "none": no callback calls Stop; "skipOwn": a callback's
+                    \*   Stop waits for every instance but its own (bf0d7a47);
+                    \*   "signal": a callback's Stop only signals (97045bac)
 
 \* In English: "The two protocol instances: the first run's and the one the
 \* restart installs."
@@ -91,11 +112,22 @@ VARIABLES
     replyOn,    \* the instance the answer went out on, 0 before it does
     sentCalls,  \* how many times ResponseSentFunc has been called
     stopper,    \* Server.Stop: "idle", "joining" or "returned"
-    joinSet     \* the instances Stop waits for
+    joinSet,    \* the instances Stop waits for
+    src2,       \* the second run's RequestNextFunc: "none", "running" or
+                \*   "done"
+    cbStop,     \* cbStop[o]: Stop called by a callback of instance o:
+                \*   "idle", "joining" or "returned"
+    cbJoin,     \* cbJoin[o]: the instances that Stop waits for
+    cbAt        \* cbAt[o]: the current instance when that Stop was called,
+                \*   0 before
 
-\* Literally: "vars is defined as the tuple of all thirteen variables."
+\* Literally: "vars is defined as the tuple of all seventeen variables."
 vars == <<cur, inst, retired, stopped, src, req, late, quitRead, quitter,
-          replyOn, sentCalls, stopper, joinSet>>
+          replyOn, sentCalls, stopper, joinSet, src2, cbStop, cbJoin, cbAt>>
+
+\* Literally: "others is defined as the tuple of src2, cbStop, cbJoin and
+\*   cbAt", the variables only the callback Stop steps change.
+others == <<src2, cbStop, cbJoin, cbAt>>
 
 \* In English: "The request has been read on the first instance, whose
 \* source and request goroutines are running; nothing else has happened."
@@ -103,7 +135,8 @@ vars == <<cur, inst, retired, stopped, src, req, late, quitRead, quitter,
 \*   and 2 to "unborn", retired is empty, stopped is false, src equals
 \*   "running", req equals "wait", late equals "none", quitRead is false,
 \*   quitter equals "idle", replyOn equals 0, sentCalls equals 0, stopper
-\*   equals "idle", and joinSet is empty."
+\*   equals "idle", joinSet is empty, src2 equals "none", and no callback
+\*   has called Stop."
 Init ==
     /\ cur = 1
     /\ inst = [i \in Instances |-> IF i = 1 THEN "running" ELSE "unborn"]
@@ -118,6 +151,10 @@ Init ==
     /\ sentCalls = 0
     /\ stopper = "idle"
     /\ joinSet = {}
+    /\ src2 = "none"
+    /\ cbStop = [o \in Instances |-> "idle"]
+    /\ cbJoin = [o \in Instances |-> {}]
+    /\ cbAt = [o \in Instances |-> 0]
 
 -----------------------------------------------------------------------------
 (* The first instance's goroutines. *)
@@ -131,6 +168,7 @@ SourceReturns ==
     /\ src' = "returned"
     /\ UNCHANGED <<cur, inst, retired, stopped, req, late, quitRead, quitter,
                    replyOn, sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "The request goroutine takes the answer and sends it on the
 \* instance ProtocolInstance returns now. If the answer is ready the select
@@ -143,6 +181,7 @@ ReqAnswer ==
     /\ req' = "send"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, late, quitRead, quitter,
                    sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "The send has returned; the goroutine calls ResponseSentFunc."
 \* Literally: "ReqCallback is defined as: req equals "send", and req
@@ -152,16 +191,19 @@ ReqCallback ==
     /\ req' = "callback"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, late, quitRead, quitter,
                    replyOn, sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "ResponseSentFunc returns and the request goroutine ends."
 \* Literally: "ReqCallbackEnds is defined as: req equals "callback",
 \*   sentCalls goes up by one, and req becomes "done"."
 ReqCallbackEnds ==
     /\ req = "callback"
+    /\ cbStop[1] # "joining"
     /\ sentCalls' = sentCalls + 1
     /\ req' = "done"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, late, quitRead, quitter,
                    replyOn, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "QuitChan closed while the source still runs: the request
 \* goroutine starts the late goroutine on the instance ProtocolInstance
@@ -174,6 +216,7 @@ ReqQuit ==
     /\ req' = "cancel"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, quitRead, quitter,
                    replyOn, sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "MsgCanceled goes out, and the request goroutine ends."
 \* Literally: "ReqCancelSent is defined as: req equals "cancel", replyOn
@@ -184,6 +227,7 @@ ReqCancelSent ==
     /\ req' = "done"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, late, quitRead, quitter,
                    sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "The first instance is stopped while the request waits: the
 \* goroutine leaves the late goroutine to release the notification and
@@ -197,6 +241,7 @@ ReqDone ==
     /\ req' = "done"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, quitRead, quitter,
                    replyOn, sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "The late goroutine gets the notification and calls
 \* ResponseSentFunc with the reason it was not sent."
@@ -207,16 +252,19 @@ LateCallback ==
     /\ late' = "callback"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, req, quitRead, quitter,
                    replyOn, sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "ResponseSentFunc returns and the late goroutine ends."
 \* Literally: "LateEnds is defined as: late equals "callback", sentCalls
 \*   goes up by one, and late becomes "done"."
 LateEnds ==
     /\ late = "callback"
+    /\ cbStop[1] # "joining"
     /\ sentCalls' = sentCalls + 1
     /\ late' = "done"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, req, quitRead, quitter,
                    replyOn, stopper, joinSet>>
+    /\ UNCHANGED others
 
 -----------------------------------------------------------------------------
 (* The client's MsgQuit and the restart. *)
@@ -230,6 +278,7 @@ QuitRead ==
     /\ quitRead' = TRUE
     /\ UNCHANGED <<cur, inst, retired, stopped, src, req, late, quitter,
                    replyOn, sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "handleQuit runs once the request is answered (or at once,
 \* in the mutation): it sends MsgDone, stops the first instance with
@@ -247,6 +296,7 @@ QuitHandled ==
     /\ quitter' = "restarting"
     /\ UNCHANGED <<cur, stopped, src, req, late, quitRead, replyOn,
                    sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 \* In English: "initProtocol, under the server's lock: unless Stop has run,
 \* the second instance becomes current and starts."
@@ -262,6 +312,7 @@ Restart ==
                /\ inst' = [inst EXCEPT ![2] = "running"]
     /\ UNCHANGED <<retired, stopped, src, req, late, quitRead, replyOn,
                    sentCalls, stopper, joinSet>>
+    /\ UNCHANGED others
 
 -----------------------------------------------------------------------------
 (* Server.Stop, called by the user with a context that does not end. *)
@@ -280,16 +331,19 @@ StopStarts ==
     /\ stopper' = "joining"
     /\ UNCHANGED <<cur, retired, src, req, late, quitRead, quitter, replyOn,
                    sentCalls>>
+    /\ UNCHANGED others
 
-\* In English: "Instance i has no goroutine left. Only the first instance
-\* runs any in this model: the source, the request and the late goroutine.
-\* The engine loops end once an instance is stopped, so they are not
-\* modelled."
-\* Literally: "Quiet of i is defined as: i equals 2, or src does not equal
-\*   "running" and req equals "done" and late is "none" or "done"."
+\* In English: "Instance i has no goroutine left: the first instance's
+\* source, request and late goroutines have ended, or the second
+\* instance's source has. The engine loops end once an instance is
+\* stopped, so they are not modelled."
+\* Literally: "Quiet of i is defined as: i equals 2 and src2 is "none" or
+\*   "done"; or i equals 1 and src does not equal "running" and req equals
+\*   "done" and late is "none" or "done"."
 Quiet(i) ==
-    \/ i = 2
-    \/ /\ src # "running"
+    \/ i = 2 /\ src2 \in {"none", "done"}
+    \/ /\ i = 1
+       /\ src # "running"
        /\ req = "done"
        /\ late \in {"none", "done"}
 
@@ -303,13 +357,84 @@ StopReturns ==
     /\ stopper' = "returned"
     /\ UNCHANGED <<cur, inst, retired, stopped, src, req, late, quitRead,
                    quitter, replyOn, sentCalls, joinSet>>
+    /\ UNCHANGED others
+
+-----------------------------------------------------------------------------
+(* The second run's source, and Stop called from a callback. *)
+
+\* In English: "The second instance reads the client's next request and
+\* runs RequestNextFunc on one of its RunLoop goroutines."
+\* Literally: "Src2Starts is defined as: CallbackStop does not equal
+\*   "none", cur equals 2, inst of 2 equals "running", src2 equals "none",
+\*   and src2 becomes "running"."
+Src2Starts ==
+    /\ CallbackStop # "none"
+    /\ cur = 2 /\ inst[2] = "running" /\ src2 = "none"
+    /\ src2' = "running"
+    /\ UNCHANGED <<cur, inst, retired, stopped, src, req, late, quitRead,
+                   quitter, replyOn, sentCalls, stopper, joinSet, cbStop,
+                   cbJoin, cbAt>>
+
+\* In English: "The second run's source returns, unless it is inside Stop."
+\* Literally: "Src2Returns is defined as: src2 equals "running", cbStop of
+\*   2 does not equal "joining", and src2 becomes "done"."
+Src2Returns ==
+    /\ src2 = "running" /\ cbStop[2] # "joining"
+    /\ src2' = "done"
+    /\ UNCHANGED <<cur, inst, retired, stopped, src, req, late, quitRead,
+                   quitter, replyOn, sentCalls, stopper, joinSet, cbStop,
+                   cbJoin, cbAt>>
+
+\* In English: "A user callback of instance o is running: ResponseSentFunc
+\* on the first instance, RequestNextFunc on the second."
+\* Literally: "InCallback of o is defined as: o equals 1 and req or late
+\*   equals "callback"; or o equals 2 and src2 equals "running"."
+InCallback(o) ==
+    \/ o = 1 /\ (req = "callback" \/ late = "callback")
+    \/ o = 2 /\ src2 = "running"
+
+\* In English: "A callback of instance o calls Stop with its
+\* CallbackContext's Context. Stop marks the server stopped and stops the
+\* current instance, as from the user. bf0d7a47 then waits for every
+\* instance it would join but the callback's own; 97045bac waits for none."
+\* Literally: "CallbackStopStarts of o is defined as: CallbackStop does not
+\*   equal "none", InCallback of o, cbStop of o equals "idle", stopped
+\*   becomes true, inst of cur becomes "stopped", cbJoin of o becomes (if
+\*   CallbackStop equals "skipOwn" then the set containing cur joined with
+\*   retired, without o, else empty), cbAt of o becomes cur, and cbStop of
+\*   o becomes "joining"."
+CallbackStopStarts(o) ==
+    /\ CallbackStop # "none"
+    /\ InCallback(o) /\ cbStop[o] = "idle"
+    /\ stopped' = TRUE
+    /\ inst' = [inst EXCEPT ![cur] = "stopped"]
+    /\ cbJoin' = [cbJoin EXCEPT ![o] = IF CallbackStop = "skipOwn"
+                                          THEN ({cur} \cup retired) \ {o}
+                                          ELSE {}]
+    /\ cbAt' = [cbAt EXCEPT ![o] = cur]
+    /\ cbStop' = [cbStop EXCEPT ![o] = "joining"]
+    /\ UNCHANGED <<cur, retired, src, req, late, quitRead, quitter, replyOn,
+                   sentCalls, stopper, joinSet, src2>>
+
+\* In English: "That Stop returns once every instance it waits for is
+\* quiet, at once when it waits for none."
+\* Literally: "CallbackStopReturns of o is defined as: cbStop of o equals
+\*   "joining", every i in cbJoin of o is Quiet, and cbStop of o becomes
+\*   "returned"."
+CallbackStopReturns(o) ==
+    /\ cbStop[o] = "joining"
+    /\ \A i \in cbJoin[o] : Quiet(i)
+    /\ cbStop' = [cbStop EXCEPT ![o] = "returned"]
+    /\ UNCHANGED <<cur, inst, retired, stopped, src, req, late, quitRead,
+                   quitter, replyOn, sentCalls, stopper, joinSet, src2,
+                   cbJoin, cbAt>>
 
 \* In English: "Everything that can happen has happened."
 \* Literally: "Finished is defined as: stopper equals "returned", and Quiet
-\*   of 1, and quitter is "idle" or "done"."
+\*   of 1 and of 2, and quitter is "idle" or "done"."
 Finished ==
     /\ stopper = "returned"
-    /\ Quiet(1)
+    /\ Quiet(1) /\ Quiet(2)
     /\ quitter \in {"idle", "done"}
 
 \* In English: "A step is one of the steps above, or nothing once finished."
@@ -322,6 +447,8 @@ Next ==
     \/ LateCallback \/ LateEnds
     \/ QuitRead \/ QuitHandled \/ Restart
     \/ StopStarts \/ StopReturns
+    \/ Src2Starts \/ Src2Returns
+    \/ \E o \in Instances : CallbackStopStarts(o) \/ CallbackStopReturns(o)
     \/ Finished /\ UNCHANGED vars
 
 \* Literally: "Spec is defined as: Init holds at the start, and always,
@@ -345,12 +472,23 @@ TypeOK ==
     /\ sentCalls \in 0..2
     /\ stopper \in {"idle", "joining", "returned"}
     /\ joinSet \subseteq Instances
+    /\ src2 \in {"none", "running", "done"}
+    /\ cbStop \in [Instances -> {"idle", "joining", "returned"}]
+    /\ cbJoin \in [Instances -> SUBSET Instances]
+    /\ cbAt \in [Instances -> {0} \cup Instances]
 
-\* In English: "Once Stop has returned nil, no goroutine of the first
-\* instance is left: no user callback runs or can still start."
+\* In English: "Once the user's Stop has returned nil, no goroutine of
+\* either instance is left: no user callback runs or can still start."
 \* Literally: "NoCallbackAfterStop is defined as: stopper equals "returned"
-\*   implies Quiet of 1."
-NoCallbackAfterStop == stopper = "returned" => Quiet(1)
+\*   implies Quiet of 1 and Quiet of 2."
+NoCallbackAfterStop == stopper = "returned" => Quiet(1) /\ Quiet(2)
+
+\* In English: "Stop called from a callback waits for no instance, as its
+\* doc says." It fails when a callback's Stop joins another instance,
+\* which may be running a callback that is itself in Stop.
+\* Literally: "CallbackStopDoesNotWait is defined as: for every o in
+\*   Instances, cbJoin of o is empty."
+CallbackStopDoesNotWait == \A o \in Instances : cbJoin[o] = {}
 
 \* In English: "The answer goes out on the instance that read the request."
 \* Literally: "ReplyOnOwnInstance is defined as: replyOn is 0 or 1."
@@ -364,4 +502,10 @@ ResponseSentOnce == sentCalls <= 1
 \* while the retired instance's source still runs."
 ProbeStopAfterRestartWhileSourceRuns ==
     ~(stopper = "joining" /\ cur = 2 /\ src = "running")
+
+\* Probe, EXPECTED to be violated: "The retired run's callback and the
+\* second run's source never both call Stop after the restart", the
+\* interleaving that deadlocks at bf0d7a47.
+ProbeCallbacksStopAfterRestart ==
+    ~(cbAt[1] = 2 /\ cbAt[2] = 2)
 =============================================================================
