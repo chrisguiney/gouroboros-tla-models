@@ -116,11 +116,11 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N59](#n59) | network | LeiosNotify: source consulted when requests are pipelined behind `MsgQuit` | Every outstanding request answered `MsgCanceled`, then `MsgDone`; silent on how often the source is consulted | main: every request answered; the source is asked zero or one time, by whether the handler runs before the read loop reaches `MsgQuit` | Not stated | conforms | Test assertion fixed on local branch `fix/leiosnotify-pipelined-cancel-flake`, no PR (model `leios-peras` `LeiosNotifyPipelinedQuitAssumptionBug.cfg`) |
 | [N60](#n60) | network | Message submission V2: the responder after the requester's `MsgDone` | The responder is restarted in its initial state; dmq-node's V2 inbound sends `MsgDone` on demotion and runs again on the same connection when the peer is promoted | `7cd17437`: the V2 `Client` (the responder) stays in `StDone`, so the next run's first request is never answered | "should be restarted in its initial state" | does not conform | Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR (model `dmq` `DmqRestartSubmissionV2NoRestartBug.cfg`) |
 | [N61](#n61) | network | Local-tx-monitor `Release()` with no snapshot acquired | Not expressible: the typed client offers `MsgRelease` only while acquired | `7cd17437`: sends `MsgRelease` from `Idle`; the send loop refuses it and the connection is torn down while `Release` returns nil | `MsgRelease` only from `StAcquired` | does not conform | Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR (model `localtx` `LocalTxMonitorClientCallsReleaseIdleBug.cfg`) |
-| [N62](#n62) | network | Node-to-node version 16 data carries the Peras field | `7cd17437`: version 16 sends and requires five fields, the fifth Peras support; version 17 unknown | Main: 16 has four fields (tx-submission outbound V2), Peras moved to 17; the release (cardano-diffusion 1.3.0.1): 16 with the Peras field | Version 17 "Experimental, support Peras mini-protocols" | conforms to the release, not to main | Recorded, not changed (model `handshake` `HandshakeVersionDataPerasV16Bug.cfg`, `HandshakeVersionDataReleased.cfg`); gOuroboros already treats 16 as tx-submission outbound V2 |
-| [N63](#n63) | network | DMQ node-to-node agreed peer sharing | Disabled when the agreed diffusion mode is initiator-only | `7cd17437`: Cardano rule only, peer sharing kept for an initiator-only agreement | CIP-0137 silent | does not conform | Fixed on local branch `fix/handshake-dmq-peer-sharing` `1c208857`, no PR (model `handshake` `HandshakeVersionDataDMQRuleBug.cfg`) |
-| [N64](#n64) | network | Peer sharing value outside 0 and 1 (node-to-node from 13, DMQ) | Decode failure: `MsgRefuse` DecodeError, a client error | `7cd17437`: any unsigned integer accepted, read as enabled | CDDL `peerSharing = 0..1` | does not conform | Fixed on local branch `fix/handshake-peer-sharing-range` `50a554d5`, no PR (model `handshake` `HandshakeVersionDataPeerSharingRangeBug.cfg`) |
-| [N65](#n65) | network | Data a handshake client ends with on `MsgAcceptVersion` | Its own agreement of its data with the accept's data | `7cd17437`: the accept's data as sent | Silent | conforms (no wrong outcome against a server that sends the agreed data) | Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR (model `handshake` `HandshakeVersionDataClientRawEndBug.cfg`); matters against gOuroboros servers from before #3194 |
-| [N66](#n66) | network | Version-table keys a uint16 cannot hold | Skipped like any key the codec does not recognise | `7cd17437`: the whole `MsgProposeVersions` or `MsgQueryReply` fails to decode | Keys are version numbers | does not conform | Fixed on local branch `fix/handshake-skip-wide-version-keys` `ccf4f845`, no PR (model `handshake` `HandshakeVersionDataWideKeyBug.cfg`) |
+| [N63](#n63) | network | Node-to-node version 16 data carries the Peras field | `7cd17437`: version 16 sends and requires five fields, the fifth Peras support; version 17 unknown | Main: 16 has four fields (tx-submission outbound V2), Peras moved to 17; the release (cardano-diffusion 1.3.0.1): 16 with the Peras field | Version 17 "Experimental, support Peras mini-protocols" | conforms to the release, not to main | Recorded, not changed (model `handshake` `HandshakeVersionDataPerasV16Bug.cfg`, `HandshakeVersionDataReleased.cfg`); gOuroboros already treats 16 as tx-submission outbound V2 |
+| [N64](#n64) | network | DMQ node-to-node agreed peer sharing | Disabled when the agreed diffusion mode is initiator-only | `7cd17437`: Cardano rule only, peer sharing kept for an initiator-only agreement | CIP-0137 silent | does not conform | Fixed on local branch `fix/handshake-dmq-peer-sharing` `1c208857`, no PR (model `handshake` `HandshakeVersionDataDMQRuleBug.cfg`) |
+| [N65](#n65) | network | Peer sharing value outside 0 and 1 (node-to-node from 13, DMQ) | Decode failure: `MsgRefuse` DecodeError, a client error | `7cd17437`: any unsigned integer accepted, read as enabled | CDDL `peerSharing = 0..1` | does not conform | Fixed on local branch `fix/handshake-peer-sharing-range` `50a554d5`, no PR (model `handshake` `HandshakeVersionDataPeerSharingRangeBug.cfg`) |
+| [N66](#n66) | network | Data a handshake client ends with on `MsgAcceptVersion` | Its own agreement of its data with the accept's data | `7cd17437`: the accept's data as sent | Silent | conforms (no wrong outcome against a server that sends the agreed data) | Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR (model `handshake` `HandshakeVersionDataClientRawEndBug.cfg`); matters against gOuroboros servers from before #3194 |
+| [N67](#n67) | network | Version-table keys a uint16 cannot hold | Skipped like any key the codec does not recognise | `7cd17437`: the whole `MsgProposeVersions` or `MsgQueryReply` fails to decode | Keys are version numbers | does not conform | Fixed on local branch `fix/handshake-skip-wide-version-keys` `ccf4f845`, no PR (model `handshake` `HandshakeVersionDataWideKeyBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -875,7 +875,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR: `Release` returns `ErrNotAcquired` and sends nothing, as the local-state-query client already does
 
-### N62
+### N63
 
 **Node-to-node version 16 data carries the Peras field** (kind 2: follows the reference release, not main)
 
@@ -886,7 +886,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** conforms to the release; does not conform to main
 - **Status.** Recorded, not changed: moving Peras to 17 breaks gOuroboros against released nodes that enable 16, so it waits for the reference release. `TestNodeToNodeVersionsMatchReference` (branch `test/handshake-versions`) pins the released shape
 
-### N63
+### N64
 
 **DMQ node-to-node agreed peer sharing** (kind 1: fixed on a local branch)
 
@@ -897,7 +897,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/handshake-dmq-peer-sharing` `1c208857`, no PR: the agreement takes the version and applies the DMQ rule to DMQ node-to-node versions. `TestServerAgreesDMQPeerSharingAsReference` fails 6 of 32 cases without it
 
-### N64
+### N65
 
 **Peer sharing value outside 0 and 1** (kind 1: fixed on a local branch)
 
@@ -908,7 +908,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/handshake-peer-sharing-range` `50a554d5`, no PR; versions 11 and 12 keep their three modes
 
-### N65
+### N66
 
 **Data a handshake client ends with on `MsgAcceptVersion`** (kind 2: differs; both within the spec)
 
@@ -917,9 +917,9 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/Handshake/Client.hs` 147-172
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/handshake/client.go` `handleAcceptVersion`
 - **Verdict.** conforms
-- **Status.** Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR; `TestClientEndsWithItsAgreement` fails without it. It calls `agreedVersionData` with the two-argument form; merged after N63's branch it must pass the version
+- **Status.** Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR; `TestClientEndsWithItsAgreement` fails without it. It calls `agreedVersionData` with the two-argument form; merged after N64's branch it must pass the version
 
-### N66
+### N67
 
 **Version-table keys a uint16 cannot hold** (kind 1: fixed on a local branch)
 

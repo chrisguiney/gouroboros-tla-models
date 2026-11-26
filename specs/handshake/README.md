@@ -217,24 +217,24 @@ left to `Handshake.tla`. Versions 14 to 17 stand for Cardano node-to-node
 
 What it found, at gOuroboros `7cd17437`:
 
-- **Peras at 16** (DRIFT N62). Reference main moved the Peras field to the
+- **Peras at 16** (DRIFT N63). Reference main moved the Peras field to the
   new version 17 and made 16 four fields [V1][V2]; gOuroboros follows the
   release, where 16 has it. `HandshakeVersionDataPerasV16ConnectBug.cfg`:
   a main client offers only 16, the gOuroboros server refuses it with
   DecodeError. Against the release everything passes
   (`HandshakeVersionDataReleased.cfg`). Recorded, not changed.
-- **DMQ peer sharing** (N63). dmq-node disables peer sharing when the
+- **DMQ peer sharing** (N64). dmq-node disables peer sharing when the
   agreed mode is initiator-only [V4]; gOuroboros applied the Cardano rule.
   Fixed on `fix/handshake-dmq-peer-sharing`.
-- **Peer sharing range** (N64). From version 13 only 0 and 1 decode [V1][V4];
+- **Peer sharing range** (N65). From version 13 only 0 and 1 decode [V1][V4];
   gOuroboros accepted any number. Fixed on `fix/handshake-peer-sharing-range`.
-- **The client's end data** (N65). The reference client ends with its own
+- **The client's end data** (N66). The reference client ends with its own
   agreement of its data with the accept's [V6]; gOuroboros kept the
   accept's data, which differs only against a server that does not send the
   agreement, such as gOuroboros before #3194
   (`HandshakeVersionDataClientRawEndBug.cfg`). Fixed on
   `fix/handshake-client-agreed-data`.
-- **Keys a uint16 cannot hold** (N66). The reference skips them [V5];
+- **Keys a uint16 cannot hold** (N67). The reference skips them [V5];
   gOuroboros failed the whole message. Fixed on
   `fix/handshake-skip-wide-version-keys`.
 
