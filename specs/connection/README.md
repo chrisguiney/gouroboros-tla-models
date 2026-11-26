@@ -18,6 +18,7 @@ first.
 | 4b | `ConnectionShutdownAgency.tla` | When the peer closes, is it an error? |
 | 5 | `ConnectionTeardown.tla` | Can `Close` during `Dial` leak the muxer, or a late `waitGroup.Go` panic? |
 | 5 | `ConnectionCloseConcurrent.tla` | Can callbacks closing one connection at once wait for each other? |
+| 7 | `ConnectionLifecycle.tla` | One connection end to end: does each teardown source deliver at most its one error, and nothing arrive before the handshake? |
 
 `make connection` runs all of them.
 
@@ -519,6 +520,56 @@ Run it with `make handshake-timeout`. Go tests (gOuroboros branch
 `TestHandshakeTimeoutTearsDownOnce`, `TestCloseBeforeHandshakeCreatesNone`
 (fails on `7cd17437`), `TestDialReturnsAfterTeardownOnClose` (fails on
 `7cd17437`).
+
+## Part 7: one connection end to end (`ConnectionLifecycle.tla`)
+
+The parts above each look at one piece. This one composes them into a single
+connection, from `setupConnection` to the end of shutdown, with every way it
+ends: `Close`, a peer EOF while idle or while a reply is owed, a protocol
+error (a violation, a keep-alive or any state timeout), a muxer error, the
+handshake timeout and a handshake refusal. Each piece is kept only at the
+grain the integration needs; the parts above hold the details (setup's
+select and the handshake instance: part 6; the trackMu fence and the muxer
+join: part 5; idle versus owed at EOF: part 4b, here one flag `busy`).
+
+Goroutines, at gOuroboros `7cd17437`: setup, the muxer's `readLoop` behind its
+start gate (`StartOnce` before the handshake, `Start` once the mini-protocols
+are registered), the muxer-error and protocol-error forwarders, shutdown, one
+callback, the user's `Close`, and the peer.
+
+| Invariant | Says |
+| --- | --- |
+| `NoMessageBeforeHandshake` | `readLoop` reads no mini-protocol message before the handshake finished and the mini-protocols are registered |
+| `GateOpensOnce` | the gate opens at most once, and `Start` is never dropped while `StartOnce`'s token waits |
+| `SetupResult` | setup returns nil only after the handshake, and an error only with the connection torn down |
+| `AtMostOneError` | no teardown puts two errors on `ErrorChan` |
+| `OneErrorPerCause` | after shutdown, `ErrorChan` carried one error if a forwarded error began it, none otherwise |
+| `NoErrorAfterQuietClose` | a teardown begun by `Close`, by setup, or by an idle peer EOF delivers no error |
+| `DoneBeforeError` | the error is delivered only once `doneChan`, every callback's `ConnectionDoneChan`, is closed |
+| `CloseJoins` | after `Close` returns no callback runs and both forwarders have returned |
+| `SetupReturns`, `TeardownFinishes`, `CloseReturns` | liveness, with weak fairness on the code's own steps |
+
+| Config | Design | Result |
+| --- | --- | --- |
+| `ConnectionLifecycleCurrent.cfg` | `7cd17437` | passes: the gate, setup's result, the joins and liveness |
+| `ConnectionLifecycleTwoErrorsBug.cfg` | `7cd17437` | **fails** `AtMostOneError`: a muxer error and a protocol error raised together are both delivered |
+| `ConnectionLifecycleErrorAfterCloseBug.cfg` | `7cd17437` | **fails** `NoErrorAfterQuietClose`: a forwarder that already took an error delivers it after `Close` (or the handshake timeout) began the teardown, because `forwardError` may pick the send once `doneChan` is closed |
+| `ConnectionLifecycleErrorBeforeDoneBug.cfg` | `7cd17437` | **fails** `DoneBeforeError`: `forwardError` runs before the forwarder's `requestClose` |
+| `ConnectionLifecycle.cfg` | fixed (`closeWithError`) | passes every invariant and property |
+| `ConnectionLifecycleGateEarlyBug.cfg` | mutation: `Start` instead of `StartOnce` | **fails** `NoMessageBeforeHandshake` |
+
+The fix, on gOuroboros `fix/connection-error-once`: both forwarders call
+`closeWithError`, which closes `doneChan` and then sends the error, inside
+`onceClose`. Only the forwarder that begins the shutdown delivers, and only
+after it has begun. Dingo's connection manager runs its close cleanup when
+`ErrorChan` yields; with this order a protocol callback still running can see
+the shutdown on `ConnectionDoneChan` (dingo-tla-models
+`specs/connmanager-lifecycle`).
+
+Go tests, each naming the invariant it binds to: `connection_lifecycle_test.go`
+(two real Connections over loopback TCP, one test per teardown source, both
+ends checked; passes at `7cd17437` and after the fix) and
+`connection_error_once_internal_test.go` (fails at `7cd17437`, passes after).
 
 ## What model `connection` found
 
