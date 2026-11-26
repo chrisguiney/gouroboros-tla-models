@@ -343,11 +343,10 @@ marker is accepted.
 
 ### Not modelled in this slice
 
-The `busyMutex`/`busyStateMutex` handoff and the :606 releaser, `Start` and a
-second generation, `Pipeline.Submit` blocking (it ends when `Stop` cancels the
-pipeline context), `failRequest` from `handleBlock` (a resolve on `recvLoop`
-under its own `deliveryMu`, the same shape as `BlockFunc`), the 250 ms
-`MsgClientDone` write (one non-blocking step: it is bounded), and the server.
+`Pipeline.Submit` blocking (it ends when `Stop` cancels the pipeline
+context) and the 250 ms `MsgClientDone` write (one non-blocking step: it is
+bounded). The busy lock, `Start` and a second generation, `failRequest` and
+the server are slices 5-10.
 
 ## Slice 4: a fetch during a restart (`BlockFetchClientReader.tla`)
 
@@ -368,6 +367,146 @@ and stopped once, and `Start` installs a second instance while the fetch runs.
 
 The second failure is the one the fix's comment names ("a concurrent Start
 may already have installed a newer one"); the Go test checks only the race.
+
+## Slices 5-10: lifecycle gaps after the lifecycle series
+
+Written against gOuroboros `origin/main` `7cd17437`, after the protocol
+lifecycle series (`Stop(ctx)`, the goroutine group, `StopContext` from
+callbacks) had merged. Each slice is small and answers one question slice 3
+listed as not modelled. Go tests are on gOuroboros branch
+`test/blockfetch-lifecycle`; the two fixes are on
+`fix/blockfetch-start-joins-previous` and `fix/blockfetch-busy-across-restart`
+(the second contains the first).
+
+### Slice 5: Start and a second generation (`BlockFetchRestart.tla`)
+
+Hazard B3 (`NoOldGenCallbackAfterStart`). A generation's ranges are
+resolved by its shutdown watcher (a protocol loop) or by a range deadline
+watcher (the client's goroutine group). `Stop` joins both. `Start`, after a
+`Stop`, waited only for the old instance's loops
+(`oldProto.Stop(context.Background())`), so the deadline watcher could still
+be in `RangeDoneFunc` when the new instance started: after a `Stop` whose
+context ended before its join, or while a `Stop` on another goroutine was
+still joining.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchRestartSerial.cfg`: main, `Stop` then `Start`, contexts never end | 44 | passes: a plain `Stop` joins the group |
+| `BlockFetchRestartStopCtxBug.cfg`: main, `Stop`'s context ends | | **fails** `NoOldGenCallbackAfterStart` |
+| `BlockFetchRestartConcurrentBug.cfg`: main, `Start` during a `Stop` | | **fails** `NoOldGenCallbackAfterStart` |
+| `BlockFetchRestart.cfg`: the fix, `Start` also waits for the old group; both triggers, three generations | 105 | passes |
+| `BlockFetchRestartProbeWindowBug.cfg` (probe) | | violated: `Start` is reached while the old deadline callback runs |
+| `BlockFetchRestartCbStartBug.cfg`: the fix, a deadline callback stops the client with its own context and calls `Start` | | deadlock: it waits for itself |
+
+The last row is why `Start`'s doc comment now says it must not be called
+from a callback. On main that was already true of the receive-loop and
+shutdown-watcher callbacks, whose `Start` waits for its own loop.
+`TestStartWaitsForPreviousInstanceCallbacks` (both triggers) fails on main
+and passes with the fix (`-race -count=30`).
+
+### Slice 6: requests after `Stop` queued `MsgClientDone` (`BlockFetchClientDone.tla`)
+
+`RequestRange` takes no lifecycle lock, so it can queue `MsgRequestRange`
+behind `Stop`'s `MsgClientDone` (`ProbeBehindBug`). The send loop holds
+`MsgClientDone` until `StIdle`, which holds everything behind it, and in
+`StDone` it takes nothing more; the request stays in the client queue and the
+shutdown watcher resolves it with `ErrProtocolShuttingDown`
+(`ProbeUnsentBug`). `RequestRange` returns an id rather than an error for
+such a request: the caller is released through `RangeDoneFunc`.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchClientDone.cfg`: main, three requests racing `Stop` | 1,779 | passes `NoRequestAfterDone`, `ServerNeverViolated`, `QueueHoldsQueued`, and no deadlock (every caller released) |
+| `BlockFetchClientDoneSendInDoneBug.cfg`: the send loop writes in `StDone` | | **fails** `NoRequestAfterDone` |
+| `BlockFetchClientDoneNoDrainBug.cfg`: no shutdown drain | | deadlock: a caller is stranded |
+| `BlockFetchClientDoneProbe{Behind,Unsent}Bug.cfg` | | violated: both cases are reached |
+
+`TestRequestDuringStopNeverFollowsClientDone` runs the race 20 times (both
+orders occur; most requests land behind `MsgClientDone`) and checks the wire,
+the error channel and every caller; it fails when the drain is removed.
+
+### Slice 7: range continuity and `failRequest` (`BlockFetchRangeCheck.tla`)
+
+`recordBlock`'s rules as `Accepts`, against a peer that sends any of the
+chain `a <- b <- c <- d` (`b` and `c` in one slot, as a Byron epoch boundary
+block and the first block of its epoch) and a fork block `x` whose parent is
+`a`, for the range `a..b`; and `failRequest` on the receive loop racing a
+range deadline.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchRangeCheck.cfg`: main, up to four blocks, the deadline racing | 177 | passes `DeliveredIsChainFromStart`, `DeliveredWithinRange`, `CompleteOnlyAtEnd`, `ResolvedOnce`, `NoResolveDuringDelivery` |
+| `...NoParentBug.cfg` (no previous-hash check) | | **fails** `DeliveredIsChainFromStart` |
+| `...BeyondEndBug.cfg` (no "end already received" check) | | **fails** `DeliveredWithinRange`: `c` follows `b` in `b`'s slot, so the slot check alone does not refuse it |
+| `...ShortDoneBug.cfg` (`MsgBatchDone` completes anything) | | **fails** `CompleteOnlyAtEnd` |
+| `...DeadlineUnlockedBug.cfg` (deadline resolves without `deliveryMu`) | | **fails** `NoResolveDuringDelivery` |
+| `...Probe{Complete,Fail,Fork}Bug.cfg` | | violated: a range completes; `failRequest` retires one; the fork block reaches `BlockFunc` |
+
+The fork probe is a limitation, not a defect: without the headers the
+reference checks each block against, gOuroboros accepts any hash chain from
+the start point, so a fork's blocks can reach `BlockFunc` before
+`MsgBatchDone` fails the range. A completed range is a hash chain from start
+to end. `failRequest` retires a range only while it is the queue's head, so
+a deadline that already took it resolves it instead, once.
+`TestRecordBlockMatchesModel` checks `recordBlock` against `Accepts` for every
+sequence of up to four blocks, and the three invariants on what it accepts;
+it fails with the previous-hash or end-point check removed.
+`TestFailRequestRetiresOnlyHead` fails when `failRequest` resolves a range
+that is not the head.
+
+### Slice 8: in-flight bound and ingress allowance (`BlockFetchAdmission.tla`)
+
+Three pipelined callers (sizes 3, 2 and 5 against a bound of 4; one
+unestimated) with the wait outside the send token, the recheck under it,
+and removals that close `bytesFreed` and recompute the allowance.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchAdmission.cfg`: main | 171 | passes `InFlightWithinBound`, `InFlightMatchesQueue`, `TokenConserved`, `NoLostWakeup`, `AllowanceMatchesQueue`, no deadlock |
+| `...NoRecheckBug.cfg` | | **fails** `InFlightWithinBound` |
+| `...NoWakeBug.cfg` | | **fails** `NoLostWakeup` |
+| `...StaleAllowanceBug.cfg` | | **fails** `AllowanceMatchesQueue` |
+| `...Probe{Park,Over}Bug.cfg` | | violated: a caller parks; the lone oversize request is admitted |
+
+No new Go test: `TestConcurrentAdmissionRespectsInFlightBound`,
+`TestInFlightCapacity*` and `TestInFlightWaitDoesNotBlockOtherCallers` cover
+the bound and the recheck. The allowance has no getter outside the muxer.
+
+### Slice 9: the server writes `MsgBlock` only in `StStreaming` (`BlockFetchServerSend.tla`)
+
+`Server.Block` and the other send methods queue whatever they are given.
+The send loop runs only with agency (`StBusy`, `StStreaming`) and applies
+each transition before the segment is written, so a misplaced message stops
+the server unwritten.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchServerSend.cfg`: main, any order of four calls, two ranges | 1,232 | passes `BlockOnlyInStreaming`, `WireFollowsStateMap` |
+| `...UncheckedBug.cfg` (write without the check) | | **fails** `BlockOnlyInStreaming` |
+| `...Probe{Block,Refused}Bug.cfg` | | violated: a block is served; a misplaced call stops the server |
+
+`TestServerWritesBlockOnlyInStreaming` (a block in `StBusy`; a block left
+over after `MsgBatchDone`) fails when the send loop ignores a failed
+transition. Size limits are `TestStateMapLimitsAgainstSpec`'s.
+
+### Slice 10: the busy lock across a restart (`BlockFetchBusyHandoff.tla`)
+
+`busyMutex`/`busyStateMutex` and the busy releaser. `Stop` recorded the
+held busy token (`heldBusyToken`) and released it after its join. A
+`GetBlockRange` or `GetBlock` caller between `acquireBusy` and its read of the
+protocol instance lost its lock that way; after a `Start` it sent on the new
+instance while a second fetch took the lock. Every fetch already releases its
+own token (failed send, resolve, or its instance done), so the fix drops
+`Stop`'s release.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `BlockFetchBusyHandoffStopReleaseBug.cfg`: main | | **fails** `OneFetchAtATime` |
+| `BlockFetchBusyHandoff.cfg`: the fix, three generations | 939 | passes `OneFetchAtATime`, `HolderIsInProgress`, no deadlock (the lock is free at the end) |
+| `BlockFetchBusyHandoffProbeAcrossBug.cfg` (probe) | | violated: with the fix a fetch that took the lock before a restart sends on the new instance |
+
+`TestBusyLockHeldAcrossRestart` (a test hook after `acquireBusy`) fails on
+main and passes with the fix (`-race -count=30`).
 
 ## Spec, reference, and gOuroboros
 
@@ -436,11 +575,10 @@ and gOuroboros `origin/main` at `61046085`.
 
 ## Not modelled
 
-The in-flight byte bound and ingress allowance (covered by
-`TestRequestRangeInFlightByteBound`, `TestConcurrentAdmissionRespectsInFlightBound`
-and others), range continuity and block validation, the block processing
-pipeline, compressed blocks (CIP-0150), `RangeTimeout`, and requests made
-after `Stop` has queued `MsgClientDone`.
+Block validation beyond range continuity (body hashes, era decoding), the
+block processing pipeline, compressed blocks (CIP-0150), and `RangeTimeout`
+as time. The in-flight bound, range continuity and requests made after `Stop`
+has queued `MsgClientDone` are slices 6-8.
 
 ## After merging main into #3114
 
@@ -515,6 +653,12 @@ cd specs/blockfetch
 ../../bin/tlc -config BlockFetchBusyDeliveryX1.cfg BlockFetchBusyDelivery.tla
 ../../bin/tlc -config BlockFetchBusyDeliveryFixed.cfg BlockFetchBusyDelivery.tla
 ../../bin/tlc -config BlockFetchBusyDeliverySender.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchRestart.cfg BlockFetchRestart.tla
+../../bin/tlc -config BlockFetchClientDone.cfg BlockFetchClientDone.tla
+../../bin/tlc -config BlockFetchRangeCheck.cfg BlockFetchRangeCheck.tla
+../../bin/tlc -config BlockFetchAdmission.cfg BlockFetchAdmission.tla
+../../bin/tlc -config BlockFetchServerSend.cfg BlockFetchServerSend.tla
+../../bin/tlc -config BlockFetchBusyHandoff.cfg BlockFetchBusyHandoff.tla
 # expected to fail
 ../../bin/tlc -config BlockFetchQueueRefusedBug.cfg BlockFetchQueue.tla
 ../../bin/tlc -config BlockFetchQueueNoTokenBug.cfg BlockFetchQueue.tla
@@ -531,6 +675,9 @@ cd specs/blockfetch
 ../../bin/tlc -config BlockFetchBusyDeliveryOrderBug.cfg BlockFetchBusyDelivery.tla
 ../../bin/tlc -config BlockFetchBusyDeliveryRecvStopBug.cfg BlockFetchBusyDelivery.tla
 ../../bin/tlc -config BlockFetchBusyDeliveryX1ReachableBug.cfg BlockFetchBusyDelivery.tla
+../../bin/tlc -config BlockFetchRestartStopCtxBug.cfg BlockFetchRestart.tla
+../../bin/tlc -config BlockFetchRestartConcurrentBug.cfg BlockFetchRestart.tla
+../../bin/tlc -config BlockFetchBusyHandoffStopReleaseBug.cfg BlockFetchBusyHandoff.tla
 ```
 
-The rest of slice 3's `*Bug.cfg` configs are listed in its table; `make blockfetch` runs every config.
+The rest of the `*Bug.cfg` configs of slices 3 and 5-10 are listed in their tables; `make blockfetch` runs every config.
