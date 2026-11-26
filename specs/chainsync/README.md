@@ -469,6 +469,112 @@ Not a deviation: gOuroboros draws from [601, 911) and the reference from
 601 to 911, a subset. The 462000-byte pending-receive budget the fix keeps
 is not a per-message limit, so it is not in the table.
 
+## Slice 6: the GetCurrentTip worker, Stop's lock wait, GetAvailableBlockRange (`ChainSyncTipWorker.tla`)
+
+### What the code does
+
+Based on `protocol/chainsync/client.go` at gOuroboros `7cd17437`.
+
+- **`GetCurrentTip`** takes an operation slot and starts a worker. The worker
+  locks `busyMutex` (blocking), returns if the client stopped, registers for
+  an intersect answer and sends `MsgFindIntersect` with no points. It does
+  not check that the protocol is idle: the engine holds the message until
+  any `MsgRequestNext` already sent is answered. The caller waits for the
+  worker's answer or `DoneChan`, then joins the worker.
+- **`GetAvailableBlockRange`** holds `busyMutex` throughout: it refuses while
+  a `MsgRequestNext` is unanswered, sends `MsgFindIntersect`, then
+  `MsgRequestNext` until the first block after the intersection arrives, and
+  returns only once every request it sent is retired.
+- **`Stop`** marks the client Stopping, then polls `TryLock` on `busyMutex`
+  every 10 ms for up to 5 s. With or without the lock it sends `MsgDone` if
+  the protocol is in `StIdle`, otherwise closes the connection
+  (`abandonIfOwed`), signals the protocol to stop, and waits for
+  `DoneChan` and the operation slots, or for its ctx. `DoneChan` closes only
+  after the receive loop, which runs every callback, has returned.
+
+### The question
+
+| Invariant or property | Question |
+| --- | --- |
+| `BusyHeldInCriticalSection` | does a call act without holding `busyMutex`? |
+| `WorkerJoinedBeforeReturn` | does `GetCurrentTip` return before its worker exits? |
+| `AnswersReachTheirCall` | does an intersect answer reach a call that did not ask, or arrive with nobody registered? |
+| `RangeFromOwnReplies` | does `GetAvailableBlockRange` take its tip or first block from someone else's reply (a stray roll)? |
+| `RangeLeavesIdle` | does it return a range with a request unretired or a ready signal left for the next sync? |
+| `FindOnlyWhenIdle` | is `MsgFindIntersect` on the wire with anything else outstanding? |
+| `StopHonoursCtxInvariant` | does `Stop` keep polling for `busyMutex` after its ctx is done? |
+| `CallbackStopDoesNotWait` | does a `Stop` from a callback poll for `busyMutex`? |
+| `StopReturns`, `TipReturns` | does every `Stop` and `GetCurrentTip` return (weak fairness; the server may withhold the sync's reply at the tip)? |
+
+### The answer
+
+The query paths hold. `GetCurrentTip` waits for its own answer behind
+whatever holds `busyMutex` and behind any unanswered `MsgRequestNext`
+(hazard B6). That is by design: `MsgFindIntersect` needs `StIdle`
+[C1], which only the outstanding replies restore. `GetAvailableBlockRange`
+builds its range from its own replies and leaves the client idle, whether
+the server rolls back first or rolls forward at once.
+
+`Stop` has two defects:
+
+1. **Its wait for `busyMutex` ignores ctx and the callback marker.** The doc
+   comment says `Stop` returns on ctx, and returns at once when called with
+   a callback's context. The poll loop checks neither, so a `Stop` whose ctx
+   is done keeps polling for up to 5 s, and a `Stop` from
+   `IntersectFoundFunc` waits the full 5 s, because `Jump` (or `Sync`,
+   `Reintersect`, `GetAvailableBlockRange`) holds the lock until that very
+   callback returns.
+2. **A callback that calls `GetCurrentTip` makes `Stop` hang for ever.**
+   During a sync, `GetCurrentTip` is the one query that does not refuse with
+   `ErrSyncInProgress`, so a roll callback can call it. Its answer is
+   delivered on the goroutine running the callback, so it never comes;
+   `GetCurrentTip` and its worker wait only for `DoneChan`, which closes only
+   after that goroutine returns. `Stop` with no deadline then never returns
+   (TLC: deadlock).
+
+The fixes: the lock wait ends on ctx and is skipped in a callback; the
+worker and the caller also return on `StopChan`.
+
+| Config | What | Result |
+| --- | --- | --- |
+| `ChainSyncTipWorker.cfg` | today, no ctx deadline: both queries with a sync at the tip, Stop | passes, 6,316 states |
+| `ChainSyncTipWorkerRange.cfg` | today, no sync, no Stop | passes, 218 states |
+| `ChainSyncTipWorkerFixed.cfg` | both fixes, ctx may expire | passes, 30,128 states |
+| `ChainSyncTipWorkerCallbackStop.cfg` | both fixes, Stop from the sync's roll callback | passes, 221 states |
+| `ChainSyncTipWorkerCallbackTip.cfg` | both fixes, GetCurrentTip from the roll callback, then Stop | passes, 707 states |
+| `ChainSyncTipWorkerCtxBug.cfg` | today, ctx expires | **fails** `StopHonoursCtxInvariant` |
+| `ChainSyncTipWorkerCallbackStopBug.cfg` | today, Stop from a callback | **fails** `CallbackStopDoesNotWait` |
+| `ChainSyncTipWorkerCallbackTipBug.cfg` | today, GetCurrentTip from a callback | **fails**: deadlock, Stop never returns |
+| `ChainSyncTipWorkerNoRetireBug.cfg` | mutation: the range call skips `waitRequestNextRetired` | **fails** `RangeLeavesIdle` |
+| `ChainSyncTipWorkerNoJoinBug.cfg` | mutation: `GetCurrentTip` does not join its worker | **fails** `WorkerJoinedBeforeReturn` |
+
+The probes `ProbeTipWaitsBehindRange`, `ProbeRangeOk` and
+`ProbeStopWithoutBusy` are each violated on `ChainSyncTipWorker.cfg`: the
+worker does queue behind the range call, the range call does return a
+range, and Stop does proceed without the lock.
+
+B7, the `RollBackward` drain goroutine, is not in this model: it calls the
+concrete `BlockPipeline.WaitForDrain`, which returns on its ctx, and the
+handler cancels that ctx on return, so the goroutine is bounded.
+
+### The same in Go
+
+`protocol/chainsync/client_tip_worker_test.go` names the config each test
+binds to:
+
+| Test | Binds | Before the fixes |
+| --- | --- | --- |
+| `TestStopReturnsOnCtxWhileBusyMutexHeld` | `StopHonoursCtxInvariant` | fails: Stop returned after 3.0 s with a 20 ms ctx |
+| `TestStopFromCallbackDoesNotWaitForBusyMutex` | `CallbackStopDoesNotWait` | fails: 3.0 s in the callback |
+| `TestStopReleasesGetCurrentTipCalledFromCallback` | `StopReturns` | fails: GetCurrentTip never returns |
+| `TestGetAvailableBlockRangeReplyShapes` | `RangeFromOwnReplies`, `RangeLeavesIdle` | passes (allowed transitions) |
+
+### Not in this slice
+
+Several concurrent `GetCurrentTip` callers, a sync loop that keeps sending,
+`Reintersect` and `StopAfterDrain` holding the lock (slices 1 and 2), and a
+second roll back during `GetAvailableBlockRange`.
+
 ## Running it
 
 ```sh
