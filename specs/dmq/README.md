@@ -303,6 +303,8 @@ a new run. `MaxRuns = 2`; `MaxMsgs` bounds the messages.
 - **NewRunServed**: a message waiting for the server can be read
   (`inbox nonempty => ENABLED Recv("Server")`).
 - **NoViolation**: no side receives a message its state forbids.
+- **NoTimeoutBetweenRuns** (V2): the responder's Idle timeout never fires
+  between a run's `MsgDone` and the next run's first request.
 
 ### The answer
 
@@ -311,7 +313,9 @@ a new run. `MaxRuns = 2`; `MaxMsgs` bounds the messages.
 | `DmqRestartLocalSubmission.cfg`: reference, two runs | 56 | passes |
 | `DmqRestartLocalNotification.cfg` | 73 | passes |
 | `DmqRestartSubmissionV1.cfg` | 68 | passes |
-| `DmqRestartSubmissionV2.cfg`: the V2 responder restarts | 115 | passes |
+| `DmqRestartSubmissionV2.cfg`: the V2 responder restarts, Idle untimed between runs | 146 | passes, `NoTimeoutBetweenRuns` included |
+| `DmqRestartSubmissionV2IdleTimeoutBug.cfg`: `95f5396d`, Idle timed after `MsgDone` | 13 | **fails** `NoTimeoutBetweenRuns` |
+| `DmqRestartSubmissionV2ProbeInRunTimeoutBug.cfg`: probe, the Idle timeout fires within a run | 26 | violated, as expected |
 | `DmqRestart*NoRestartBug.cfg` (three): gOuroboros `main` | 38-52 | **fails** `NewRunServed` |
 | `DmqRestartSubmissionV2NoRestartBug.cfg`: gOuroboros `7cd17437`, V2 | 78 | **fails** `NewRunServed` |
 | `DmqRestart*ProbeNoSecondRunBug.cfg` (four): probe, a second run starts | 28-53 | violated, as expected |
@@ -330,6 +334,20 @@ on-demand protocol [R6]. The responder must restart for that run [R11]. At
 is never answered. Fixed on `fix/leios-dmq-lifecycle` `95f5396d`: the V2
 Client's `MsgDone` leads back to `StIdle` and the run's outstanding ids are
 dropped, which on the wire is a restarted responder.
+
+**V2 Idle timeout between runs (review of `95f5396d`).** The restarted
+Client returned to `StIdle` with its 300 s Idle timeout still armed. The next
+run starts only when dmq-node promotes the peer again, which nothing bounds,
+and dmq-node's own V2 limits wait forever in `StIdle` (`SingIdle` is
+`waitForever`, `DMQ/Protocol/SigSubmissionV2/Codec.hs` [R15]), so a peer
+demoted for longer than the timeout had its connection torn down. The model
+has an abstract Idle timer: `IdleTimerFires` is the requester staying silent
+past the timeout while the timer is armed; `IdleTimeout = "Always"` arms it in
+every Idle wait (`95f5396d`) and `"WithinRun"` disarms it from `MsgDone` until
+the next request (`f608affe`). The Bug config fails in four states (request,
+`MsgDone`, read, timeout); the probe shows the timeout still fires within a
+run under the fix. Go: `TestV2ClientIdleTimeoutAfterMsgDone` (after `MsgDone`
+no timeout; within a run the timeout fires).
 
 ### Restart and an application wait (review of PR #3197)
 
@@ -632,6 +650,7 @@ tests do not repeat them.
 | `fix/localmessagenotification-server-restart` (from `d8f5bc2a`) | `MsgClientDone` shuts the server down for good | `TestServerAnswersRequestSentDuringRestart` and `TestServerAnswersBackToBackRestarts` time out on `main`. The queue, acknowledged ids and expiry cleaner now outlast a run (the cleaner no longer watches the run's channels) and only `Stop` ends them; `TestServerStopDuringRestartStopsServer` covers Stop during a restart |
 | `fix/messagesubmission-server-restart` (from `d8f5bc2a`) | The server stays in `StDone` after the client's `MsgDone`, with the run's request still recorded | `TestServerRequestsAfterRestart` and `TestServerHandlesInitSentDuringRestart` fail on `main` ("the server never accepted a request for the next run"). The run's outstanding ids and requests are dropped once the new instance has started; the queue and delivered ids are kept. V1 only: in V2 `MsgDone` comes from the server |
 | `fix/leios-dmq-lifecycle` `95f5396d` (from `7cd17437`) | The V2 Client (the responder) stays in `StDone` after the requester's `MsgDone` | `TestV2ClientServesRunAfterMsgDone` fails on `7cd17437` ("run 1: the client never handled the request") and passes with the fix |
+| `fix/leios-dmq-lifecycle` `f608affe` | The restarted V2 Client keeps the Idle timeout between runs, so a peer demoted for longer than it is disconnected | `TestV2ClientIdleTimeoutAfterMsgDone` ("after MsgDone" subtest gets a timeout error without the fix; "within a run" shows the timer still fires) |
 | `fix/localmessagenotification-lost-wakeup` | An application `WaitForMessage` takes the wakeup meant for a blocking request | `TestAddMessageWakesBlockingRequestAndWaiter` (deterministic, `synctest`) fails 6 runs of 6 on `main`, either way round |
 
 The repeat fix records the ids asked for, per side, until they are
@@ -712,6 +731,7 @@ gOuroboros `61046085`.
 | R8 | [`dmq-node/src/DMQ/NodeToClient.hs` lines 155-185](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/NodeToClient.hs#L155-L185); `DMQ/Protocol/LocalMsgSubmission/Type.hs` 20-22 | local servers run with `runAnnotatedPeer`, no limits; local submission is `LocalTxSubmission` |
 | R9 | [`dmq-node/src/DMQ/Protocol/LocalMsgNotification/Codec.hs` lines 119-166](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/LocalMsgNotification/Codec.hs#L119-L166); `Type.hs` 45-77 | notification tags; an empty blocking reply fails to decode |
 | R13 | [`dmq-node/src/DMQ/SigSubmissionV2/Inbound.hs` lines 99-133](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/SigSubmissionV2/Inbound.hs#L99-L133) | the V2 inbound's `serverIdle` sends `SendMsgDone` on `Terminate` |
+| R15 | [`dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs`](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/src/DMQ/Protocol/SigSubmissionV2/Codec.hs) | the V2 time limits: `SingIdle` is `waitForever` |
 | R11 | [`ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs` lines 455-470](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs#L455-L470); [`ouroboros-network/lib/Ouroboros/Network/Diffusion.hs` lines 402-418](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/lib/Ouroboros/Network/Diffusion.hs#L402-L418) | a responder that ended cleanly is run again; the node-to-client server runs under an inbound governor too |
 | R12 | [`dmq-node/app/Main.hs` line 270](https://github.com/IntersectMBO/dmq-node/blob/a267003c14e95b3c9086319e5775a1f618456765/dmq-node/app/Main.hs#L270) | dmq-node runs `Ouroboros.Network.Diffusion.run` |
 | S5 | [`docs/network-spec/connection-manager.tex` lines 492-496](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/docs/network-spec/connection-manager.tex#L492-L496) | the server side "should be restarted in its initial state" |

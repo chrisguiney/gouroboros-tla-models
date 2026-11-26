@@ -67,6 +67,23 @@
 (*   [G1] gOuroboros 7cd17437, protocol/messagesubmission/                *)
 (*        messagesubmission.go stateMapV2, client.go handleDone.          *)
 (*                                                                         *)
+(* The V2 Idle timeout [G1]. The gOuroboros V2 Client times its wait in  *)
+(* StIdle (300 s by default) and tears the connection down when it fires.  *)
+(* After the requester's MsgDone the next run starts only when dmq-node   *)
+(* promotes the peer again, which nothing bounds, and dmq-node's own V2   *)
+(* limits wait forever in StIdle [R15]. The model has an abstract timer:  *)
+(* IdleTimerFires is the peer staying silent past the timeout while the   *)
+(* responder waits in StIdle with the timer armed; between runs that is a *)
+(* peer demoted for longer than the timeout. IdleTimeout = "Always" arms   *)
+(* the timer in every Idle wait (the restart fix 95f5396d, which kept      *)
+(* StIdle's timeout after MsgDone;                                         *)
+(* DmqRestartSubmissionV2IdleTimeoutBug.cfg);                              *)
+(* "WithinRun" disarms it from MsgDone until the next request arrives    *)
+(* (f608affe: DmqRestartSubmissionV2.cfg), and the in-run timeout still   *)
+(* fires (DmqRestartSubmissionV2ProbeInRunTimeoutBug.cfg).               *)
+(*   [R15] dmq-node a267003c, DMQ/Protocol/SigSubmissionV2/Codec.hs:      *)
+(*        the V2 time limits give SingIdle waitForever.                    *)
+(*                                                                         *)
 (* Not modelled: message contents, the window rules (MessageSubmission.tla *)
 (* has them).                                                              *)
 (*                                                                         *)
@@ -79,8 +96,13 @@ CONSTANTS
                     \* or "SubmissionV2"
     MaxRuns,        \* how many runs the client may start on one connection
     MaxMsgs,        \* how many messages may be sent in all (keeps the model finite)
-    ServerRestarts  \* TRUE: the server restarts after MsgDone [S5][R11]
+    ServerRestarts, \* TRUE: the server restarts after MsgDone [S5][R11]
                     \* FALSE: gOuroboros d8f5bc2a, which stays in StDone
+    IdleTimeout     \* SubmissionV2 only, the responder's StIdle timer:
+                    \* "WithinRun": disarmed from MsgDone until the next
+                    \*   request arrives (f608affe)
+                    \* "Always": armed in every Idle wait, between runs too
+                    \*   (95f5396d)
 
 \* Literally: "Roles is defined as the set containing "Client" and "Server"."
 Roles == {"Client", "Server"}
@@ -200,21 +222,28 @@ VARIABLES
     view,   \* view[r]: the state side r believes the protocol is in, or "Violation"
     inbox,  \* inbox[r]: messages sent to r that r has not read yet
     runs,   \* client runs started so far on this connection
-    sent    \* messages sent so far, by either side
+    sent,   \* messages sent so far, by either side
+    runEnded, \* the server has read MsgDone and no request since
+    timedOut  \* "no", or where the server's Idle timeout fired: "inRun"
+              \*   or "betweenRuns"; either way the connection is torn down
 
-\* Literally: "vars is defined as the tuple of view, inbox, runs and sent."
-vars == <<view, inbox, runs, sent>>
+\* Literally: "vars is defined as the tuple of view, inbox, runs, sent,
+\*   runEnded and timedOut."
+vars == <<view, inbox, runs, sent, runEnded, timedOut>>
 
 \* In English: "Both sides start in the protocol's first state, with
 \* nothing in flight, in the first run."
 \* Literally: "Init is defined as: view equals the function that maps every r
 \*   in Roles to InitState, and inbox equals the function that maps every r in
-\*   Roles to the empty sequence, and runs equals 1, and sent equals 0."
+\*   Roles to the empty sequence, and runs equals 1, and sent equals 0, and
+\*   runEnded is false, and timedOut equals "no"."
 Init ==
     /\ view = [r \in Roles |-> InitState]
     /\ inbox = [r \in Roles |-> <<>>]
     /\ runs = 1
     /\ sent = 0
+    /\ runEnded = FALSE
+    /\ timedOut = "no"
 
 \* In English: "Side r, holding agency in its own view, sends m, which its
 \* table allows there, and moves its view along the row."
@@ -233,7 +262,7 @@ Send(r, m) ==
     /\ view' = [view EXCEPT ![r] = After(view[r], m)]
     /\ inbox' = [inbox EXCEPT ![Peer(r)] = Append(@, m)]
     /\ sent' = sent + 1
-    /\ UNCHANGED runs
+    /\ UNCHANGED <<runs, runEnded, timedOut>>
 
 \* In English: "Side r may read when it waits for its peer in its own
 \* view, or when it is the server, its run is over, and it restarts. A
@@ -254,7 +283,10 @@ CanRead(r) ==
 \*   the next state equals view except that its r entry is (if IsLegal of s and
 \*   m then After of s and m, else "Violation"); and inbox in the next state
 \*   equals inbox except that its r entry is the tail of the old entry, and
-\*   runs and sent are unchanged."
+\*   runEnded in the next state is (if r equals "Server" then IsDone of m,
+\*   else runEnded), and runs, sent and timedOut are unchanged."
+\* The server reads only MsgDone or a request, so a request clears
+\* runEnded (handleRequestMessageIds) and MsgDone sets it (handleDone).
 Recv(r) ==
     /\ inbox[r] /= <<>>
     /\ CanRead(r)
@@ -263,7 +295,8 @@ Recv(r) ==
        IN  view' = [view EXCEPT ![r] = IF IsLegal(s, m) THEN After(s, m)
                                                          ELSE "Violation"]
     /\ inbox' = [inbox EXCEPT ![r] = Tail(@)]
-    /\ UNCHANGED <<runs, sent>>
+    /\ runEnded' = IF r = "Server" THEN IsDone(Head(inbox[r])) ELSE runEnded
+    /\ UNCHANGED <<runs, sent, timedOut>>
 
 \* In English: "Once its run is over, the client may start another on the
 \* same connection, up to MaxRuns."
@@ -276,30 +309,70 @@ ClientRestart ==
     /\ runs < MaxRuns
     /\ view' = [view EXCEPT !["Client"] = InitState]
     /\ runs' = runs + 1
-    /\ UNCHANGED <<inbox, sent>>
+    /\ UNCHANGED <<inbox, sent, runEnded, timedOut>>
+
+\* In English: "The V2 responder waits in StIdle for the requester: in its
+\* StIdle, or in StDone when it restarts, which the gOuroboros Client does
+\* by mapping MsgDone back to StIdle."
+\* Literally: "ServerIdleWait is defined as: Proto equals "SubmissionV2", and
+\*   view of "Server" equals "StIdle", or view of "Server" equals "StDone"
+\*   and ServerRestarts is true."
+ServerIdleWait ==
+    /\ Proto = "SubmissionV2"
+    /\ \/ view["Server"] = "StIdle"
+       \/ view["Server"] = "StDone" /\ ServerRestarts
+
+\* In English: "The Idle timer runs while the responder waits in Idle: with
+\* "Always" in every such wait, with "WithinRun" unless the last message
+\* it read was MsgDone."
+\* Literally: "TimerArmed is defined as: ServerIdleWait, and IdleTimeout
+\*   equals "Always" or runEnded is false."
+TimerArmed ==
+    /\ ServerIdleWait
+    /\ IdleTimeout = "Always" \/ ~runEnded
+
+\* In English: "The requester stays silent past the timeout while the timer
+\* runs: within a run a stuck peer, between runs a peer demoted for longer
+\* than the timeout. The timeout tears the connection down."
+\* Literally: "IdleTimerFires is defined as: timedOut equals "no", and
+\*   TimerArmed, and inbox of "Server" equals the empty sequence, and
+\*   timedOut in the next state equals (if runEnded then "betweenRuns", else
+\*   "inRun"), and view, inbox, runs, sent and runEnded are unchanged."
+IdleTimerFires ==
+    /\ timedOut = "no"
+    /\ TimerArmed
+    /\ inbox["Server"] = <<>>
+    /\ timedOut' = IF runEnded THEN "betweenRuns" ELSE "inRun"
+    /\ UNCHANGED <<view, inbox, runs, sent, runEnded>>
 
 \* In English: "The model stops when the message budget is spent, or when
 \* a side has hung up, or when both runs are over and nothing is in flight."
 \* Literally: "Over is defined as: sent equals MaxMsgs; or there exists an r in
 \*   Roles such that view of r equals "Violation"; or view of "Client" equals
 \*   "StDone" and runs equals MaxRuns, and view of "Server" equals "StDone" and
-\*   inbox of "Server" equals the empty sequence."
+\*   inbox of "Server" equals the empty sequence; or timedOut does not equal
+\*   "no"."
 Over ==
     \/ sent = MaxMsgs
+    \/ timedOut /= "no"
     \/ \E r \in Roles : view[r] = "Violation"
     \/ /\ view["Client"] = "StDone" /\ runs = MaxRuns
        /\ view["Server"] = "StDone" /\ inbox["Server"] = <<>>
 
-\* In English: "A step is some side sending some message, some side reading, a
-\* client restart, or, once the model is over, nothing."
-\* Literally: "Next is defined as: there exists an r in Roles such that there
-\*   exists a tr in Rows such that Send of r and element 2 of tr; or there
-\*   exists an r in Roles such that Recv of r; or ClientRestart; or Over is
-\*   true and vars is unchanged."
+\* In English: "While the connection is up, a step is some side sending some
+\* message, some side reading, a client restart, or the Idle timer firing;
+\* once the model is over, nothing."
+\* Literally: "Next is defined as: timedOut equals "no", and there exists an
+\*   r in Roles such that there exists a tr in Rows such that Send of r and
+\*   element 2 of tr, or there exists an r in Roles such that Recv of r, or
+\*   ClientRestart, or IdleTimerFires; or Over is true and vars is
+\*   unchanged."
 Next ==
-    \/ \E r \in Roles : \E tr \in Rows : Send(r, tr[2])
-    \/ \E r \in Roles : Recv(r)
-    \/ ClientRestart
+    \/ /\ timedOut = "no"
+       /\ \/ \E r \in Roles : \E tr \in Rows : Send(r, tr[2])
+          \/ \E r \in Roles : Recv(r)
+          \/ ClientRestart
+          \/ IdleTimerFires
     \/ Over /\ UNCHANGED vars
 
 \* In English: "Start in Init, and from then on every step is a Next step."
@@ -313,11 +386,14 @@ Spec == Init /\ [][Next]_vars
 \* Literally: "TypeOK is defined as: view is a member of the set of functions
 \*   from Roles to the union of States and the set containing "Violation", and
 \*   runs is a member of 1 through MaxRuns, and sent is a member of 0 through
-\*   MaxMsgs."
+\*   MaxMsgs, and runEnded is a boolean, and timedOut is "no", "inRun" or
+\*   "betweenRuns"."
 TypeOK ==
     /\ view \in [Roles -> States \cup {"Violation"}]
     /\ runs \in 1..MaxRuns
     /\ sent \in 0..MaxMsgs
+    /\ runEnded \in BOOLEAN
+    /\ timedOut \in {"no", "inRun", "betweenRuns"}
 
 \* In English: "No side has received a message its state forbids."
 \* Literally: "NoViolation is defined as: for all r in Roles, view of r does
@@ -333,7 +409,22 @@ NoViolation == \A r \in Roles : view[r] /= "Violation"
 NewRunServed ==
     (inbox["Server"] /= <<>> /\ NoViolation) => ENABLED Recv("Server")
 
+\* In English: "The responder's Idle timeout never fires between runs: a
+\* requester that ended its run with MsgDone may start the next one any
+\* time later [R13][R15], and the connection must still be up." It fails
+\* when the timer stays armed after MsgDone.
+\* Literally: "NoTimeoutBetweenRuns is defined as: timedOut does not equal
+\*   "betweenRuns"."
+NoTimeoutBetweenRuns == timedOut /= "betweenRuns"
+
 \* Probe, EXPECTED to be violated: "The client never starts a second run."
 \* Literally: "ProbeNoSecondRun is defined as: runs equals 1."
 ProbeNoSecondRun == runs = 1
+
+\* Probe, EXPECTED to be violated: "The Idle timeout never fires within a
+\* run after the run's first request." It shows NoTimeoutBetweenRuns does
+\* not hold by disarming the timer altogether.
+\* Literally: "ProbeNoInRunTimeout is defined as: timedOut equals "inRun"
+\*   implies sent equals 0."
+ProbeNoInRunTimeout == timedOut = "inRun" => sent = 0
 =============================================================================
