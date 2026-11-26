@@ -238,6 +238,105 @@ Probes on the reference config: `ProbeServerNeverBlocks`,
 `ProbeNoSecondRun`, `ProbeNoCancelledHeldSubmit` (Stop cancels a
 submission the node holds for a full mempool).
 
+## Slice 3: the monitor client's calls (`LocalTxMonitorClientCalls.tla`)
+
+Slice 1's client only ever sends what is legal. This slice asks what the
+public calls do when an application makes them in any order, racing
+`Stop()`, on gOuroboros `7cd17437` (`protocol/localtxmonitor/client.go`).
+
+### What the code does
+
+- `Acquire`, `Release`, `HasTxForEra`, `NextTx` and `GetSizes` take
+  `busyMutex` and return `ErrProtocolShuttingDown` at once if `Stop` has
+  closed `stopRequested`. `GetMeasures` does not check.
+- `release()` sends `MsgRelease` whatever `acquired` says.
+- A query with nothing acquired sends `MsgAcquire` first; after the
+  answer it sends the query without checking `Stop` again.
+- `Stop` closes `stopRequested`, takes `busyMutex`, and sends `MsgDone`
+  unless a call abandoned its wait. It never releases first.
+- The send loop holds a message sent while the server has agency until
+  agency returns, then checks it; an illegal message is a protocol error
+  that closes the connection.
+
+### The questions
+
+1. **`NoIllegalSend`**: does any sequence of calls make the client send a
+   message its state does not allow?
+2. **`NoSendFromLateCall`**: does a call that begins after `Stop` was
+   called send anything?
+3. **`FlagMatchesState`**: between calls, does `acquired` say whether the
+   protocol is in `StAcquired`?
+4. Deadlock: does every call and `Stop` return?
+
+### The answers
+
+| Config | Setting | States (distinct) | Result |
+| --- | --- | --- | --- |
+| `LocalTxMonitorClientCalls.cfg` | the three fixes below | 57 | all hold |
+| `LocalTxMonitorClientCallsMainBug.cfg` | gOuroboros `7cd17437` | 18 | `NoIllegalSend` violated in 1 step (`Release` from `StIdle`) |
+| `LocalTxMonitorClientCallsReleaseIdleBug.cfg` | `Release` sends from `StIdle` | 35 | `NoIllegalSend` violated |
+| `LocalTxMonitorClientCallsLateMeasuresBug.cfg` | `GetMeasures` does not check `Stop` | 36 | `NoSendFromLateCall` violated in 2 steps (Stop, then `GetMeasures`) |
+| `LocalTxMonitorClientCallsStopAcquiredBug.cfg` | `Stop` does not release first | 58 | `NoIllegalSend` violated |
+| `LocalTxMonitorClientCallsReleaseFlagBug.cfg` | mutation: `release()` keeps `acquired` | 57 | `FlagMatchesState` violated |
+| `LocalTxMonitorClientCallsProbeNoAbandonBug.cfg` | probe: `Stop` abandons a wait | 42 | violated, so reached |
+
+Three defects on `7cd17437`:
+
+- **`Release()` from Idle.** It returns nil while the send loop refuses
+  `MsgRelease` and tears the connection down. Reproduced in Go: "message
+  \*localtxmonitor.MsgRelease not allowed in current protocol state Idle".
+  The local-state-query client already refuses this (`ErrNotAcquired`).
+  Fixed on `fix/localtxmonitor-client-call-guards`.
+- **`GetMeasures()` after `Stop()`.** Called after `Stop` closed
+  `stopRequested` but before it takes `busyMutex`, it sends `MsgAcquire` or
+  `MsgGetMeasures`, abandons the wait, and `Stop` then closes without
+  `MsgDone`. Fixed on the same branch.
+- **`Stop()` from Acquired.** The defect `LocalTxMonitorStopBug.cfg` shows
+  is still on main: every query leaves the snapshot acquired, and `Stop`
+  sends `MsgDone` there. Go at `7cd17437`: `Stop` returns "protocol is
+  shutting down" and the connection reports "message \*localtxmonitor.MsgDone
+  not allowed in current protocol state Acquired". An open pull request
+  (#3088) releases first; it conflicts with main's `Stop(ctx)` and
+  `stopRequested`. `LocalTxMonitorGouroboros.cfg` sets `StopReleases =
+  TRUE`, so it describes main with that fix, not main.
+
+## Slice 4: the monitor server's transaction-ID cache (`LocalTxMonitorTxIdCache.tla`)
+
+`MsgHasTx` must answer whether the acquired snapshot holds the
+transaction [S3]. The server caches each transaction's ID, keyed by era and
+the maphash of its bytes, so a polling client does not reparse the mempool
+(`server.go` `txHashes`, `txHash`, `acquireMempool`, `releaseMempool`). The
+cache is a library design, not a protocol rule.
+
+Three transactions, two of them colliding on the maphash key; an acquire
+takes any subset as the new snapshot.
+
+| Invariant | Question |
+| --- | --- |
+| `AnswersMatchSnapshot` | does the cache ever change a `MsgHasTx` answer? |
+| `CacheWithinSnapshot` | is every entry a transaction of the held snapshot (so the cache is never larger than it)? |
+| `OneEntryPerKey`, `EntriesCorrect` | one entry per key, each with its bytes' own ID? |
+| `NothingCachedWhenIdle` | after a release or a restart, is anything left from before? |
+
+| Config | Setting | States (distinct) | Result |
+| --- | --- | --- | --- |
+| `LocalTxMonitorTxIdCache.cfg` | gOuroboros `7cd17437`, 5 steps | 106 | all hold |
+| `LocalTxMonitorTxIdCacheConfirmBug.cfg` | mutation: hit on the key alone | 56 | `AnswersMatchSnapshot` violated |
+| `LocalTxMonitorTxIdCacheSweepBug.cfg` | mutation: acquire keeps departed entries | 95 | `CacheWithinSnapshot` violated |
+| `LocalTxMonitorTxIdCacheReleaseBug.cfg` | mutation: release keeps the cache | 77 | `NothingCachedWhenIdle` violated |
+| `LocalTxMonitorTxIdCacheProbeCollisionBug.cfg` | probe: an entry held beside its colliding transaction | 58 | violated, so reached |
+
+The cache is correct. Go: `TestServerTxIdCacheMatchesModel` runs every
+sequence of four steps over five snapshots, four `MsgHasTx` queries and
+release, with two encodings of one transaction, and checks the same
+invariants after each step; dropping the sweep, the release, or the
+re-pointing of carried entries each fails it. Collisions cannot be forced
+through maphash; `TestServerHasTxIgnoresCollidingCacheEntry` plants one.
+
+The local-tx-submission server has no transaction-ID cache: it hands every
+`MsgSubmitTx` to `SubmitTxFunc`, so refusing a duplicate is the
+application's mempool's job, as in the reference [R4].
+
 ## The modelling mistakes
 
 - `ClientStop` was enabled only while the client held agency, on the
@@ -326,10 +425,8 @@ The receive-before-agency rule cited as Model `keepalive`'s [S8] (typed-protocol
 ## Not modelled
 
 Message contents (transaction validity, reject reasons, `MsgReplyNextTx`
-order within a snapshot), size limits (none in the spec), CBOR decoding
-limits, the server's transaction-ID cache, and API misuse such as
-`Release()` from Idle (it sends `MsgRelease` and fails the same way as
-`Stop()` did).
+order within a snapshot), size limits (none in the spec) and CBOR decoding
+limits.
 
 ## After merging main into #3196
 
@@ -355,9 +452,12 @@ cd specs/localtx
 ../../bin/tlc -config LocalTxSubmissionGouroboros.cfg LocalTxSubmission.tla
 ../../bin/tlc -config LocalTxSubmissionTable.cfg LocalTxSubmission.tla | grep '^<<'
 # expected to fail (bugs, deviations, mutations, probes):
-for c in LocalTxMonitor*Bug.cfg; do ../../bin/tlc -config $c LocalTxMonitor.tla || true; done
+for c in $(grep -l "SPEC: LocalTxMonitor.tla" LocalTxMonitor*Bug.cfg); do ../../bin/tlc -config $c LocalTxMonitor.tla || true; done
 for c in LocalTxSubmission*Bug.cfg; do ../../bin/tlc -config $c LocalTxSubmission.tla || true; done
 ```
+
+Every config, each with its own module, in one go: `scripts/run-model.sh
+specs/localtx` (or `make localtx`).
 
 ## Merging main into #3133, #3140 and #3154
 

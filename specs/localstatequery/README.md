@@ -377,14 +377,67 @@ and gOuroboros `origin/main` at `61046085`. `P` below is
 | G5 | same, `queries.go` 81, 244; branch `fix/localstatequery-decode-future-pparams` | No query type 33 on main; `ShelleyFuturePParamsQuery` on the branch. |
 | G2 | gOuroboros `35982911` (`fix/localstatequery-implicit-acquire`), `client.go` | `endCall`, `runQueryMaxItems`; `GetEpochNo` makes two queries. |
 
+## Cached era, timeouts and the read limit (`LocalStateQueryClientLimits.tla`)
+
+Three gOuroboros additions to the protocol, on `7cd17437`, with one caller
+and a node whose era advances:
+
+- **The cached era.** `handleAcquired` and `handleFailure` clear
+  `currentEra` before waking the caller; `release()` clears it, and so does
+  `endCall`'s release of an implicit acquire; `getCurrentEra` fills it.
+- **Timeouts.** `AcquireTimeout` and `QueryTimeout` are opt-in (none by
+  default). `protocol.go`'s `stateLoop` stops and drains the previous
+  state's timer on every transition and arms one only where the node has
+  agency.
+- **The read limit.** A message larger than `MaxReadBufferSize` is a
+  `SendError` in the read loop, which stops the protocol; once `DoneChan`
+  closes, a goroutine closes the result channels, so a waiting call returns
+  `ErrProtocolShuttingDown`.
+
+| Invariant | Question |
+| --- | --- |
+| `CachedEraIsHeldEra` | is a cached era ever not the era of the state held now (after a release, a re-acquire in a later era, a failed re-acquire)? |
+| `ErasReturnedFresh` | does `GetCurrentEra` ever return another state's era? |
+| `NoStaleTimeout` | does a timer ever fire in a state other than the one it was armed for? |
+| `NoFailures` | with the defaults and results that fit, does the protocol ever stop on an error? ("No timeouts", "No size limits" [S3]) |
+| deadlock | is a call ever left waiting, including after an oversized result? |
+
+| Config | Setting | States (distinct) | Result |
+| --- | --- | --- | --- |
+| `LocalStateQueryClientLimits.cfg` | `7cd17437`, timeouts set, oversized results possible; eras 0-2, 4 calls | 297 | all hold, no deadlock |
+| `LocalStateQueryClientLimitsDefault.cfg` | defaults, results fit | 153 | all hold, and `NoFailures` |
+| `LocalStateQueryClientLimitsAcquiredBug.cfg` | mutation: `MsgAcquired` keeps the cache | | `CachedEraIsHeldEra` violated |
+| `LocalStateQueryClientLimitsFailureBug.cfg` | mutation: `MsgFailure` keeps it | | `CachedEraIsHeldEra` violated |
+| `LocalStateQueryClientLimitsReleaseBug.cfg` | mutation: release keeps it | | `CachedEraIsHeldEra` violated |
+| `LocalStateQueryClientLimitsTimerBug.cfg` | mutation: entering `StAcquired` keeps the `StAcquiring` timer | | `NoStaleTimeout` violated |
+| `LocalStateQueryClientLimitsWedgedBug.cfg` | mutation: result channels not closed when the protocol stops | | deadlock after an oversized result |
+| `LocalStateQueryClientLimitsTimeoutBug.cfg` | timeouts set, results fit | | `NoFailures` violated: an opt-in timeout tears the connection down, which the specification never does |
+| `LocalStateQueryClientLimitsProbeCacheBehindBug.cfg` | probe: a cached era older than the node's | | violated, so reached |
+| `LocalStateQueryClientLimitsProbeOversizeBug.cfg` | probe: an oversized result while a call waits | | violated, so reached |
+
+The code is correct on all three. Go:
+
+- Cached era: the existing `current_era_cache_wire_test.go` tests cover
+  each clearing transition (`TestCurrentEraCacheInvalidatesAfterReacquire`,
+  `...AfterRelease`, `...AfterFailedReacquire`,
+  `TestCurrentEraNotCachedAcrossImplicitCalls`).
+- `TestAcquireTimeoutEndsWithAcquiring` (`NoStaleTimeout`): acquired, the
+  client sits five timeouts long in `Acquired` and still queries. Keeping
+  the timer across a transition into a client-agency state in `stateLoop`
+  fails it ("timeout waiting on transition from protocol state Acquired").
+- `TestOversizedResultReleasesCaller` (the deadlock check): a result twice
+  `MaxReadBufferSize` ends the waiting `GetCurrentEra` with
+  `ErrProtocolShuttingDown` and the connection reports the overflow;
+  without the channel close it waits forever. `TestResultWithinLimitIsDelivered`
+  is its control.
+
 ## Not modelled
 
 The encoding and results of individual queries other than the set
 arguments, era guards and query type 33 in `LocalStateQueryCodec.tla`; Byron
-(where the fixed `GetAccountState` guard refuses); the cached era
-(`currentEra`), the server's callbacks, timeouts (a timeout is a protocol
-error, like the violations here), and the message size limit
-(`MaxReadBufferSize`).
+(where the fixed `GetAccountState` guard refuses); and the server's
+callbacks. The cached era, timeouts and the message size limit are in
+`LocalStateQueryClientLimits.tla` above.
 
 ## Server release without a callback (`LocalStateQueryServerRelease.tla`)
 
