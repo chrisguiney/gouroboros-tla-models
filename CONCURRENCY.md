@@ -2043,6 +2043,14 @@ hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
 - **B13: covered by #3154.** `deliverResult` gains a `stopRequested` arm,
   which can fire on `recvLoop`. The `DoneChan` arm stays dead and the comment
   still credits it; a wording fix for that PR.
+- **K1, B11-B13 (rank 6 `LocalTxStopLock`): fixed on `main`.** Re-checked
+  on `7cd17437`: #3140 and #3154 are merged, so the planned
+  `LocalTxStopLock.tla` is not needed; `localtx` `LocalTxMonitor*StopWaitBug.cfg`
+  and `LocalTxSubmissionStopWaitBug.cfg` reproduce the hazard and the
+  `StopCancelsWait` configs pass. `LocalTxMonitorClientCalls.tla` found one
+  gap in the same scheme: `GetMeasures` did not check `stopRequested` before
+  sending (`LocalTxMonitorClientCallsLateMeasuresBug.cfg`, fixed on local
+  `fix/localtxmonitor-client-call-guards` `78c2d993`).
 
 ### Status: C8-C26, D1, D2
 

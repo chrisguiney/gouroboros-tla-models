@@ -82,7 +82,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N25](#n25) | network | Peer-sharing address forms | An IPv4-mapped IPv6 address is sent as IPv6; the old eight-field IPv6 form is not decoded; declared list length ignored | IPv4-mapped sent as IPv4 (`net.IP.To4`); old form accepted on decode; list length checked | CDDL `peer-sharing-v14.cddl` | conforms | Recorded (model `peersharing`); same endpoint on a dual-stack host |
 | [N26](#n26) | network | Local-tx-monitor: re-acquire (`MsgAwaitAcquire`) is timed | The node holds the answer until the mempool changes | main: the client times it at 5 s, so it dies against a real node; PR: not timed (acquire from `Idle` still is) | Await a new snapshot; no timeouts | does not conform → conforms | Open PR #3154 |
 | [N27](#n27) | network | Local-tx-monitor server answers `MsgAwaitAcquire` at once | Waits until the snapshot differs | Answers immediately with the current snapshot | Await a new snapshot | does not conform | Opt-in fix in PR #3196 (`AwaitMempoolFunc`); merge after PR #3154, which stops the client timing the await |
-| [N28](#n28) | network | Local-tx-monitor `MsgGetMeasures` | Always decoded and answered | Not implemented; decoding fails and the connection is torn down | Part of the protocol | does not conform | Not fixed; a missing feature |
+| [N28](#n28) | network | Local-tx-monitor `MsgGetMeasures` | Always decoded and answered | Not implemented; decoding fails and the connection is torn down | Part of the protocol | does not conform → conforms | Fixed by merged #3196 (`0fa7a0df`, on `7cd17437`) |
 | [N29](#n29) | network | Local-tx-monitor `Stop` while a snapshot is acquired | `MsgDone` only from `StIdle` (typed) | main: sends `MsgDone` from `Acquired`, an illegal message; PR: sends `MsgRelease` first | `MsgDone` only from `StIdle` | does not conform → conforms | Open PR #3088 (by another contributor) |
 | [N30](#n30) | network | Node-to-client default timeouts | No time limits in the node-to-client codecs | main: local-state-query 5 s / 180 s, local-tx-monitor 5 s / 30 s, local-tx-submission 30 s; PRs: none by default | No timeouts | does not conform → conforms | Open PRs #3159 and #3140 |
 | [N31](#n31) | network | Local-state-query server after `MsgDone` | Restarted by the inbound governor | main: stays `Done`; a new run's `MsgAcquire` is never answered; PR: restarts | A cleanly terminated server-side mini-protocol is restarted | does not conform → conforms | Open PR #3113 |
@@ -115,6 +115,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N58](#n58) | network | DMQ: what node-to-node receipt does with each message | Judged one at a time in `Validate.hs` order; expired, unregistered, not-initialised and duplicate dropped quietly; any other failure closes the connection after the valid ones are kept | main: any failure refuses the whole reply and closes the connection; pool checked before the KES window, signatures before the counter; branch: as the reference | Any failed step is "a protocol violation" (402) | does not conform → conforms | Fixed on local branch `fix/messagesubmission-reference-receipt` (`a12edd17`), no PR (model `dmq` `MessageIngressAllOrNothingBug.cfg`, `MessageIngressMainOrderBug.cfg`) |
 | [N59](#n59) | network | LeiosNotify: source consulted when requests are pipelined behind `MsgQuit` | Every outstanding request answered `MsgCanceled`, then `MsgDone`; silent on how often the source is consulted | main: every request answered; the source is asked zero or one time, by whether the handler runs before the read loop reaches `MsgQuit` | Not stated | conforms | Test assertion fixed on local branch `fix/leiosnotify-pipelined-cancel-flake`, no PR (model `leios-peras` `LeiosNotifyPipelinedQuitAssumptionBug.cfg`) |
 | [N60](#n60) | network | Message submission V2: the responder after the requester's `MsgDone` | The responder is restarted in its initial state; dmq-node's V2 inbound sends `MsgDone` on demotion and runs again on the same connection when the peer is promoted | `7cd17437`: the V2 `Client` (the responder) stays in `StDone`, so the next run's first request is never answered | "should be restarted in its initial state" | does not conform | Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR (model `dmq` `DmqRestartSubmissionV2NoRestartBug.cfg`) |
+| [N61](#n61) | network | Local-tx-monitor `Release()` with no snapshot acquired | Not expressible: the typed client offers `MsgRelease` only while acquired | `7cd17437`: sends `MsgRelease` from `Idle`; the send loop refuses it and the connection is torn down while `Release` returns nil | `MsgRelease` only from `StAcquired` | does not conform | Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR (model `localtx` `LocalTxMonitorClientCallsReleaseIdleBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -498,7 +499,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/LocalTxMonitor/Codec.hs` 78
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/messages.go` 28-39 (tags 0-10 only)
 - **Verdict.** does not conform
-- **Status.** Fixed on local branch `fix/localtxmonitor-get-measures` (`923a32dc`): both messages, `Client.GetMeasures`, and the server's answer, gated on `NodeToClientV_20` as the reference encoder is (`Codec.hs` 57, 78-86, 102-113). Model: `LocalTxMonitorOldNode.cfg`, `LocalTxMonitorOldNodeBug.cfg`
+- **Status.** Merged in #3196 (`0fa7a0df`); on `main` at `7cd17437`. First fixed on local branch `fix/localtxmonitor-get-measures` (`923a32dc`): both messages, `Client.GetMeasures`, and the server's answer, gated on `NodeToClientV_20` as the reference encoder is (`Codec.hs` 57, 78-86, 102-113). Model: `LocalTxMonitorOldNode.cfg`, `LocalTxMonitorOldNodeBug.cfg`
 
 ### N29
 
@@ -509,7 +510,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/LocalTxMonitor/Type.hs` (agency typing)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/localtxmonitor/client.go` 99-110; PR #3088 head `0fcda55b0` same file 104-121
 - **Verdict.** does not conform → conforms
-- **Status.** Open PR #3088 (by another contributor)
+- **Status.** Open PR #3088 (by another contributor). Still on `main` at `7cd17437` (`Stop` returns "protocol is shutting down" and the connection reports `MsgDone` not allowed in `Acquired`); #3088 conflicts with main's `Stop(ctx)` and `stopRequested`. Model: `localtx` `LocalTxMonitorClientCallsStopAcquiredBug.cfg`
 
 ### N30
 
@@ -857,6 +858,17 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/messagesubmission/messagesubmission.go` `stateMapV2`, `client.go` `handleDone`; `TestV2ClientServesRunAfterMsgDone`
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/leios-dmq-lifecycle` `95f5396d`, no PR: the V2 Client's `MsgDone` leads back to `StIdle` and the run's outstanding ids are dropped
+
+### N61
+
+**Local-tx-monitor `Release()` with no snapshot acquired** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: the typed client offers `MsgRelease` only in its acquired continuation, so it cannot be sent from `StIdle`. gOuroboros: `Release()` sends it whatever the client holds; from `Idle` its own send loop refuses it and tears the connection down, and `Release` returns nil.
+- **Spec.** ouroboros-network `5f356486ab3e` `docs/network-spec/miniprotocols.tex`, local tx-monitor transition table, lines 2105-2166 (`MsgRelease` from `StAcquired` only)
+- **Reference.** ouroboros-network `5f356486ab3e` `.../Protocol/LocalTxMonitor/Client.hs` 121-166
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/localtxmonitor/client.go` `Release`, `release`; `TestReleaseWithNothingAcquired`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/localtxmonitor-client-call-guards` `c6e999f9`, no PR: `Release` returns `ErrNotAcquired` and sends nothing, as the local-state-query client already does
 
 ## Consensus
 
@@ -1502,6 +1514,7 @@ These pull requests fix races, leaks and deadlocks inside gOuroboros. The wire b
 | #3274 | A9 | `engine` `EngineSendBeforeStartLostBug.cfg`, `EngineSendBeforeStartRaceBug.cfg` | `EngineSendBeforeStart.cfg` |
 | #3276 | C13, C14, C15 | `leios-peras` `PerasClientOpMuReentryBug.cfg`, `PerasClientOpMuDoneCtxBug.cfg`, `PerasClientOpMuAwaitPanicBug.cfg`, `PerasClientOpMuAwaitUnjoinedBug.cfg` | `PerasClientOpMu.cfg`, `PerasClientOpMuAnswered.cfg` |
 | local `fix/muxer-models` (no PR) | muxer 1, 3, 4 | `muxer` `MuxStartGateLostStartBug.cfg`, `MuxReceiverStopJoinBug.cfg`, `MuxReceiverStopReplaceBug.cfg` | `MuxStartGate.cfg`, `MuxReceiverStop.cfg` |
+| local `fix/localtxmonitor-client-call-guards` (no PR) | local-tx-monitor `GetMeasures` after `Stop` | `localtx` `LocalTxMonitorClientCallsLateMeasuresBug.cfg` | `LocalTxMonitorClientCalls.cfg` |
 | local `fix/leios-dmq-lifecycle` (no PR) | C18 across a restart; leios client `Sync` | `leios-peras` `LeiosNotifyServerRestartRetiredBug.cfg`, `LeiosVotesLifecycleRunLoopBug.cfg` | `LeiosNotifyServerRestart.cfg`, `LeiosVotesLifecycle.cfg` |
 
 ## Library boundary: contracts, not drift
@@ -1537,6 +1550,7 @@ Not drift, since gOuroboros matches the reference, but worth knowing. Details an
 
 ## Resolved since the models were written
 
+- Local-tx-monitor `MsgGetMeasures`, N28 (merged #3196).
 - Keep-alive server restart after `MsgDone` (merged #3080), and the shutdown race in every restarting server (merged #3087).
 - Chain-sync `Stop` without `MsgDone` (merged #3092, now on `main`).
 - Handshake accept data and key order, N13 and N14 (merged #3194); TPraos overlay schedule and header envelope, C15 and C16 (merged #3201). Their verdicts above still describe the pinned `main`.
@@ -1547,10 +1561,10 @@ Entries where gOuroboros on `main` breaks a stated rule, with what would close e
 
 No pull request yet (decide whether and how to fix):
 
+- **N61** Local-tx-monitor `Release()` with no snapshot acquired. Fixed on local branch `fix/localtxmonitor-client-call-guards` (`c6e999f9`).
 - **N18** Block-fetch size limit in `StBusy` (and `StIdle` for a pipelining client). Not fixed; needed by gOuroboros' engine, which judges a message against the state current when it arrives.
 - **N21** Tx-submission request over the window from `NodeToNodeV_16`. Fixed in PR #3195 (head `e5c47f5f`).
 - **N27** Local-tx-monitor server answers `MsgAwaitAcquire` at once. Opt-in fix in PR #3196 (head `26f0e50a`), which depends on PR #3154 for the client side.
-- **N28** Local-tx-monitor `MsgGetMeasures`. Not fixed; a missing feature.
 - **N32** Other servers that do not restart after `MsgDone`. Fixed in PR #3197 (head `c107bb53`). Keep-alive, chain-sync, block-fetch, tx-submission, peer-sharing and the three Leios servers do restart on main.
 - **C6** Genesis window anchor. Not fixed; correct only if the caller anchors every fragment at one point (model `consensus-genesis`, `OwnAnchorBug`).
 - **C8** Genesis window count from `SimpleChainFragment`. The float rounding is fixed on local branch `fix/genesis-window-estimate-rounding` (`74699bf6`, no PR); the estimate itself remains. Callers with real headers should implement `ChainFragment` with a count.

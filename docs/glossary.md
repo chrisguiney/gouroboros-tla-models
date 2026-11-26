@@ -190,3 +190,12 @@ Plain-language definitions, with a Go comparison where one helps.
 **`UNCHANGED x`**
 : Shorthand for `x' = x`. Every action must say what happens to every
   variable.
+
+**`SUBSET S`**
+: The set of all subsets of `S`. `\E S \in SUBSET Txs : Acquire(S)` lets a
+  step pick any subset, as `specs/localtx/LocalTxMonitorTxIdCache.tla` does
+  for a new mempool snapshot.
+
+**`A \X B`**
+: The Cartesian product: every pair `<<a, b>>` with `a` in `A` and `b` in
+  `B`. `x[1]` and `x[2]` are a pair's parts.
