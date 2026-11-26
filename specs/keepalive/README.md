@@ -342,6 +342,46 @@ packages is that trace: it holds the restart inside its `Done` handler, reads
 `DoneChan` from another goroutine, and fails under `-race` when the method
 reads the field without the lock.
 
+## The client's ping timer (`KeepAliveClientTimer.tla`)
+
+The gOuroboros keep-alive client (`protocol/keepalive/client.go`, at
+`7cd17437`) pings from a `time.AfterFunc` callback. The model has one step
+per locked block or call of `sendKeepAlive` (the `inFlight` check under
+`cookieMutex`, `SendMessage`, the unlocked and the locked `IsStopping`
+checks of `startTimer`), `Client.Stop` (signal, clear the timer under
+`timerMutex`, join), the connection's shutdown (signal and join only), the
+`DoneChan` watcher that stops the timer, and the response handler.
+
+Time is an abstract clock of small integers that keep the order of the real
+durations: `PeerLimit` stands for the server's 97 s limit on the next ping
+(S2), `Period` and `Timeout` for the client's configured values. A `Tick`
+happens only when nothing is due at the current instant.
+
+| Config | What it checks | Result |
+|---|---|---|
+| `KeepAliveClientTimer.cfg` | `NewConfig` durations, honest, rogue and silent servers, `Client.Stop` | passes: `AtMostOneInFlight`, `FiresBounded`, `PeerNeverTimesOut`, `SilentPeerNoticed`, `StopLeavesNoTimer`, `NoSendAfterStop`, `ExtraFiresAfterStopAtMostOne`, `NoTimerWhenQuiescent` |
+| `KeepAliveClientTimerClose.cfg` | the connection's shutdown, which signals the protocol and leaves the timer to the watcher it does not join | passes: at most one more fire, which sends nothing and arms nothing |
+| `KeepAliveClientTimerZeroPeriodBug.cfg` | gOuroboros `7cd17437`, a `Config` without `Period` | **fails** `FiresBounded`: the timer is re-armed for the same instant, forever |
+| `KeepAliveClientTimerZeroPeriod.cfg` | the fix: `NewClient` uses `DefaultKeepAlivePeriod` | passes |
+| `KeepAliveClientTimerNoTimeoutBug.cfg` | gOuroboros `7cd17437`, a `Config` without `Timeout`, silent server | **fails** `SilentPeerNoticed`: no timer is armed for the answer, and the ping left in flight stops every later one |
+| `KeepAliveClientTimerNoTimeout.cfg` | the fix: `NewClient` uses `DefaultKeepAliveTimeout` | passes |
+| `KeepAliveClientTimerLongPeriodBug.cfg` | a `Period` not below 97 s | **fails** `PeerNeverTimesOut`: an honest server hangs up between pings. gOuroboros accepts such a `Period`; the `Config` doc now says to keep it below `ClientTimeout` |
+| `KeepAliveClientTimerClearFirstBug.cfg` | mutation: `Stop` clears the timer before it signals (the order before the A11 fix) | **fails** `StopLeavesNoTimer` |
+| `KeepAliveClientTimerNoGuardBug.cfg` | mutation: no `inFlight` guard | **fails** `AtMostOneInFlight` |
+
+Run it with `make keepalive-client-timer`. The server waits for the next ping
+for less than `Period` whatever the answer's delay, since a ping skipped while
+one is in flight is re-armed one `Period` later; so `Period < 97 s` is the
+whole relation (gap 130).
+
+Go tests (gOuroboros branch `test/keepalive-handshake-timers`,
+`protocol/keepalive/client_timer_model_test.go`): `TestClientResponseTransitions`
+(PeerAnswers, PeerRogue), `TestSendKeepAliveTransitions` (CbCheck to CbLock,
+`AtMostOneInFlight`, `NoSendAfterStop`), `TestZeroPeriodDoesNotFloodPeer`
+(`FiresBounded`), `TestZeroTimeoutTimesTheAnswer` (`SilentPeerNoticed`),
+`TestDefaultPeriodBelowServerLimit` (`PeerNeverTimesOut`); the existing
+`TestStopLeavesNoTimerArmed` binds `StopLeavesNoTimer`.
+
 ## The Go tests this model drove
 
 `protocol/keepalive/statemap_model_test.go` in gOuroboros holds the same 30

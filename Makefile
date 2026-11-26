@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle connection engine engine-deep engine-lifecycle connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-rewards ledger-block-overlay models check clean
+.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle keepalive-client-timer handshake-timeout connection engine engine-deep engine-lifecycle connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-rewards ledger-block-overlay models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -44,6 +44,12 @@ keepalive-lifecycle: ## Check the gOuroboros server restart against Stop, connec
 	$(KEEPALIVE) -config KeepAliveLifecycleReaderUnlockedBug.cfg KeepAliveLifecycle.tla || true
 
 CONNECTION := cd specs/connection && ../../bin/tlc
+
+keepalive-client-timer: ## Check the keep-alive client's ping timer against Stop, shutdown and the server's limit
+	@scripts/run-model.sh specs/keepalive | grep -E 'KeepAliveClientTimer|keepalive:'
+
+handshake-timeout: ## Check the handshake timeout, a concurrent Close, and FinishedFunc
+	@scripts/run-model.sh specs/connection | grep -E 'HandshakeTimeout|connection:'
 
 connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config MuxHandover.cfg MuxHandover.tla
