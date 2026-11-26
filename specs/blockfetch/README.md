@@ -499,14 +499,30 @@ instance while a second fetch took the lock. Every fetch already releases its
 own token (failed send, resolve, or its instance done), so the fix drops
 `Stop`'s release.
 
+Dropping it exposes a client that was never started. Its instance takes a send
+without refusing or answering it, and `Stop` in a state other than running
+left that instance alone. A caller that sends on it, before or after `Stop`,
+then waits forever with the lock held, and no fetch after `Start` can take it.
+The fix also stops a never-started instance in that branch of `Stop`, under
+`lifecycleMutex`: stopping unregisters the role from the muxer, which removes
+whichever instance is registered, so done after the mutex is released it can
+remove the registration of the instance a concurrent `Start` just installed.
+The model starts in either state (`life` is `"new"` or `"running"`), lets a
+send on an instance resolve only once it is started or done, and tracks the
+registered instance (`reg`).
+
 | Config | States | Result |
 | --- | --- | --- |
 | `BlockFetchBusyHandoffStopReleaseBug.cfg`: main | | **fails** `OneFetchAtATime` |
-| `BlockFetchBusyHandoff.cfg`: the fix, three generations | 939 | passes `OneFetchAtATime`, `HolderIsInProgress`, no deadlock (the lock is free at the end) |
+| `BlockFetchBusyHandoffNeverStartedBug.cfg`: first pass of the fix (no release, never-started instance not stopped) | 586 | **fails** `CallerAlwaysReleased`: a fetch on the never-started instance waits forever with the lock held (deadlock with deadlock checking on) |
+| `BlockFetchBusyHandoffStopNewUnlockedBug.cfg`: never-started instance stopped after `lifecycleMutex` is released | | **fails** `RegisteredWhileRunning` |
+| `BlockFetchBusyHandoff.cfg`: the fix, three generations, both initial states | 1,754 | passes `OneFetchAtATime`, `HolderIsInProgress`, `RegisteredWhileRunning`, `CallerAlwaysReleased`, `BusyEventuallyFree`, no deadlock (the lock is free at the end) |
 | `BlockFetchBusyHandoffProbeAcrossBug.cfg` (probe) | | violated: with the fix a fetch that took the lock before a restart sends on the new instance |
 
 `TestBusyLockHeldAcrossRestart` (a test hook after `acquireBusy`) fails on
 main and passes with the fix (`-race -count=30`).
+`TestFetchOnNeverStartedClientFailsAfterStop` binds `CallerAlwaysReleased`
+for a never-started client.
 
 ## Spec, reference, and gOuroboros
 
@@ -678,6 +694,8 @@ cd specs/blockfetch
 ../../bin/tlc -config BlockFetchRestartStopCtxBug.cfg BlockFetchRestart.tla
 ../../bin/tlc -config BlockFetchRestartConcurrentBug.cfg BlockFetchRestart.tla
 ../../bin/tlc -config BlockFetchBusyHandoffStopReleaseBug.cfg BlockFetchBusyHandoff.tla
+../../bin/tlc -config BlockFetchBusyHandoffNeverStartedBug.cfg BlockFetchBusyHandoff.tla
+../../bin/tlc -config BlockFetchBusyHandoffStopNewUnlockedBug.cfg BlockFetchBusyHandoff.tla
 ```
 
 The rest of the `*Bug.cfg` configs of slices 3 and 5-10 are listed in their tables; `make blockfetch` runs every config.
