@@ -711,7 +711,22 @@ reaches through `resolve`, the watcher at :606, or `Stop` through `releaseCurren
    - Interleaving: the handler returns on `StopChan` (:1970), and the deferred cancel stops
      `drainCtx`. A `Pipeline.WaitForDrain` that ignores its context leaves this goroutine
      running after the protocol is gone.
-3. **Server: promoted methods race the restart.**
+3. **`Stop`'s wait for `busyMutex` ignores ctx and the callback marker.**
+   - Kind: lock across blocking call.
+   - Lines: protocol/chainsync/client.go `stopRunning` (gOuroboros 7cd17437).
+   - Interleaving: G1 `Jump` holds `busyMutex` waiting for `MsgIntersectFound`. The
+     handler runs `IntersectFoundFunc`, which calls `Stop` with its context. `Stop`
+     polls for 5 s: G1 releases only after the callback returns. A `Stop` whose ctx is
+     done also keeps polling. `ChainSyncTipWorkerCtxBug.cfg`,
+     `ChainSyncTipWorkerCallbackStopBug.cfg`.
+4. **`GetCurrentTip` from a callback hangs `Stop`.**
+   - Kind: other (wait on a channel only the blocked goroutine can close).
+   - Lines: protocol/chainsync/client.go `GetCurrentTip` (gOuroboros 7cd17437).
+   - Interleaving: a roll callback calls `GetCurrentTip`; its answer needs the receive
+     loop the callback is blocking. The call and its worker wait only for `DoneChan`,
+     which closes after that loop returns, so `Stop` with no deadline never returns.
+     `ChainSyncTipWorkerCallbackTipBug.cfg`.
+5. **Server: promoted methods race the restart.**
    - Kind: other (data race).
    - Lines: protocol/chainsync/server.go:125 writes `s.Protocol` under `protocolMu`; promoted
      methods called from consumer goroutines read it without the lock. Same interleaving as
@@ -2009,6 +2024,8 @@ hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
   `MsgIntersectFound`/`NotFound`. Waiting behind the current holder is by
   design: `MsgFindIntersect` needs `StIdle`, which only the holder's reply
   restores.
+- **B6/B7: modelled** in `ChainSyncTipWorker.tla` (rank 9); the model found
+  chainsync hazards 3 and 4 above.
 - **B7: bounded.** The drain goroutine (`chainsync/client.go:1950`) calls the
   concrete `*pipeline.BlockPipeline.WaitForDrain`, which returns on `ctx`
   (`pipeline/pipeline.go:1072`, `lockSubmit` `:465`, `Fence` `:893`). The
@@ -2270,7 +2287,7 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 6 | `LocalTxStopLock` | localtxsubmission, localtxmonitor | K1, B11, B12, B13 | The known review finding; small model, quick confirmation of the fix. |
 | 7 | `LeiosFetchRangeDelivery` | leiosfetch | C8 | A permanent goroutine leak holding queued replies, on an ordinary caller cancel. |
 | 8 | `MuxReceiverStop` | muxer | (none found; checks the `sync.Cond` by machine) | The muxer carries all traffic; the hand check of the `Cond` and the stop/metrics callback order deserves a machine check. |
-| 9 | `ChainSyncTipWorker` | chainsync | B6, B7 | `GetCurrentTip` latency coupled to an unrelated query; `Stop`'s `TryLock` deadline. |
+| 9 | `ChainSyncTipWorker` | chainsync | B6, B7 | `GetCurrentTip` latency coupled to an unrelated query; `Stop`'s `TryLock` deadline. **Written** (`specs/chainsync/ChainSyncTipWorker.tla`): B6 by design, B7 bounded; found that `Stop`'s lock wait ignores ctx and the callback marker, and that `GetCurrentTip` from a callback hangs `Stop`. |
 | 10 | `TxSubmissionServerLocks` | txsubmission | hazard 2 (found by the model) | Written: `specs/txsubmission/TxSubmissionServerLocks.tla`. Found a stateMu -> protocolMu inversion in `handleInit`/`handleDone` that deadlocks with `Stop` and a caller; the one-slot handoff and restart-vs-`Stop` hold. |
 | 11 | `PerasClientOpMu` | perasvotes | C13, C14, C15 | Reentrancy deadlock and an uncontained panic, in an experimental protocol. |
 | 12 | `KeepAliveClientTimer` | keepalive | A11 | **Done**: `specs/keepalive/KeepAliveClientTimer.tla`. Bounded (one extra fire), but `AfterFunc` callbacks are easy to get wrong when fixing it. |

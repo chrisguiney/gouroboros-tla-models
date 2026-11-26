@@ -112,6 +112,16 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncProtocolFindBug.cfg ChainSyncProtocol.tla || true
 	$(CHAINSYNC) -config ChainSyncProtocolDoneBug.cfg ChainSyncProtocol.tla || true
 	$(CHAINSYNC) -config ChainSyncProtocolAwaitBug.cfg ChainSyncProtocol.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorker.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerRange.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerFixed.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackStop.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackTip.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerCtxBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackStopBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackTipBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerNoRetireBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerNoJoinBug.cfg ChainSyncTipWorker.tla || true
 
 chainsync-deep: ## Check the chain-sync client with a window of three
 	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla
