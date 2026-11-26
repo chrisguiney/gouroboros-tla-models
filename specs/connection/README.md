@@ -15,6 +15,7 @@ first.
 | 2 | `MuxHandover.tla`, with a stopper | Does `Stop` or a connection shutdown during a restart leave anything behind? |
 | 3 | `MuxIngress.tla` | What happens when several mini-protocols share one demultiplexer? |
 | 4 | `ConnectionShutdown.tla` | Can errors and shutdown race into a panic or a hang? |
+| 4b | `ConnectionShutdownAgency.tla` | When the peer closes, is it an error? |
 | 5 | `ConnectionTeardown.tla` | Can `Close` during `Dial` leak the muxer, or a late `waitGroup.Go` panic? |
 | 5 | `ConnectionCloseConcurrent.tla` | Can callbacks closing one connection at once wait for each other? |
 
@@ -239,6 +240,66 @@ read-buffer budget, `protocol/protocol.go:1946`, `:2073`, `:2109`, all
 before the terminal-message check at `:2117`), and `SendError` checks
 `stopChan` and then sends, so a protocol stopped by `stopProtocols` between
 the two still queues its error. Part 5 shows the panic.
+
+## Part 4b: is a peer close an error? (`ConnectionShutdownAgency.tla`)
+
+The muxer reports a read of EOF as a `ConnectionClosedError`. The
+connection's muxer-error forwarder drops it, closing quietly, when
+`allProtocolsIdle()` holds: every mini-protocol's
+`Protocol.IsInTerminalOrIdleState()` is true. At `7cd17437` that function is
+true when the protocol is stopped, when its state has `AgencyNone` (`Done`),
+or when its state is the initial one. `recvLoop` asks the same of a
+zero-byte read.
+
+The rule: a close is normal only when no mini-protocol is in the middle of
+a transaction, so nobody owes a message. The reference fails the mux on a
+`BearerClosed` read while any mini-protocol is running and treats it as a
+normal end only when none is [S1]; a pipelined client may terminate only
+with no request outstanding (`Z` in `ClientPipelinedStIdle`) [S3]; `StDone`
+has `NobodyAgency` [S2].
+
+The module has requesters (chain-sync, block-fetch and leios clients):
+`Idle` (initial) -> request -> `Busy` -> reply -> `Idle`, and `MsgDone` ->
+`Done`. In `Busy` a requester may pipeline more requests: the engine writes
+them at once, defers their transitions (`queuedStateTransitions`), and
+counts them in `pendingPipelinedRequests` until `sendLoop` flushes them. A
+reply that arrives in `Idle` for such a request is reserved
+(`pendingPipelinedReplies`) and applied after the flush. The peer closes at
+any moment, and the forwarder judges once, while the protocols' loops still
+run.
+
+| Config | Classifier | Result |
+| --- | --- | --- |
+| `ConnectionShutdownAgency.cfg` | fixed: also no pipelined request without its reply | **Passes: 11,652 distinct states.** `NoErrorOnlyWhenNobodyOwes`, `NoErrorAtRest`, `NoCleanWithUnansweredPipelined`. |
+| `ConnectionShutdownAgencyNoPipelining.cfg` | gOuroboros at `7cd17437`, no pipelining | **Passes: 2,580 distinct states.** Without pipelining the classification is right. |
+| `ConnectionShutdownAgencyPipelinedBug.cfg` | gOuroboros at `7cd17437`, pipelining | **Fails `NoErrorOnlyWhenNobodyOwes`** (7 states): request, pipelined request, first reply (state `Idle`, `pend = 1`), peer closes, judged clean while the peer owes the pipelined reply. |
+| `ConnectionShutdownAgencyAnyStateBug.cfg` | mutation: every state idle | fails `NoErrorOnlyWhenNobodyOwes` |
+| `ConnectionShutdownAgencyDoneIsBusyBug.cfg` | mutation: `Done` not idle | fails `NoErrorAtRest` |
+
+**The defect.** Between the reply that returns a pipelining client to its
+initial state and `sendLoop`'s flush of the next deferred transition, the
+client's state is the initial one, so `IsInTerminalOrIdleState` is true. A
+peer that closes then has left a request unanswered, and if every other
+protocol is idle the connection closes as if the peer had ended cleanly. Fixed
+on gOuroboros branch `fix/shutdown-and-peersharing`: the function also
+requires `pendingPipelinedReplies >= pendingPipelinedRequests`, read in the
+same critical section as the state (`currentInboundSnapshot`).
+
+**Go tests** (same branch):
+
+| Test | Binds |
+| --- | --- |
+| `protocol/eof_classification_test.go` `TestIdleClassificationCountsUnansweredPipelinedRequest` | the steps `Request`, `PipelineRequest`, `AdmitInBusy`, `AdmitInIdle`, `Flush`, `ApplyHeld` on a running state loop, with the classification after each; fails at `7cd17437` on the bug trace's state. |
+| `protocol/eof_classification_table_test.go` `TestCloseClassificationMatchesAgency` | every state of the `StateMap` of every mini-protocol package, client and server (32 protocol instances): clean exactly in `AgencyNone` (which must have no transitions) and the initial state, an error in every other state, only `Done` clean with a pipelined request unanswered, and every state clean once stopped. Fails at `7cd17437` on the pipelined rows. |
+
+Server roles add nothing to the dynamic model: a responder never waits on
+the peer except in its initial state, so the table test covers them.
+
+| Source | Where | What it says |
+| --- | --- | --- |
+| S1 | ouroboros-network `5f356486ab3e` `network-mux/src/Network/Mux.hs` 474-483, 527-551 | `anyRunning`; a `BearerClosed` read is a normal end only when no mini-protocol is running, otherwise the mux fails. |
+| S2 | same commit, `ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/ChainSync/Type.hs` 180 | `StDone` has `NobodyAgency`. |
+| S3 | same commit, `.../Protocol/ChainSync/ClientPipelined.hs` 64-84 | Outstanding pipelined requests are counted in the type (`S n`); `SendMsgDone` only at `Z`. |
 
 ## Part 5: teardown while Dial runs (`ConnectionTeardown.tla`)
 

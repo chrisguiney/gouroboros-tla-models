@@ -2499,6 +2499,10 @@ Models: `specs/` in this repository.
     wait) and the handler (`requestedMutex` read, unbuffered send).
   - Invariants: `CheckedAgainstOwnAmount` (the handler compares the reply with the amount of
     the request in flight) and `HandoffHasReceiver`.
+  - Done: `specs/peersharing/PeerSharingExchange.tla`. `NeverGivenMoreThanAsked` (the
+    first invariant above), `EveryCallerReturns`, and the NoPeerSharing gate
+    (`NeverRequestsWhenOff`, `NeverServesWhenOff`). The exchange holds; the server gate did
+    not (it checked `LocalDisabled` only).
 
 #### Pipeline, Leios/Peras and DMQ
 

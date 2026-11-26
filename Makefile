@@ -67,6 +67,11 @@ connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config MuxIngressSharedBudgetBug.cfg MuxIngress.tla || true
 	$(CONNECTION) -config ConnectionShutdown.cfg ConnectionShutdown.tla
 	$(CONNECTION) -config ConnectionShutdownLateErrorBug.cfg ConnectionShutdown.tla || true
+	$(CONNECTION) -config ConnectionShutdownAgency.cfg ConnectionShutdownAgency.tla
+	$(CONNECTION) -config ConnectionShutdownAgencyNoPipelining.cfg ConnectionShutdownAgency.tla
+	$(CONNECTION) -config ConnectionShutdownAgencyPipelinedBug.cfg ConnectionShutdownAgency.tla || true
+	$(CONNECTION) -config ConnectionShutdownAgencyAnyStateBug.cfg ConnectionShutdownAgency.tla || true
+	$(CONNECTION) -config ConnectionShutdownAgencyDoneIsBusyBug.cfg ConnectionShutdownAgency.tla || true
 
 ENGINE := cd specs/engine && ../../bin/tlc
 

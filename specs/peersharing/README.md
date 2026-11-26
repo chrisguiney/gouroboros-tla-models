@@ -112,6 +112,51 @@ The `Ended` clause for an idle server was reached only through a rogue
 request after the client finished. The probe now runs with one rogue message.
 Without it, that clause could have been hiding a real deadlock.
 
+## The exchange and the NoPeerSharing gate (`PeerSharingExchange.tla`)
+
+`PeerSharing.tla` checks the wire protocol. `PeerSharingExchange.tla` checks
+the Go code around it: two `GetPeers` callers (`exchangeLock`, the recorded
+`requestedAmount`, `SendMessage`, the wait on `sharePeersChan` or
+`DoneChan`), `sendLoop` writing queued requests, `handleSharePeers`, the
+client stopping (Stop, the `Busy` timeout, or the connection closing), and a
+misbehaving peer that sends our server `MsgShareRequest` whatever was
+negotiated. The handshake picks `LocalDisabled` and `RemoteDisabled`;
+`connection.go` sets `RemoteDisabled` from the negotiated version data, which
+is off whenever either side advertised `NoPeerSharing` [R5], so
+`LocalDisabled` implies `RemoteDisabled`.
+
+| Invariant | Meaning |
+| --- | --- |
+| `NeverRequestsWhenOff` | A connection that negotiated `NoPeerSharing` never sends `MsgShareRequest`. |
+| `NeverServesWhenOff` | ... and never asks `ShareRequestFunc` for peers to give the peer [S2 1770-1771][R5]. |
+| `NeverGivenMoreThanAsked` | No caller is handed more peers than it asked for. |
+| `EveryCallerReturns` (liveness, weak fairness) | Every `GetPeers` returns. |
+
+| Config | Result |
+| --- | --- |
+| `PeerSharingExchange.cfg` (server checks either flag) | **Passes: 2,202 distinct states**, all four. |
+| `PeerSharingExchangeServerGateLocalBug.cfg` (gOuroboros at `7cd17437`: server checks `LocalDisabled` only) | **Fails `NeverServesWhenOff`**: remote advertised `NoPeerSharing`, local did not; the peer asks anyway and is given peers. |
+| `PeerSharingExchangeServerGateNoneBug.cfg` (mutation: no server check) | fails `NeverServesWhenOff` |
+| `PeerSharingExchangeNoClientGateBug.cfg` (mutation: `GetPeers` ignores the flags) | fails `NeverRequestsWhenOff` |
+| `PeerSharingExchangeNoLockBug.cfg` (mutation: no `exchangeLock`) | fails `NeverGivenMoreThanAsked`: two callers wait on `sharePeersChan` and one gets the other's reply |
+
+**The defect.** `handleShareRequest` checked only `LocalDisabled`. Its
+README documented that: a remote that advertised `NoPeerSharing` was still
+served "if local advertised active". The negotiated mode is then
+`NoPeerSharing`, the reference does not run the server at all, and
+`connection.go` sets `RemoteDisabled` so that "client/server guards can
+refuse traffic when either side advertised NoPeerSharing". Fixed on
+gOuroboros branch `fix/shutdown-and-peersharing`: the server answers an empty
+list when either flag is set, as it already did for `LocalDisabled` (the
+lenient choice of DRIFT N24). Go test
+`protocol/peersharing/negotiation_gate_test.go`
+`TestServerServesOnlyWhenNegotiatedOn` runs all four flag combinations
+against a real server and fails at `7cd17437` on `remote off`.
+
+The exchange itself holds as the code is: `exchangeLock` keeps one request in
+flight per client, so `requestedAmount` is always the amount of the request
+being answered, and the `DoneChan` case returns every waiting caller.
+
 ## The receive table
 
 `PeerSharingTable.tla` prints 2 roles x 3 states x 5 kinds = 30 cells. Kinds:
@@ -188,7 +233,7 @@ preflight bounds (`messages_test.go`, `dispatch_test.go`).
 | Message while the reader holds agency | not stated | waits, judged later (Model `keepalive`, S8) | refused at once | differs, as in keep-alive; only a misbehaving peer is affected |
 | Server after `MsgDone` | restart [S7] | restart | restart | agree |
 | Client sends `MsgDone` | "Terminating message" [S2] | on `Terminate` [R3] | never through the API | differs; the connection closes instead |
-| `ShareRequest` when peer sharing was negotiated off | "won't even have the ... server running" [S2 1770-1771] | protocol 10 not registered [R5]; a segment for it is `UnknownMiniProtocol`, which tears down the connection [R6] | answers an empty list | differs; gOuroboros is more lenient, by design (its README) |
+| `ShareRequest` when peer sharing was negotiated off | "won't even have the ... server running" [S2 1770-1771] | protocol 10 not registered [R5]; a segment for it is `UnknownMiniProtocol`, which tears down the connection [R6] | answers an empty list (at `7cd17437` only when this node advertised it; a remote that advertised it was served, see `PeerSharingExchange.tla`) | differs; gOuroboros is more lenient, by design (its README) |
 | IPv4 address | CDDL `[0, word32, port]` [S4] | network-order word read as a host word [R4] | little-endian word | agree (existing test) |
 | IPv6 address, v14 | `[1, w1..w4, port]` [S4] | four big-endian words, flow and scope dropped [R4] | same | agree |
 | IPv6, v11/v12 8-element form | obsolete CDDL | not decoded: versions below 14 are gone [R4][R8] | accepted on decode | gOuroboros more lenient; harmless |
@@ -222,8 +267,7 @@ commit.
 ## Not modelled
 
 Real time, exact byte sizes (`ByteCap` stands for them; the 230/231 boundary
-is tested in Go), the `NoPeerSharing` gating (a flag, not a state; see the
-table), the restart goroutines (Model `keepalive`'s `KeepAliveLifecycle.tla`), the
+is tested in Go), the restart goroutines (Model `keepalive`'s `KeepAliveLifecycle.tla`), the
 reference's client registry and peer selection policy, and address encoding
 (tested in Go).
 
@@ -235,6 +279,7 @@ cd specs/peersharing
 ../../bin/tlc -config PeerSharingSlow.cfg PeerSharing.tla
 ../../bin/tlc -workers auto -config PeerSharingRogue.cfg PeerSharing.tla
 ../../bin/tlc -config PeerSharingTable.cfg PeerSharingTable.tla | grep '^<<'
+../../bin/tlc -config PeerSharingExchange.cfg PeerSharingExchange.tla
 # expected to fail:
 ../../bin/tlc -config PeerSharingNoClampBug.cfg PeerSharing.tla
 ../../bin/tlc -config PeerSharingNoCapBug.cfg PeerSharing.tla
@@ -246,4 +291,8 @@ cd specs/peersharing
 ../../bin/tlc -config PeerSharingProbeNeverClampsToCapBug.cfg PeerSharing.tla
 ../../bin/tlc -config PeerSharingProbeNeverRestartsBug.cfg PeerSharing.tla
 ../../bin/tlc -config PeerSharingProbeNeverIdleForeverBug.cfg PeerSharing.tla
+../../bin/tlc -config PeerSharingExchangeServerGateLocalBug.cfg PeerSharingExchange.tla
+../../bin/tlc -config PeerSharingExchangeServerGateNoneBug.cfg PeerSharingExchange.tla
+../../bin/tlc -config PeerSharingExchangeNoClientGateBug.cfg PeerSharingExchange.tla
+../../bin/tlc -config PeerSharingExchangeNoLockBug.cfg PeerSharingExchange.tla
 ```
