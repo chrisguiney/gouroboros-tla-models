@@ -469,6 +469,7 @@ affect the model.
 
 ## Not modelled yet
 
-Byte sizes beyond "fits or not", timeouts, and the egress side of the
-muxer. Goroutines started with `RunLoop` and the keep-alive client's timer
+Byte sizes beyond "fits or not" and timeouts. The egress side of the muxer,
+its start gate and its receiver goroutines are in
+[the muxer](../muxer/README.md). Goroutines started with `RunLoop` and the keep-alive client's timer
 are not in the join.
