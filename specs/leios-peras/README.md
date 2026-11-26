@@ -327,6 +327,68 @@ with the caller's context, and a call whose context carries the client's
 | `PerasClientOpMuAnswered` | the fix, server answering, call back on another context that ends | passes, including `EveryCallReturns` |
 | `PerasClientOpMuForeignBackgroundProbeBug` | probe, the fix: a call back on another context that never ends | **fails** `EveryCallReturns`: it waits for the `Sync` running it, as `Sync`'s doc says. Contract, not a defect |
 
+## LeiosNotify server restart and Stop (`LeiosNotifyServerRestart.tla`)
+
+Hazards C18 and C19 (CONCURRENCY.md), README gap "`ResponseSentFunc` and late
+notifications".
+
+### What the code does
+
+The server runs `RequestNextFunc` (the source) on a `RunLoop` goroutine of the
+instance that read the request, and a second `RunLoop` goroutine waits for the
+source's answer, the client's `MsgQuit` (`QuitChan`) or the instance's
+`DoneChan`. An answer is sent and then handed to `ResponseSentFunc`; a quit
+first sends `MsgCanceled` and leaves a third goroutine that hands a
+notification the source returns later to `ResponseSentFunc` with
+`ErrRequestCanceled`. `MsgQuit` is handled only once the request is answered;
+`handleQuit` sends `MsgDone`, stops the instance with `StopForRestart` (which
+does not wait) and installs a new one. `Server.Stop` stops the current
+instance and waits for its goroutines.
+
+### The answers
+
+| Config | States | Result |
+| --- | --- | --- |
+| `LeiosNotifyServerRestartRetiredBug.cfg`: gOuroboros `7cd17437` | 95 | **fails** `NoCallbackAfterStop` |
+| `LeiosNotifyServerRestart.cfg`: the fix, `Stop` also waits for retired instances | 90 | passes |
+| `LeiosNotifyServerRestartQuitUnheldBug.cfg`: mutation, `MsgQuit` handled before the reply | 149 | **fails** `ReplyOnOwnInstance` |
+| `LeiosNotifyServerRestartProbeBug.cfg`: probe, `Stop` after the restart while the retired source runs | 90 | violated, as expected |
+
+**Defect: `Stop` returns before a retired run's callbacks.** After a restart,
+`Stop` joins only the new instance. A source that ignores `QuitChan` is still
+running on the retired one, and its notification reaches `ResponseSentFunc`
+after `Stop` returned. `TestStopWaitsForSourceOfRetiredRun` fails on
+`7cd17437` ("Stop returned before the late ResponseSentFunc ran") and passes
+on `fix/leios-dmq-lifecycle` `bf0d7a47`, where `handleQuit` records the
+retired instance and `Stop` waits for it. `ReplyOnOwnInstance` and
+`ResponseSentOnce` hold at `7cd17437`: the answer always precedes the restart,
+because `MsgQuit` is held back until the reply is sent, so the request
+goroutine's later `ProtocolInstance()` calls cannot reach the new instance
+with a send.
+
+## LeiosVotes and LeiosNotify client lifecycle (`LeiosVotesLifecycle.tla`)
+
+Hazards C10, C11, C21. The two clients share a shape (`busyMutex` for the loop
+flag, `sendMutex` from the shutdown check through the sends, a loop started by
+`RunLoop`), so one model covers both.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `LeiosVotesLifecycleRunLoopBug.cfg`: gOuroboros `7cd17437` | 105 | **fails** `SyncReportsLoop` |
+| `LeiosVotesLifecycle.cfg`: the fix, `Sync` honours `RunLoop`'s result | 105 | passes |
+| `LeiosVotesLifecycleStopUnlockedBug.cfg`: mutation, `Stop` without `sendMutex` | 64 | **fails** `NoRequestAfterDone` |
+| `LeiosVotesLifecycleProbeBug.cfg`: probe, loops close while `Sync` starts its loop | 98 | violated, as expected |
+
+**Defect: `Sync` reports a loop that never started.** `RunLoop` starts nothing
+once the connection has begun to close, but both clients' `Sync` marked the
+loop running before calling it and ignored its result, so `Sync` returned nil
+and later calls saw "already running". `TestSyncOutcomeFollowsLifecycle`
+(leiosvotes) and `TestSyncReportsNotificationLoopThatCannotStart`
+(leiosnotify) fail on `7cd17437` and pass on `fix/leios-dmq-lifecycle`
+`3088a839`. C10 (`busyMutex` held across the vote waits) and C11/C21 (unjoined
+loops) are closed on `7cd17437`: the waits end on `DoneChan`, and `RunLoop`
+goroutines are in `Stop`'s join (`NoCallbackAfterStop` passes).
+
 ## The three servers' promoted methods (C9, C12, C20)
 
 The leios-fetch, leios-votes and leios-notify servers embedded the
@@ -396,14 +458,18 @@ ObjectDiffusion window rules (`TestObjectDiffusionWindowAndAgencyRules`).
 | C3 | [CIP-0164 lines 1480-1548](https://github.com/cardano-foundation/CIPs/blob/03387471681166e746518d58a33e25f2ccea3d29/CIP-0164/README.md?plain=1#L1480-L1548) | The CIP's LeiosFetch and its message table. |
 | C4 | [CIP-0140 line 1515](https://github.com/cardano-foundation/CIPs/blob/03387471681166e746518d58a33e25f2ccea3d29/CIP-0140/README.md?plain=1#L1515) | Two new mini-protocols for vote and certificate diffusion. |
 | G1 | gOuroboros `61046085`, `protocol/leiosnotify/`, `protocol/leiosfetch/`, `protocol/leiosvotes/`, `protocol/perasvotes/`, and `protocol/protocol.go` (`sendLoop`, `reserveInboundAdmission`, `recvLoop`) | The code modelled. |
+| G3 | gOuroboros `7cd17437`, `protocol/leiosnotify/server.go`, `client.go`, `protocol/leiosvotes/client.go`, `protocol/protocol.go` (`RunLoop`, `join`, `StopForRestart`), `muxer/loops.go` | The code `LeiosNotifyServerRestart.tla` and `LeiosVotesLifecycle.tla` model. |
+| R11 | [ouroboros-network `5f356486ab3e`, `ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs` lines 455-470](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/framework/lib/Ouroboros/Network/InboundGovernor.hs#L455-L470) | A responder that ended cleanly is run again. |
+| R14 | [ouroboros-network `5f356486ab3e`, `network-mux/src/Network/Mux.hs` lines 280-287](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/network-mux/src/Network/Mux.hs#L280-L287) | The mux waits for a mini-protocol's threads before it returns. |
 | G2 | gOuroboros `f7ebba9b` on local branch `fix/perasvotes-await-reply`, `protocol/perasvotes/` | The await fix: StateMap, `Sync`, `awaitObjectIDs`. |
 
 ## Not modelled
 
 Byte and count limits, message validation (LeiosFetch reply binding, vote
 decoding), timeouts beyond the table above, LeiosFetch's range streams beyond
-one reply, LeiosNotify's `ResponseSentFunc` and late notifications, Peras
-non-blocking requests and certificates.
+one reply, Peras non-blocking requests and certificates.
+`LeiosNotifyServerRestart.tla` models one request of one run; a second
+restart and pipelined requests are not modelled.
 
 ## Running it
 
@@ -421,4 +487,7 @@ for c in PerasVotesReferenceServerBug PerasVotesEmptyServerBug PerasVotesProbesB
 # Range delivery (C8) and the Peras exchange lock (C13-C15), both ways:
 for c in LeiosFetchRangeDelivery*.cfg; do ../../bin/tlc -config $c LeiosFetchRangeDelivery.tla; done
 for c in PerasClientOpMu*.cfg; do ../../bin/tlc -config $c PerasClientOpMu.tla; done
+# Server restart and Stop, and the clients' Sync and loop (C10, C11, C18, C21):
+for c in LeiosNotifyServerRestart*.cfg; do ../../bin/tlc -config $c LeiosNotifyServerRestart.tla; done
+for c in LeiosVotesLifecycle*.cfg; do ../../bin/tlc -config $c LeiosVotesLifecycle.tla; done
 ```
