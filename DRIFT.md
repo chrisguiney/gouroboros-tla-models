@@ -454,7 +454,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `network-mux/src/Network/Mux/Ingress.hs` 126
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/peersharing/server.go` 122-134
 - **Verdict.** conforms (implementation choice)
-- **Status.** Deliberate (documented in the package)
+- **Status.** Deliberate (documented in the package). At `7cd17437` the empty answer applied only when this node advertised `NoPeerSharing`; a remote that advertised it was served from `ShareRequestFunc`. `PeerSharingExchange.tla` (`NeverServesWhenOff`) finds it; fixed on gOuroboros `fix/shutdown-and-peersharing` (empty answer when either side advertised it).
 
 ### N25
 
