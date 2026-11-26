@@ -67,6 +67,12 @@ connection: ## Check the connection: restarts, stop, shared ingress, shutdown
 	$(CONNECTION) -config MuxIngressSharedBudgetBug.cfg MuxIngress.tla || true
 	$(CONNECTION) -config ConnectionShutdown.cfg ConnectionShutdown.tla
 	$(CONNECTION) -config ConnectionShutdownLateErrorBug.cfg ConnectionShutdown.tla || true
+	$(CONNECTION) -config ConnectionLifecycle.cfg ConnectionLifecycle.tla
+	$(CONNECTION) -config ConnectionLifecycleCurrent.cfg ConnectionLifecycle.tla
+	$(CONNECTION) -config ConnectionLifecycleTwoErrorsBug.cfg ConnectionLifecycle.tla || true
+	$(CONNECTION) -config ConnectionLifecycleErrorAfterCloseBug.cfg ConnectionLifecycle.tla || true
+	$(CONNECTION) -config ConnectionLifecycleErrorBeforeDoneBug.cfg ConnectionLifecycle.tla || true
+	$(CONNECTION) -config ConnectionLifecycleGateEarlyBug.cfg ConnectionLifecycle.tla || true
 	$(CONNECTION) -config ConnectionShutdownAgency.cfg ConnectionShutdownAgency.tla
 	$(CONNECTION) -config ConnectionShutdownAgencyNoPipelining.cfg ConnectionShutdownAgency.tla
 	$(CONNECTION) -config ConnectionShutdownAgencyPipelinedBug.cfg ConnectionShutdownAgency.tla || true

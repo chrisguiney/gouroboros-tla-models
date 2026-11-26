@@ -716,6 +716,7 @@ Counts (items are per package): modelled 29 items / 158 functions, vectors 31 it
 | Item | Functions | Class | Evidence |
 |---|---|---|---|
 | Connection setup/close/dial | NewConnection, Connection.DialTimeout, Connection.Close | modelled | specs/connection/ConnectionTeardown.tla: CloseWaitsForShutdown, MuxerStoppedWhenClosed, CloseTearsDown, NoCallbackAfterClose (ConnectionTeardownCloseDuringDialBug.cfg for DialTimeout) |
+| Connection lifecycle end to end (setup, muxer gate, error forwarders, every teardown source) | NewConnection, Connection.ErrorChan, Connection.Close, Muxer.StartOnce, Muxer.Start | modelled | specs/connection/ConnectionLifecycle.tla: NoMessageBeforeHandshake, GateOpensOnce, AtMostOneError, OneErrorPerCause, NoErrorAfterQuietClose, DoneBeforeError, CloseJoins; defect: duplicate, late and early ErrorChan errors (fix/connection-error-once) |
 | Connection options (handshake timeout) | WithHandshakeTimeout | caller-contract | godoc connection_options.go WithHandshakeTimeout; value chosen by caller (handshake README 'Not modelled': connection-wide handshake timeout) |
 | Network table lookups | NetworkByName, NetworkById, NetworkByNetworkMagic | gap | networks_test.go hand-written expectations only; magic/genesis values not checked against cardano-node configs |
 
