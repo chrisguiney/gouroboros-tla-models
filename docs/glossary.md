@@ -215,3 +215,12 @@ Plain-language definitions, with a Go comparison where one helps.
 : A model clock that jumps straight to the next deadline instead of ticking
   one unit at a time, so long durations (300 s) cost no states
   (`specs/dmq/DmqBlockingDeadline.tla`).
+
+**Time limit and byte limit** (Ouroboros term)
+: Per-state bounds the reference driver applies while receiving. A time limit
+  bounds how long the side without agency waits for the peer's next message:
+  `shortWait` (10 s), `longWait` (60 s) or `waitForever`. A byte limit bounds
+  the size of one message received in that state, such as `smallByteLimit`
+  (65,535 bytes); a larger one ends the connection. In gOuroboros they are a
+  state map entry's `Timeout` and `PendingMessageByteLimit`. Model
+  `limits-timeouts`.

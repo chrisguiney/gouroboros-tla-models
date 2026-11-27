@@ -36,6 +36,7 @@ closes. A PR can draw on more than one model.
 | `dmq` | #3142 (empty blocking replies, lost wakeup) | #3137, #3138, #3139 | merged |
 | `leios-peras` | #3160 (quit, cancel, pipelined vote requests, state map tests) | #3150, #3151, #3152, #3153 | merged |
 | `leios-peras` | #3165 (await, server idle, timeouts) | #3162, #3163, #3164 | merged |
+| `limits-timeouts` | local branches `fix/leiosfetch-block-limit` (`5e861de6`), `fix/messagesubmission-blocking-timeout-option` (`53fa164d`), `fix/messagesubmission-nonblocking-timeout` (`bb0e6ca9`), `test/limits-and-timeouts` (`ee6b1414`), not yet published | | local |
 | `consensus` | #3111 (header envelope, first header after Origin) | #3095, #3099, #3100 | open |
 | `ledger-shelley` | #3129 (epoch-aware pool registration) | #3124, #3125, #3126 | merged |
 | `ledger-governance` | #3155 (nil voter, governance lookup contract) | #3147, #3148, #3149 | merged |

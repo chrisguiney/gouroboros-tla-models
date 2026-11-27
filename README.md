@@ -63,6 +63,9 @@ protocol.
   rules, size limits and timeouts.
 - [Leios and Peras](specs/leios-peras/README.md): the
   experimental notify, fetch and vote protocols.
+- [Per-state timeouts and byte limits](specs/limits-timeouts/README.md):
+  which side each state's timer runs on, its value and each state's byte
+  limit, for Leios, Peras and message submission, against the reference.
 
 ### Node-to-client protocols
 

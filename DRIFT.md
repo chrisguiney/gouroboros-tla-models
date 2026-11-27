@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-116 entries. On `main`: does not conform 68; conforms 24; conforms (implementation choice) 15; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+118 entries. On `main`: does not conform 70; conforms 24; conforms (implementation choice) 15; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -127,6 +127,8 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N70](#n70) | network | Tx-submission reply naming an id still unacknowledged | Sent after a mempool re-add (new index); the inbound keeps both entries | `7cd17437`: `reconcileTxIds` refuses it; the Client fails its own connection | Silent | does not conform | Fixed on local branch `fix/txsubmission-reannounced-txid` `3dbb4caa`, no PR (model `txsubmission` `TxSubmissionReannounceBug.cfg`) |
 | [N71](#n71) | network | Chain-sync window depth at the server's tip | `pipelineDecisionMax`: pipeline only while the client's tip block number plus the requests outstanding is below the server's, so one request at the tip | `7cd17437`: the window is refilled to `PipelineLimit` (75) after every reply, so 75 requests wait at the tip and `Reintersect` drains for 75 blocks | Silent | does not conform | Fixed on local branch `fix/chainsync-window-at-tip` `f98beb33`, no PR (model `chainsync` `ChainSyncTipWindowFullBug.cfg`) |
 | [N72](#n72) | network | How a chain-sync client learns the server's tip during a sync | From every reply: each roll and intersect answer hands the client the server's tip; there is no tip query | `7cd17437`: `GetCurrentTip` sends `MsgFindIntersect` with no points, which waits for every outstanding `MsgRequestNext`; at the tip that is the next block, indefinitely in node-to-client mode | Silent (`MsgFindIntersect` only from `StIdle`) | conforms (implementation choice) | Fixed on local branch `fix/chainsync-tip-during-sync` `6a6368c0`, no PR (model `chainsync` `ChainSyncTipWorkerStreamBug.cfg`) |
+| [N73](#n73) | network | LeiosFetch `MsgLeiosBlock` byte limit | Endorser block (600,000) plus ten bytes of framing: 600,010 | `7cd17437`: 600,000 plus a tenth, 660,000, described as the reference's | Silent | does not conform | Fixed on local branch `fix/leiosfetch-block-limit` `5e861de6`, no PR (model `limits-timeouts` `StateLimitsLeiosFetchClientBlockLimitBug.cfg`) |
+| [N74](#n74) | network | Message submission (DMQ) per-state time and byte limits | V1: Init, Idle, blocking waitForever; non-blocking, bodies 10 s. V2: Idle waitForever, blocking 20 s, non-blocking, bodies 10 s. Ids 65,535 bytes; bodies `maxSigSize` x (`maxSigIdsInflight` + 2) | `7cd17437`: non-blocking untimed; bodies 30 s; V1 blocking 30 s; V2 blocking 30 s; Idle 300 s; no per-state byte limit | Silent | does not conform | Non-blocking: fixed on local branch `fix/messagesubmission-nonblocking-timeout` `bb0e6ca9`; V1 blocking: local `fix/messagesubmission-v1-blocking-untimed` `d88a7e9d`; the rest recorded (model `limits-timeouts`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -1002,6 +1004,28 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/chainsync/client.go` `GetCurrentTip`, `syncLoop`
 - **Verdict.** conforms (implementation choice)
 - **Status.** Fixed on local branch `fix/chainsync-tip-during-sync` `6a6368c0`, no PR: while a `MsgRequestNext` is unanswered, `GetCurrentTip` returns the last reply's tip; `TestGetCurrentTipDuringSyncAtTip` fails without it
+
+### N73
+
+**LeiosFetch `MsgLeiosBlock` byte limit** (kind 1: local branch moves to the reference)
+
+- **What differs.** Reference: a reply to a block request may take an endorser block's 600,000 bytes plus the at most ten bytes a `MsgLeiosBlock` adds in tight CBOR. gOuroboros: `MaxBlockMessageBytes` adds a tenth of the block, 660,000 bytes, and calls it the reference's limit, so the client accepts replies up to 59,990 bytes larger.
+- **Spec.** spec silent
+- **Reference.** ouroboros-consensus `ec239d57f618` (unchanged at `136122cc666c`) `.../MiniProtocol/LeiosFetch/Type.hs` 218-229 (`byteLimitsLeiosFetch`); `.../Consensus/Leios/Types.hs` 479-480
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/leiosfetch/leiosfetch.go` `MaxBlockMessageBytes`; `protocol/PROTOCOL_LIMITS.md`
+- **Verdict.** does not conform → conforms
+- **Status.** Fixed on local branch `fix/leiosfetch-block-limit` `5e861de6`, no PR. `TestBlockReplyOverReferenceLimitIsRefused` declares a 600,011-byte reply; on `7cd17437` the client waits for the rest instead of refusing it. Model `limits-timeouts` `StateLimitsLeiosFetchClientBlockLimitBug.cfg` (`NoLooserThanReference`) / `StateLimitsLeiosFetchClient.cfg`
+
+### N74
+
+**Message submission (DMQ) per-state time and byte limits** (kind 1 for the non-blocking request; kind 2 for the rest)
+
+- **What differs.** Reference: V1 (`SigSubmission`) waits forever in Init, Idle and a blocking id request, and gives a non-blocking id request and a request for bodies shortWait (10 s); V2 waits forever in Idle, gives a blocking id request 20 s and the others 10 s; ids are limited to smallByteLimit (65,535) and bodies to `maxSigSize` x (`maxSigIdsInflight` + 2). gOuroboros: a non-blocking id request is untimed, so a peer that never answers holds the requester forever; a request for bodies is timed 30 s; a blocking id request 30 s in V1 and V2; Idle 300 s; no state has a `PendingMessageByteLimit`, so only the read buffer and the collection decoders bound a message.
+- **Spec.** spec silent (DMQ is outside the network specification)
+- **Reference.** dmq-node `67a1a1e5a579` `dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` 57-100; `.../SigSubmissionV2/Codec.hs` 45-95
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/messagesubmission/messagesubmission.go` timeout constants, `stateMapV1`, `stateMapV2`
+- **Verdict.** does not conform (non-blocking request untimed; V1 blocking timed) → conforms with the local fixes; the other timeouts and the byte limits are recorded differences (bodies, V2 blocking and Idle more lenient or stricter by a wide margin, byte limits absent)
+- **Status.** Non-blocking: fixed on local branch `fix/messagesubmission-nonblocking-timeout` `bb0e6ca9` (`TestWaitsTheReferenceTimesAreTimed`); V1 blocking: local `fix/messagesubmission-v1-blocking-untimed` `d88a7e9d`. Separately, `fix/messagesubmission-blocking-timeout-option` `53fa164d` makes the Server, the side that waits, apply the Config's timeouts, which it ignored. Model `limits-timeouts` `StateLimitsMsgSubV1ServerNonBlockingBug.cfg`, `StateLimitsMsgSubV2ServerNonBlockingBug.cfg`, `StateLimitsMsgSubV1ServerBlockingBug.cfg`, `StateLimitsMsgSubV2ServerOptionsBug.cfg`
 
 ## Consensus
 
