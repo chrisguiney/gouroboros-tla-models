@@ -657,6 +657,38 @@ once-a-minute pruning of expired ids (every caller checks expiry before
 authentication, so an expired id still held is never consulted), and the
 signatures.
 
+## Part 10: time limits as deadlines (`DmqBlockingDeadline.tla`)
+
+The other models treat a time limit as "may fire". This one orders them:
+one round of an inbound idling in `StIdle`, sending a blocking request, and
+an outbound answering when a message arrives or, in V2, with
+`MsgReplyNoSigIds` after 17 s. Each engine times only the states where the
+peer has agency (`protocol.go` `armTimeout`). The clock jumps to the next
+deadline, so 300 s costs no states. `NoTimeoutOfConformingPeer` asks that
+no timer fires on a peer waiting as the reference allows.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `DmqBlockingDeadlineServerV2.cfg`: gOuroboros Server (30 s) against dmq-node's V2 outbound (17 s) | 16 | passes |
+| `DmqBlockingDeadlineServerV1Bug.cfg`: `7cd17437`, the V1 Server times a blocking request at 30 s | | **fails**: dmq-node's V1 outbound waits for an id and has no empty answer |
+| `DmqBlockingDeadlineServerV1.cfg`: the fix, V1 blocking untimed | 14 | passes |
+| `DmqBlockingDeadlineServerV2ShortBug.cfg`: mutation, a 16 s limit | | fails |
+| `DmqBlockingDeadlineClientV2.cfg`: dmq-node's inbound (20 s) against a Client whose application answers none at 17 s | 19 | passes |
+| `DmqBlockingDeadlineClientV2NoAnswerBug.cfg`: the application never answers | | fails: the application must call `ReplyNoMessageIds` (documented) |
+| `DmqBlockingDeadlineClientV1.cfg`: V1, untimed on both sides | 17 | passes |
+| `DmqBlockingDeadlineClientIdleProbeBug.cfg`: dmq-node's inbound idles 301 s | | fails: the Client's 300 s `StIdle` limit fires (recorded, DRIFT N39) |
+
+The V1 blocking limit is a defect (DRIFT N69): V1 is tx-submission, whose
+blocking state is `waitForever` [R7], and dmq-node's V1 outbound
+(`txSubmissionOutbound`) answers only once it has an id. A quiet dmq-node
+peer was dropped every 30 s. The `StIdle` limit is left as recorded drift:
+the reference waits forever there, but its requester re-requests quickly in
+every case the source shows, and nothing bounds the idle time either way.
+
+The pipelined inbound of dmq-node (gap 166) is modelled with tx-submission,
+whose window rules DMQ shares: `specs/txsubmission/TxSubmissionPipelined.tla`
+(the window defect, DRIFT N68).
+
 ## Go tests and fixes
 
 All on gOuroboros `61046085`, local branches only.
@@ -798,9 +830,9 @@ gOuroboros `61046085`.
 
 The replay caches' capacity bounds and batch admission (Go tests cover them); the opcert cold signature (a pure check, covered
 by Go tests); the payload bytes beyond `MessagePayloadBytes.tla`'s shapes; the
-pipelined inbound of dmq-node V2 (`runPipelinedAnnotatedPeerWithLimits`);
-time limits as durations (the 20 s V2 limit appears only as "an unanswered
-blocking request is a deadlock"); wire tags and list encodings, which the Go
+pipelined inbound of dmq-node V2, here (it is
+`specs/txsubmission/TxSubmissionPipelined.tla`); time limits beyond
+`DmqBlockingDeadline.tla`'s one round; wire tags and list encodings, which the Go
 tests check byte for byte. Restarts are modelled only in `DmqRestart.tla`.
 
 ## Running it
@@ -823,7 +855,9 @@ cd specs/dmq
 ../../bin/tlc -config DmqRestartSubmissionV2.cfg DmqRestart.tla
 ../../bin/tlc -config DmqReplayShared.cfg DmqReplayShared.tla
 for c in LmsReplayTokens LmsReplayTokensNoTTL; do ../../bin/tlc -config $c.cfg LmsReplayTokens.tla; done
+for c in DmqBlockingDeadlineServerV2 DmqBlockingDeadlineServerV1 DmqBlockingDeadlineClientV2 DmqBlockingDeadlineClientV1; do ../../bin/tlc -config $c.cfg DmqBlockingDeadline.tla; done
 # expected to fail
+for c in DmqBlockingDeadline*Bug.cfg; do ../../bin/tlc -config $c DmqBlockingDeadline.tla; done
 ../../bin/tlc -config DmqRestartSubmissionV2NoRestartBug.cfg DmqRestart.tla
 for c in DmqReplayShared*Bug.cfg; do ../../bin/tlc -config $c DmqReplayShared.tla; done
 for c in LmsReplayTokens*Bug.cfg; do ../../bin/tlc -config $c LmsReplayTokens.tla; done

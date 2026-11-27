@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-112 entries. On `main`: does not conform 65; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+115 entries. On `main`: does not conform 68; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -76,7 +76,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N19](#n19) | network | Block-fetch `RangeTimeout` | None | A whole range must finish within about 36 hours by default | Silent | conforms (implementation choice) | gOuroboros addition. Local only: it ends the caller's wait and sends nothing |
 | [N20](#n20) | network | Tx-submission blocking and non-blocking request rules | Client throws `ProtocolErrorRequestBlocking`, `RequestNonBlocking`, `RequestedNothing`; server picks the style from its FIFO | main: the client does not check; `Server.RequestTxIds` lets the caller pick either style; PR: both enforced | Blocking iff nothing stays unacknowledged; ack or request non-zero | does not conform → conforms | Open PR #3128 (Dingo always sends blocking requests for at least one id) |
 | [N21](#n21) | network | Tx-submission request over the window from `NodeToNodeV_16` | From V16 the client clamps the reply to its own window | Always a protocol error | From V16 not an error; reply with as many as fit | does not conform | Fixed in PR #3195 head `8ece4753` (model `txsubmission` `ClampsOverWindow`; the first draft `4b7d5262` clamped a blocking request to an empty reply, `TxSubmissionV16ClampBlockingBug.cfg`) |
-| [N22](#n22) | network | Tx-submission duplicate ids in one reply | Not checked | Refused | Silent | conforms (stricter) | Recorded; a reference peer never sends duplicates |
+| [N22](#n22) | network | Tx-submission duplicate ids in one reply | Not checked | Refused | Silent | conforms (stricter) | Recorded; a reply comes from one mempool snapshot, so a reference peer never names an id twice in it (model `txsubmission` `TxSubmissionReannounce.cfg` `NoDuplicateWithinReply`). A repeat of an id still in the window is N70 |
 | [N23](#n23) | network | Peer-sharing: how many peers the server sends | `min(10, amount)` | `min(amount, 230)` | At most the amount requested, bounded by the message size | conforms (implementation choice) | Policy choice |
 | [N24](#n24) | network | Peer-sharing request when peer sharing was negotiated off | Mini-protocol not registered; a segment for it is `UnknownMiniProtocol` and tears the connection down | Answers an empty list | Such a node does not run the server | conforms (implementation choice) | Deliberate (documented in the package) |
 | [N25](#n25) | network | Peer-sharing address forms | An IPv4-mapped IPv6 address is sent as IPv6; the old eight-field IPv6 form is not decoded; declared list length ignored | IPv4-mapped sent as IPv4 (`net.IP.To4`); old form accepted on decode; list length checked | CDDL `peer-sharing-v14.cddl` | conforms | Recorded (model `peersharing`); same endpoint on a dual-stack host |
@@ -93,7 +93,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N36](#n36) | network | Local-state-query server: `MsgRelease` without a `ReleaseFunc` | Accepted | main: an error that tears down a client that released; PR: accepted | `MsgRelease` is legal from `StAcquired` | does not conform → conforms | Open PR #3113 (model `localstatequery` `LocalStateQueryServerRelease`) |
 | [N37](#n37) | network | DMQ message submission wire format | dmq-node: V1 uses tx-submission's tags (Init = 6); V2 tags 1-6 with `MsgReplyNoSigIds` = 3; indefinite-length lists; in V2 the initiator runs the inbound side | main: the CIP's tags, no `MsgReplyNoSigIds`, definite lists, V2 initiator is the outbound side (both sides wait); PR: dmq-node's | CIP-0137 (Proposed): V1 tags 0-5, V2 tags 1-5, inbound has agency in V2 `StIdle` | conforms → does not conform (to the CIP text) | Open PR #3130 moves from the CIP to dmq-node, the only implementation; main cannot talk to dmq-node at all |
 | [N38](#n38) | network | DMQ: the same message body requested twice | V2 refuses a repeat across requests; V1 only within one request | main: served twice; PR: refused as the reference does per version | Silent | conforms | Open PR #3130 |
-| [N39](#n39) | network | DMQ time limits | V1: blocking none, non-blocking and bodies 10 s; V2: blocking 20 s; local servers run without limits | Message submission: `StIdle` 300 s, blocking 30 s, non-blocking none, bodies 30 s; local submission: server drops a client idle 300 s | Silent | conforms (implementation choice) | Recorded (model `dmq`) |
+| [N39](#n39) | network | DMQ time limits | V1: blocking none, non-blocking and bodies 10 s; V2: blocking 20 s; local servers run without limits | Message submission: `StIdle` 300 s, blocking 30 s, non-blocking none, bodies 30 s; local submission: server drops a client idle 300 s | Silent | conforms (implementation choice), except the V1 blocking limit (N69) | Recorded (model `dmq` `DmqBlockingDeadline.tla`); the Client's 300 s `StIdle` limit against the reference's `waitForever` is a probe, `DmqBlockingDeadlineClientIdleProbeBug.cfg` |
 | [N40](#n40) | network | DMQ local notification: empty reply to a blocking request | The codec refuses it | main: accepted; PR: refused | A blocking reply holds at least one message | does not conform → conforms | Open PR #3142 |
 | [N41](#n41) | network | DMQ local notification: lost wake-up | STM wait; every waiter sees a new message | main: `AddMessage` wakes one waiter, so a blocking request can stay unanswered; PR: wakes every waiter | Silent on implementation; a blocking request is answered once a message exists | conforms | Open PR #3142. Liveness defect, wire unaffected |
 | [N42](#n42) | network | DMQ local protocols: `hasMore` and submission answers | `hasMore` set per reply from a cap; each submission's answer goes to its own continuation | `hasMore` always false (sends the whole queue); local-submission callbacks carry no message id | `hasMore` in the non-blocking reply; one answer per submission | conforms | Recorded; harmless at default sizes; API limitation |
@@ -122,6 +122,9 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N65](#n65) | network | Peer sharing value outside 0 and 1 (node-to-node from 13, DMQ) | Decode failure: `MsgRefuse` DecodeError, a client error | `7cd17437`: any unsigned integer accepted, read as enabled | CDDL `peerSharing = 0..1` | does not conform | Fixed on local branch `fix/handshake-peer-sharing-range` `50a554d5`, no PR (model `handshake` `HandshakeVersionDataPeerSharingRangeBug.cfg`) |
 | [N66](#n66) | network | Data a handshake client ends with on `MsgAcceptVersion` | Its own agreement of its data with the accept's data | `7cd17437`: the accept's data as sent | Silent | conforms (no wrong outcome against a server that sends the agreed data) | Fixed on local branch `fix/handshake-client-agreed-data` `bef829ce`, no PR (model `handshake` `HandshakeVersionDataClientRawEndBug.cfg`); matters against gOuroboros servers from before #3194 |
 | [N67](#n67) | network | Version-table keys a uint16 cannot hold | Skipped like any key the codec does not recognise | `7cd17437`: the whole `MsgProposeVersions` or `MsgQueryReply` fails to decode | Keys are version numbers | does not conform | Fixed on local branch `fix/handshake-skip-wide-version-keys` `ccf4f845`, no PR (model `handshake` `HandshakeVersionDataWideKeyBug.cfg`) |
+| [N68](#n68) | network | DMQ message-submission window (outbound's limit on unacknowledged ids) | dmq-node: 132 (4 * 33) for its requester and both outbounds; not negotiated | `7cd17437`: `DefaultMaxUnacknowledgedMessageIDs` 100, so a Client refuses dmq-node's fourth pipelined 33-id request | CIP-0137 silent | does not conform | Fixed on local branch `fix/messagesubmission-reference-window` `d52e5757`, no PR (model `txsubmission` `TxSubmissionPipelinedDmqWindowBug.cfg`) |
+| [N69](#n69) | network | DMQ V1 time limit on a blocking id request | `waitForever`; the V1 outbound answers only once it has an id | `7cd17437`: the Server times it at 30 s and drops a quiet peer | CIP-0137 silent | does not conform | Fixed on local branch `fix/messagesubmission-v1-blocking-untimed` `d88a7e9d`, no PR (model `dmq` `DmqBlockingDeadlineServerV1Bug.cfg`) |
+| [N70](#n70) | network | Tx-submission reply naming an id still unacknowledged | Sent after a mempool re-add (new index); the inbound keeps both entries | `7cd17437`: `reconcileTxIds` refuses it; the Client fails its own connection | Silent | does not conform | Fixed on local branch `fix/txsubmission-reannounced-txid` `3dbb4caa`, no PR (model `txsubmission` `TxSubmissionReannounceBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -439,7 +442,7 @@ Simultaneous open happens when two nodes dial each other at the same moment and 
 - **Reference.** ouroboros-network `5f356486ab3e` `.../TxSubmission/Outbound.hs` (no duplicate check)
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/txsubmission/validation.go` 248
 - **Verdict.** conforms (stricter)
-- **Status.** Recorded; a reference peer never sends duplicates
+- **Status.** Recorded; a reply comes from one mempool snapshot, so a reference peer never names an id twice in it (model `txsubmission` `TxSubmissionReannounce.cfg`, `NoDuplicateWithinReply`). An id repeated across replies while still unacknowledged is a different case and is sent by a reference peer: N70
 
 ### N23
 
@@ -630,7 +633,7 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **Reference.** dmq-node `a267003c14e9` `src/DMQ/Protocol/SigSubmission/Codec.hs` 73-77
 - **gOuroboros.** gOuroboros `d0b95845` `protocol/messagesubmission/messagesubmission.go` 36-41; `protocol/localmessagesubmission/localmessagesubmission.go` 39-40
 - **Verdict.** conforms (implementation choice)
-- **Status.** Recorded (model `dmq`)
+- **Status.** Recorded (model `dmq` `DmqBlockingDeadline.tla`, durations as ordered deadlines). The V1 blocking limit drops a conforming peer and is N69. The V2 limits are compatible (outbound answers at 17 s, reference inbound limit 20 s, gOuroboros Server 30 s). The Client times `StIdle` at 300 s where the reference waits forever; dmq-node's requester parks in `StIdle` with no bound in the source, so whether that fires is not established (`DmqBlockingDeadlineClientIdleProbeBug.cfg`)
 
 ### N40
 
@@ -941,6 +944,40 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/handshake/collection_decode.go` `validateVersionMapMessage`, `messages.go` `NewMsgFromCbor`
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/handshake-skip-wide-version-keys` `ccf4f845`, no PR; only a broken or hostile peer, or a future encoding, sends such a key
+
+
+### N68
+
+**DMQ message-submission window** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: dmq-node's requester keeps up to 132 ids unacknowledged and requests up to 33 at a time; its V1 and V2 outbounds check requests against the same 132. The window is not negotiated. gOuroboros: the Client's default window is 100, so after three non-blocking 33-id requests a fourth (99 + 33 = 132 outstanding) is refused as `RequestExceeded` and the connection ends.
+- **Spec.** CIP-0137 silent
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Policy.hs` 83-102 (`maxSigIdsInflight = 33`, `maxUnacknowledgedTxIds = 4 * maxSigIdsInflight`); `src/DMQ/NodeToNode.hs` 229, 305, 326; ouroboros-network `4646039f05eb` `.../TxSubmission/Inbound/V2/State.hs` 558-561 (request count bounded by the window)
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/messagesubmission/messagesubmission.go` 45-47, `validation.go` `validateMessageIDRequest`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/messagesubmission-reference-window` `d52e5757`, no PR; `TestV2OutboundAcceptsReferenceInboundWindow` fails without it. A Client configured below 132 still refuses dmq-node's requests
+
+### N69
+
+**DMQ V1 time limit on a blocking id request** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: V1 is tx-submission; `StTxIds StBlocking` is `waitForever`, and the V1 outbound (`txSubmissionOutbound`) answers only once its mempool has an id. gOuroboros: `stateMapV1` times the state at `MessageIdsBlockingTimeout` (30 s), and the Server installs it unchanged, so a dmq-node peer with no new message for 30 s is dropped. V2 is unaffected: its outbound answers with `MsgReplyNoSigIds` after 17 s, under the 20 s reference limit and the Server's 30 s.
+- **Spec.** CIP-0137 silent
+- **Reference.** dmq-node `a267003c14e9` `dmq-node/src/DMQ/Protocol/SigSubmission/Codec.hs` 60-78; ouroboros-network `4646039f05eb` `.../TxSubmission/Outbound.hs` 138-160
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/messagesubmission/messagesubmission.go` `stateMapV1` (`protocolStateMessageIdsBlock`), `server.go` `initProtocol`; `protocol/protocol.go` `stateLoop` (a timeout fails the protocol)
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/messagesubmission-v1-blocking-untimed` `d88a7e9d`, no PR; `TestBlockingIDRequestTimeoutFollowsReference` fails without it
+
+### N70
+
+**Tx-submission reply naming an id still unacknowledged** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: the outbound announces mempool entries after the last index it sent; a transaction removed and re-added (a fork switch) has a new index and is announced again while its first announcement may be unacknowledged. Both reference inbounds keep the duplicate and acknowledge by count. gOuroboros: `reconcileTxIds` refused a reply naming an id still in the window. The Client applies it to its application's reply and fails its own connection; the Server cannot meet it, since every Server request acknowledges the whole window.
+- **Spec.** spec silent (acknowledgement is by count, `miniprotocols.tex` 1323-1418)
+- **Reference.** ouroboros-network `4646039f05eb` `.../TxSubmission/Outbound.hs` 116-175 (freshness by index, 124-125); `.../Inbound/V1.hs` 300-306; `.../Inbound/V2/State.hs` 370-374
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/txsubmission/validation.go` `reconcileTxIds`, `client.go` `handleRequestTxIds`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/txsubmission-reannounced-txid` `3dbb4caa`, no PR; `TestClientReannouncesUnacknowledgedTxId` fails without it. An id twice within one reply is still refused (N22)
 
 ## Consensus
 

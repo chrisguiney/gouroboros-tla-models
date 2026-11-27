@@ -391,11 +391,87 @@ restart after `MsgDone` and concurrent `Start`/`Stop` are covered by Go
 tests only (`TestClientRestartsAfterDone`,
 `TestClientStartStopConcurrent` in `client_restart_test.go`).
 
+## A pipelining inbound (`TxSubmissionPipelined.tla`)
+
+`TxSubmission.tla` sends one request at a time because the gOuroboros Server
+never pipelines. The reference inbound does: it sends further requests for
+ids and bodies before earlier replies arrive, and computes each
+acknowledgement and count from a view that lacks the replies in flight. The
+outbound answers in order. This module puts that inbound (ouroboros-network
+`4646039f05eb` `Inbound/V2/State.hs` 480-561 `pickRequestTxIdsAction`, and
+dmq-node `a267003c` `SigSubmissionV2/Inbound.hs`, which uses it) against the
+gOuroboros outbound, the tx-submission and DMQ Client, whose checks are the
+reference outbound's. The pipelining depth is bounded the reference's way:
+ids requested and not received (`MaxReq`, dmq-node 33) and body requests
+outstanding (`MaxBatches`, 4). The inbound's back-off and peer scheduling are
+left out; they only suppress requests, so the model's inbound is a superset.
+
+The engine hands the Client a pipelined request only after it has sent the
+reply to the one before (`protocol.go` `recvLoop`), which `Handle` models.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `TxSubmissionPipelined.cfg`: tx-submission, both windows equal (10, here 3), V1 | 12,506 | passes |
+| `TxSubmissionPipelinedDmq.cfg`: DMQ V2, both windows dmq-node's 132 (here 4) | 49,865 | passes |
+| `TxSubmissionPipelinedDmqV1.cfg`: DMQ V1, the same | 48,893 | passes |
+| `TxSubmissionPipelinedGouroboros.cfg`: the gOuroboros Server as the inbound | 2,150 | passes, with `DoneOnlyWhenIdle` |
+| `TxSubmissionPipelinedDmqWindowBug.cfg`: DMQ on `7cd17437`: inbound window 132 (4), Client 100 (3) | | **fails** `HonestNeverRefused` (`requestedTooMany`) |
+| `TxSubmissionPipelinedAckAllBug.cfg`: mutation, the inbound acknowledges everything while pipelining | | fails `HonestNeverRefused` (`requestNonBlocking`) |
+| `TxSubmissionPipelinedNoDeferBug.cfg`: mutation, the engine hands over a pipelined request early | | fails `HonestNeverRefused` (`alreadyPending`) |
+| `TxSubmissionPipelinedDoneAnyTimeBug.cfg`: mutation, `MsgDone` with requests outstanding | | fails `DoneOnlyWhenIdle` |
+| `TxSubmissionPipelinedProbesBug.cfg`: depth 3, a full outbound window, a body request behind an id request | | each probe violated (run one at a time) |
+
+Tx-submission is consistent: both windows are 10 (`txSubmissionMaxUnacked`,
+the inbound policy's `maxUnacknowledgedTxIds`). DMQ was not: dmq-node's
+requester fills a window of 132 that is not negotiated, and the gOuroboros
+Client defaulted to 100, so dmq-node's fourth 33-id request was refused
+(DRIFT N68). The trace at the model's scale: a blocking request for 2, then
+a non-blocking one for 2 more with 2 outstanding, over a window of 3.
+`ViewIsPrefix`, `NothingBehindBlocking` and `AckedAtMostOnce` hold in every
+passing config.
+
+## A transaction re-announced, and the byte limits (`TxSubmissionReannounce.tla`)
+
+The reference outbound announces the mempool entries after the last index
+it sent (`Outbound.hs` 116-175, freshness by index). A transaction removed
+and added back (a fork switch) gets a new index, so it is announced again,
+possibly while its first announcement is still unacknowledged; both
+reference inbounds keep the duplicate and acknowledge by count (`Inbound/V1.hs`
+300-306, `Inbound/V2/State.hs` 370-374). One reply is read from one mempool
+snapshot, so it never names a transaction twice.
+
+| Config | States | Result |
+| --- | --- | --- |
+| `TxSubmissionReannounceBug.cfg`: `7cd17437`, a reference inbound, the Client's mempool re-adding | | **fails** `HonestNeverRefused` (`repeatsOutstanding`) |
+| `TxSubmissionReannounce.cfg`: `reconcileTxIds` refusing only an id twice within one reply | 1,967 | passes, with `NoDuplicateWithinReply` and `ViewsAgree` |
+| `TxSubmissionReannounceProbeBug.cfg`: the window holds a transaction twice | | probe violated: reachable |
+| `TxSubmissionReannounceBytes.cfg`: the gOuroboros Server's byte limits at their formulas, scaled | 1,243 | passes |
+| `TxSubmissionReannounceBytesTightBug.cfg`: mutation, a retained-byte limit below a full window | | fails `HonestNeverRefused` (`bytes`) |
+
+So DRIFT N22 (an id twice within one reply, refused) stays harmless, but
+`reconcileTxIds` also refused a reply naming an id still in the window,
+which a reference outbound sends (DRIFT N70). The Client applies the check
+to its own application's reply and failed the connection. The Server cannot
+meet it: every Server request acknowledges its whole window.
+
+### Sources for the two models above
+
+| Ref | Where | What |
+| --- | --- | --- |
+| P1 | ouroboros-network `4646039f05eb` `ouroboros-network/lib/Ouroboros/Network/TxSubmission/Inbound/V2/State.hs` 480-561 | the inbound's acknowledgement and request counts while pipelining |
+| P2 | dmq-node `a267003c14e9` `dmq-node/src/DMQ/SigSubmissionV2/Inbound.hs` 103-363 | blocking only at depth zero, `MsgDone` only from `serverIdle`, replies collected in order |
+| P3 | dmq-node `a267003c14e9` `dmq-node/src/DMQ/Policy.hs` 83-102; `src/DMQ/NodeToNode.hs` 229, 305, 326 | window 132, 33 per request, 4 body batches; the same window for both outbounds |
+| P4 | ouroboros-network `4646039f05eb` `.../TxSubmission/Outbound.hs` 116-175 | announcements by mempool index; one snapshot per reply |
+| P5 | ouroboros-network `4646039f05eb` `.../TxSubmission/Inbound/V1.hs` 300-306; `.../Inbound/V2/State.hs` 370-374 | duplicate ids within the window are expected |
+| P6 | ouroboros-network `4646039f05eb` `.../TxSubmission/Inbound/V2/Policy.hs` | `max_TX_SIZE` and the ingress limit with a 10% margin |
+
 ## Not modelled
 
-Transaction sizes and the size checks, byte limits, timeouts, the client's
-`Start`/`Stop`/`Init` state machine (Go tests only), the reference server's
-pipelining depth, and duplicate ids within one reply.
+Advertised-size discrepancy (the 32-byte tolerance) and the decoder's
+per-body work, timeouts (no tx-submission state in gOuroboros is timed
+except the non-blocking and body replies, as in the reference), and the
+client's `Start`/`Stop`/`Init` state machine (Go tests only). Byte limits
+are modelled only as `TxSubmissionReannounce.tla`'s scaled sums.
 
 ## Running it
 
@@ -424,4 +500,7 @@ done
 for c in ReadUnderStateBug DeadlockBug StopGuardBug DrainBug; do
   ../../bin/tlc -config TxSubmissionServerLocks$c.cfg TxSubmissionServerLocks.tla || true
 done
+# pipelining and re-announcement: every config, Bug ones expected to fail
+for c in TxSubmissionPipelined*.cfg; do ../../bin/tlc -config $c TxSubmissionPipelined.tla || true; done
+for c in TxSubmissionReannounce*.cfg; do ../../bin/tlc -config $c TxSubmissionReannounce.tla || true; done
 ```

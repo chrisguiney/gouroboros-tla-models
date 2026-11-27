@@ -204,3 +204,14 @@ Plain-language definitions, with a Go comparison where one helps.
 **`A \X B`**
 : The Cartesian product: every pair `<<a, b>>` with `a` in `A` and `b` in
   `B`. `x[1]` and `x[2]` are a pair's parts.
+
+**Pipelining depth**
+: How many requests one side has sent whose replies it has not yet
+  collected. The tx-submission and DMQ inbound sends further requests before
+  earlier replies arrive; the outbound answers them in order
+  (`specs/txsubmission/TxSubmissionPipelined.tla`).
+
+**Event-driven clock**
+: A model clock that jumps straight to the next deadline instead of ticking
+  one unit at a time, so long durations (300 s) cost no states
+  (`specs/dmq/DmqBlockingDeadline.tla`).
