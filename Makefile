@@ -7,7 +7,7 @@ CONFIGS := $(filter-out %Bug.cfg,$(wildcard specs/*/*.cfg))
 
 KEEPALIVE := cd specs/keepalive && ../../bin/tlc
 
-.PHONY: help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle keepalive-client-timer handshake-timeout connection engine engine-deep engine-lifecycle engine-send-drained connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-rewards ledger-block-overlay muxer models check clean
+.PHONY: limits-timeouts help install hello hello-bug keepalive keepalive-table keepalive-bugs keepalive-lifecycle keepalive-client-timer handshake-timeout connection engine engine-deep engine-lifecycle engine-send-drained connection-teardown chainsync chainsync-deep handshake blockfetch txsubmission peersharing localtx localstatequery dmq leios-peras consensus ledger-shelley ledger-governance pipeline-cbor consensus-genesis ledger-byron ledger-utxo ledger-leios consensus-nonce ledger-bbody ledger-conway-dijkstra consensus-eras ledger-witnesses consensus-tachys ledger-ppup-mir ledger-hash-cache ledger-rewards ledger-block-overlay muxer models check clean
 
 help: ## Show this list
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -175,6 +175,9 @@ dmq: ## Check the message-queue models (every config, Bug ones expected to fail)
 
 leios-peras: ## Check the Leios and Peras models (every config, Bug ones expected to fail)
 	@scripts/run-model.sh specs/leios-peras
+
+limits-timeouts: ## Check per-state timeouts and byte limits (Leios, Peras, message submission)
+	@scripts/run-model.sh specs/limits-timeouts
 
 consensus: ## Check the consensus model (chain selection, opcerts, PBFT)
 	@scripts/run-model.sh specs/consensus
