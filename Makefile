@@ -143,6 +143,11 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncTipWorkerJumpCallbackTipBug.cfg ChainSyncTipWorker.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorkerNoRetireBug.cfg ChainSyncTipWorker.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorkerNoJoinBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerStream.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerStreamStop.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerCallbackTipFromReplies.cfg ChainSyncTipWorker.tla
+	$(CHAINSYNC) -config ChainSyncTipWorkerStreamBug.cfg ChainSyncTipWorker.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWorkerStreamNoRecheckBug.cfg ChainSyncTipWorker.tla || true
 
 chainsync-deep: ## Check the chain-sync client with a window of three
 	$(CHAINSYNC) -workers auto -config ChainSyncClientDeep.cfg ChainSyncClient.tla

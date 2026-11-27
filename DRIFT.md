@@ -51,7 +51,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 
 ## Summary
 
-115 entries. On `main`: does not conform 68; conforms 24; conforms (implementation choice) 14; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
+116 entries. On `main`: does not conform 68; conforms 24; conforms (implementation choice) 15; conforms (stricter) 9. A qualified verdict counts under its main word: "does not conform (decode)" and "(epoch nonce only)" as does not conform, "conforms for canonical encodings" as conforms, "conforms (stricter, and missing the rate limit)" as stricter.
 
 | # | Area | Behaviour | Reference | gOuroboros | Spec says | Verdict | Status / PR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -126,6 +126,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N69](#n69) | network | DMQ V1 time limit on a blocking id request | `waitForever`; the V1 outbound answers only once it has an id | `7cd17437`: the Server times it at 30 s and drops a quiet peer | CIP-0137 silent | does not conform | Fixed on local branch `fix/messagesubmission-v1-blocking-untimed` `d88a7e9d`, no PR (model `dmq` `DmqBlockingDeadlineServerV1Bug.cfg`) |
 | [N70](#n70) | network | Tx-submission reply naming an id still unacknowledged | Sent after a mempool re-add (new index); the inbound keeps both entries | `7cd17437`: `reconcileTxIds` refuses it; the Client fails its own connection | Silent | does not conform | Fixed on local branch `fix/txsubmission-reannounced-txid` `3dbb4caa`, no PR (model `txsubmission` `TxSubmissionReannounceBug.cfg`) |
 | [N71](#n71) | network | Chain-sync window depth at the server's tip | `pipelineDecisionMax`: pipeline only while the client's tip block number plus the requests outstanding is below the server's, so one request at the tip | `7cd17437`: the window is refilled to `PipelineLimit` (75) after every reply, so 75 requests wait at the tip and `Reintersect` drains for 75 blocks | Silent | does not conform | Fixed on local branch `fix/chainsync-window-at-tip` `f98beb33`, no PR (model `chainsync` `ChainSyncTipWindowFullBug.cfg`) |
+| [N72](#n72) | network | How a chain-sync client learns the server's tip during a sync | From every reply: each roll and intersect answer hands the client the server's tip; there is no tip query | `7cd17437`: `GetCurrentTip` sends `MsgFindIntersect` with no points, which waits for every outstanding `MsgRequestNext`; at the tip that is the next block, indefinitely in node-to-client mode | Silent (`MsgFindIntersect` only from `StIdle`) | conforms (implementation choice) | Fixed on local branch `fix/chainsync-tip-during-sync` `6a6368c0`, no PR (model `chainsync` `ChainSyncTipWorkerStreamBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -990,6 +991,17 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/chainsync/client.go` `syncLoop`, `quiesceSync`
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/chainsync-window-at-tip` `f98beb33`, no PR; `TestClientWindowAtServerTip` fails without it. After a `MsgRollBackward`, whose point has no block number, the fix keeps one request outstanding until the next roll forward; Byron deliveries keep the full window
+
+### N72
+
+**How a chain-sync client learns the server's tip during a sync** (kind 2: differs; both within the spec)
+
+- **What differs.** Reference: `ClientStNext` and `ClientStIntersect` hand the client the server's tip with every `MsgRollForward`, `MsgRollBackward`, `MsgIntersectFound` and `MsgIntersectNotFound`; the client API has no tip query. gOuroboros: `GetCurrentTip` sends `MsgFindIntersect` with no points and returns the tip in the answer. The message needs `StIdle`, so during a sync it waits for every outstanding `MsgRequestNext`; at the server's tip that request is answered only when the chain grows, so the call, and the sync loop behind its `busyMutex`, wait for the next block, without limit in node-to-client mode.
+- **Spec.** spec silent on a tip query; `MsgFindIntersect` only from `StIdle` (`miniprotocols.tex` 838-848)
+- **Reference.** ouroboros-network `5f356486ab3e` `.../ChainSync/Client.hs` 83-111, `.../ChainSync/ClientPipelined.hs` 96-124
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/chainsync/client.go` `GetCurrentTip`, `syncLoop`
+- **Verdict.** conforms (implementation choice)
+- **Status.** Fixed on local branch `fix/chainsync-tip-during-sync` `6a6368c0`, no PR: while a `MsgRequestNext` is unanswered, `GetCurrentTip` returns the last reply's tip; `TestGetCurrentTipDuringSyncAtTip` fails without it
 
 ## Consensus
 

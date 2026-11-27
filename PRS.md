@@ -20,6 +20,7 @@ closes. A PR can draw on more than one model.
 | `chainsync` | #3092 (close the connection when Stop cannot send MsgDone) | #3091 | merged |
 | `chainsync` | #3094 (GetCurrentTip waits for its own answer) | #3093 | merged |
 | `chainsync` | #3112 (MustReply timeout, node-to-node message size, state map tests) | #3096, #3097, #3101 | merged |
+| `chainsync` (`ChainSyncTipWorker`, streaming sync) | local branch `fix/chainsync-tip-during-sync` (`6a6368c0`; GetCurrentTip answers from the last reply during a sync), not yet published | | local |
 | `handshake` | #3127 (negotiate before a query reply, simultaneous open, its proposal written before ending, state map tests) | #3115, #3116, #3117 | open |
 | `handshake` | #3194 (negotiated data in the accept, recognised key order) | #3181, #3182 | merged |
 | `blockfetch` | #3114 (Stop, refused requests, Busy timeout, state map tests) | #3107, #3108, #3109, #3110 | merged |
