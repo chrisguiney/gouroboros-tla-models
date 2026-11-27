@@ -509,6 +509,7 @@ Based on `protocol/chainsync/client.go` at gOuroboros `7cd17437`.
 | `StopHonoursCtxInvariant` | does `Stop` keep polling for `busyMutex` after its ctx is done? |
 | `CallbackStopDoesNotWait` | does a `Stop` from a callback poll for `busyMutex`? |
 | `StopReturns`, `TipReturns`, `JumpReturns` | does every `Stop`, `GetCurrentTip` and `Jump` return (weak fairness; the server may withhold the sync's reply at the tip)? |
+| `TipFromLastOnlyDuringSync` | with the fix, does `GetCurrentTip` answer from the last reply when no reply has brought a tip? |
 
 ### The answer
 
@@ -545,6 +546,33 @@ The fixes: the lock wait ends on ctx and is skipped in a callback; the
 worker and the caller also return on `StopChan`; and the worker takes
 `busyMutex` with `lockBusy`, whose wait also ends on `StopChan`.
 
+**`GetCurrentTip` during a sync waits for the chain to grow.** The configs
+above pass `TipReturns` only because a `Stop` always comes. With a sync
+loop that keeps sending (`SyncStreams`: one `MsgRequestNext` after each
+roll, as at the tip) and no `Stop`, the worker takes `busyMutex` between
+two rolls and queues `MsgFindIntersect`, which needs `StIdle` [C1]. Far
+from the tip the outstanding request is answered and the call returns,
+having stalled the sync for that round trip. Once the request reaches the
+server's tip it is answered only by a new block, so `GetCurrentTip`, and the
+sync loop behind its `busyMutex`, wait until the chain grows, for ever in
+node-to-client mode, which has no timeout (TLC: `TipReturns` violated,
+`ChainSyncTipWorkerStreamBug.cfg`). The reference has no tip query: every
+roll and intersect answer carries the server's tip to the client [R5].
+
+The fix (`TipFromReplies`): while a `MsgRequestNext` is unanswered,
+`GetCurrentTip` returns the tip of the last reply, which is the server's
+tip when it sent that reply, and at the tip, where the server answers only
+when its chain changes, its tip now. The check runs before the worker
+starts and again in the worker holding `busyMutex`; with the second check
+missing, the loop can send between the first check and the worker's
+`MsgFindIntersect`, and the call waits as before
+(`ChainSyncTipWorkerStreamNoRecheckBug.cfg`). With nothing outstanding
+the round trip is unchanged and answered at once. A roll callback runs
+while its own request is still counted, so with the fix a `GetCurrentTip`
+there returns at once too (`ChainSyncTipWorkerCallbackTipFromReplies.cfg`,
+none of the Stop fixes); `IntersectFoundFunc` runs with nothing
+outstanding and still needs them.
+
 | Config | What | Result |
 | --- | --- | --- |
 | `ChainSyncTipWorker.cfg` | today, no ctx deadline: both queries with a sync at the tip, Stop | passes, 6,316 states |
@@ -559,11 +587,20 @@ worker and the caller also return on `StopChan`; and the worker takes
 | `ChainSyncTipWorkerJumpCallbackTipBug.cfg` | GetCurrentTip and its worker return on `StopChan`, but the worker still calls `busyMutex.Lock()`; GetCurrentTip from `Jump`'s `IntersectFoundFunc` | **fails**: deadlock, the worker waits for `busyMutex` held by `Jump` |
 | `ChainSyncTipWorkerNoRetireBug.cfg` | mutation: the range call skips `waitRequestNextRetired` | **fails** `RangeLeavesIdle` |
 | `ChainSyncTipWorkerNoJoinBug.cfg` | mutation: `GetCurrentTip` does not join its worker | **fails** `WorkerJoinedBeforeReturn` |
+| `ChainSyncTipWorkerStreamBug.cfg` | today: a sync streams to the tip (2 blocks), GetCurrentTip, no Stop | **fails** `TipReturns`: `MsgFindIntersect` queued behind the sync's request at the tip |
+| `ChainSyncTipWorkerStream.cfg` | the tip fix, same scenario | passes, 223 states |
+| `ChainSyncTipWorkerStreamStop.cfg` | the tip fix and all Stop fixes, streaming sync, Stop whose ctx may expire | passes, 22,690 states |
+| `ChainSyncTipWorkerCallbackTipFromReplies.cfg` | the tip fix alone, GetCurrentTip from the roll callback, then Stop | passes, 65 states |
+| `ChainSyncTipWorkerStreamNoRecheckBug.cfg` | mutation: the tip fix checks only before the worker starts | **fails** `TipReturns` |
 
 The probes `ProbeTipWaitsBehindRange`, `ProbeRangeOk` and
 `ProbeStopWithoutBusy` are each violated on `ChainSyncTipWorker.cfg`: the
 worker does queue behind the range call, the range call does return a
 range, and Stop does proceed without the lock.
+
+| Ref | Where | What it says |
+| --- | --- | --- |
+| R5 | [`ChainSync/Client.hs` lines 83-111](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/ChainSync/Client.hs#L83-L111), [`ChainSync/ClientPipelined.hs` lines 96-124](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/ChainSync/ClientPipelined.hs#L96-L124) | `recvMsgRollForward`, `recvMsgRollBackward`, `recvMsgIntersectFound` and `recvMsgIntersectNotFound` each receive the server's tip; the client API has no other way to learn it. |
 
 B7, the `RollBackward` drain goroutine, is not in this model: it calls the
 concrete `BlockPipeline.WaitForDrain`, which returns on its ctx, and the
@@ -582,10 +619,21 @@ binds to:
 | `TestStopReleasesGetCurrentTipWaitingForBusyMutexInCallback` | `StopReturns` (`ChainSyncTipWorkerJumpCallbackTipBug.cfg`) | fails with the worker's `busyMutex.Lock()`: GetCurrentTip never returns |
 | `TestGetAvailableBlockRangeReplyShapes` | `RangeFromOwnReplies`, `RangeLeavesIdle` | passes (allowed transitions) |
 
+`protocol/chainsync/client_tip_during_sync_test.go` and
+`client_current_tip_answer_test.go`, on local branch
+`fix/chainsync-tip-during-sync`:
+
+| Test | Binds | Before the fix |
+| --- | --- | --- |
+| `TestGetCurrentTipDuringSyncAtTip` | `TipReturns` (`ChainSyncTipWorkerStreamBug.cfg`) | fails: GetCurrentTip did not return within 5 s, windows 1 and 10 |
+| `TestGetCurrentTipDuringStreamingSync` | `TipReturns` (`ChainSyncTipWorkerStream.cfg`) | passes (far from the tip the round trip completes) |
+| `TestGetCurrentTipRechecksSyncHoldingBusyMutex` | `TipReturns` (`ChainSyncTipWorkerStreamNoRecheckBug.cfg`) | fails with the worker's check removed |
+| `TestGetCurrentTipWithRequestOutstandingSendsNothing` | `AnswersReachTheirCall`, `TipFromLastOnlyDuringSync` | replaces `TestGetCurrentTipWaitsForItsOwnAnswer`, which required the round trip |
+
 ### Not in this slice
 
-Several concurrent `GetCurrentTip` callers, a sync loop that keeps sending,
-`Reintersect` and `StopAfterDrain` holding the lock (slices 1 and 2), and a
+Several concurrent `GetCurrentTip` callers, a sync window wider than one,
+a chain that grows while the sync waits at the tip, `Reintersect` and `StopAfterDrain` holding the lock (slices 1 and 2), and a
 second roll back during `GetAvailableBlockRange`.
 
 ## Slice 7: the window at the server's tip (`ChainSyncTipWindow.tla`)

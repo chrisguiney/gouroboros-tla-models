@@ -1,7 +1,8 @@
 -------------------------- MODULE ChainSyncTipWorker --------------------------
 (***************************************************************************)
 (* Model `chainsync`, slice 5: the GetCurrentTip worker, Stop's wait for   *)
-(* busyMutex, and GetAvailableBlockRange, as the code is now.              *)
+(* busyMutex, and GetAvailableBlockRange, as the code is now; and a sync   *)
+(* loop that keeps sending MsgRequestNext while GetCurrentTip is called.   *)
 (*                                                                         *)
 (* Based on protocol/chainsync/client.go (gOuroboros 7cd17437):            *)
 (*   GetCurrentTip   takes an operation slot, starts a worker goroutine    *)
@@ -12,7 +13,12 @@
 (*                   for an intersect answer, sends MsgFindIntersect with  *)
 (*                   no points and waits for its own answer or DoneChan.   *)
 (*                   It does not check that the protocol is idle: the      *)
-(*                   engine holds the message until agency returns.        *)
+(*                   engine holds the message until agency returns. With   *)
+(*                   the fix (TipFromReplies), while a MsgRequestNext is   *)
+(*                   unanswered it returns the last reply's tip, checked   *)
+(*                   before the worker starts and again by the worker      *)
+(*                   holding busyMutex, so no MsgRequestNext can be sent   *)
+(*                   between the check and MsgFindIntersect.               *)
 (*   GetAvailableBlockRange  locks busyMutex, takes a slot, refuses if a   *)
 (*                   MsgRequestNext is unanswered, sends MsgFindIntersect, *)
 (*                   then MsgRequestNext until the first block after the   *)
@@ -39,12 +45,21 @@
 (*   - Does GetCurrentTip join its worker before returning?                *)
 (*   - Does Stop honour its ctx and the callback marker while it waits for *)
 (*     busyMutex, as its doc comment says?                                 *)
+(*   - Does GetCurrentTip return while a sync streams and no Stop comes,   *)
+(*     including once the sync's request waits at the server's tip?        *)
 (*   - Does Stop always return, including when a callback is the caller   *)
 (*     of GetCurrentTip, and when that callback is IntersectFoundFunc, so  *)
 (*     the worker waits for busyMutex held by the Jump the callback        *)
 (*     blocks?                                                             *)
 (*                                                                         *)
 (* Sources:                                                                *)
+(*   [G3] protocol/chainsync/client.go: syncLoop takes busyMutex after     *)
+(*        each ready signal, sends MsgRequestNext and releases it.         *)
+(*   [R5] ouroboros-network 5f356486ab3e, .../ChainSync/Client.hs 83-111   *)
+(*        and ClientPipelined.hs 96-124: every                             *)
+(*        MsgRollForward, MsgRollBackward, MsgIntersectFound and           *)
+(*        MsgIntersectNotFound hands the client the server's tip; there    *)
+(*        is no separate tip query.                                        *)
 (*   Specification, IntersectMBO/ouroboros-network 5f356486ab3e,           *)
 (*   docs/network-spec/miniprotocols.tex:                                  *)
 (*   [C1] 838-848, 893-908: MsgFindIntersect and MsgDone only from         *)
@@ -65,8 +80,12 @@
 (*   their only source.                                                    *)
 (*                                                                         *)
 (* Abstractions: one sync MsgRequestNext may be outstanding when the calls *)
-(* start (its loop sends nothing more); the server rolls back at most     *)
-(* once for GetAvailableBlockRange; the 5 s deadline is Deadline polls;    *)
+(* start; with SyncStreams its loop sends one more after each roll (a      *)
+(* window of one, as at the tip), and the server has Ahead blocks for it   *)
+(* before its request waits at the tip for ever (node-to-client, no new    *)
+(* block); tips are not values, only whether one was received; the         *)
+(* server rolls back at most once for GetAvailableBlockRange; the 5 s      *)
+(* deadline is Deadline polls;                                             *)
 (* MsgDone's 250 ms send window is one atomic step that succeeds only      *)
 (* when nothing is outstanding.                                            *)
 (*                                                                         *)
@@ -94,7 +113,16 @@ CONSTANTS
     WithJump,          \* TRUE: a goroutine calls Jump, and its
                        \* IntersectFoundFunc calls GetCurrentTip
     RangeWaitsRetired, \* TRUE in the code; FALSE is a mutation
-    TipJoinsWorker     \* TRUE in the code; FALSE is a mutation
+    TipJoinsWorker,    \* TRUE in the code; FALSE is a mutation
+    SyncStreams,       \* TRUE: the sync loop runs and sends a MsgRequestNext
+                       \* after each roll [G3]; AtTip is then not used
+    Ahead,             \* with SyncStreams: rolls the server has for the sync
+                       \* before its request waits at the tip for ever
+    TipFromReplies,    \* FALSE today. TRUE: while a MsgRequestNext is
+                       \* unanswered, GetCurrentTip returns the tip of the
+                       \* last reply instead of sending MsgFindIntersect
+    TipRechecks        \* with TipFromReplies: TRUE, the worker repeats that
+                       \* check holding busyMutex; FALSE is a mutation
 
 \* In English: "At most one GetCurrentTip, and at most one thing runs in the
 \* sync's roll callback."
@@ -103,6 +131,8 @@ ASSUME /\ ~(WithTip /\ CallbackCallsTip)
        /\ WithJump => ~WithTip /\ ~CallbackCallsTip /\ ~WithRange
        /\ StopFrom \in {"none", "outside", "callback"}
        /\ Deadline \in Nat
+       /\ Ahead \in Nat
+       /\ SyncStreams => SyncOutstanding /\ ~WithRange /\ ~WithJump
 
 \* In English: "The value of busyMutex or a want slot when it is empty."
 None == "none"
@@ -111,15 +141,16 @@ None == "none"
 Msg(k, f) == [k |-> k, f |-> f]
 
 VARIABLES
-    busy,          \* who holds busyMutex: None, "worker", "range", "jump"
-                   \* or "stop"
+    busy,          \* who holds busyMutex: None, "worker", "range", "jump",
+                   \* "loop" or "stop"
     life,          \* lifecycleState: "running", "stopping", "stopped"
     ops,           \* operation slots held (activeOperations)
     opc,           \* GetCurrentTip's next step
     wpc,           \* its worker's next step
     wAns,          \* TRUE once the worker's own answer was handed to it
-    wres,          \* what the worker reported: "none", "own" or "err"
-    tres,          \* what GetCurrentTip returned: "none", "own" or "err"
+    wres,          \* what the worker reported: "none", "own", "last" or "err"
+    tres,          \* what GetCurrentTip returned: "none", "own", "last"
+                   \* (the last reply's tip) or "err"
     gpc,           \* GetAvailableBlockRange's next step
     gIF,           \* the intersect answer it received: "none", "Found", "FoundAtTip"
     gTip,          \* who sent the tip it received: "none", "range", "sync", "worker"
@@ -149,13 +180,17 @@ VARIABLES
     recvExited,    \* TRUE once recvLoop returned (DoneChan closes)
     jpc,           \* Jump's next step
     jAns,          \* TRUE once Jump's own answer was handed to it
-    jres           \* what Jump returned: "none", "ok", "inprogress", "err"
+    jres,          \* what Jump returned: "none", "ok", "inprogress", "err"
+    lpc,           \* the sync loop: "off", "wait", "lock", "send", "exited"
+    syncReady,     \* ready signals the sync's rolls left for its loop
+    ahead,         \* rolls the server still has for the sync
+    haveTip        \* TRUE once the client has received a reply with a tip
 
 vars == <<busy, life, ops, opc, wpc, wAns, wres, tres, gpc, gIF, gTip, gFirst,
           gres, backed, wantIF, wantTip, wantFB, ready, outstanding, sendQ,
           inflight, toClient, hpc, hmsg, misrouted, orphan, spc, stopHeld,
           ticks, ticksAfterCtx, ctxDone, doneSent, closed, stopSig,
-          recvExited, jpc, jAns, jres>>
+          recvExited, jpc, jAns, jres, lpc, syncReady, ahead, haveTip>>
 
 \* In English: "Variables grouped by owner, so each action can say which
 \* groups it leaves alone."
@@ -167,6 +202,7 @@ stopVars  == <<spc, stopHeld, ticks, ticksAfterCtx, ctxDone, doneSent, closed,
                stopSig>>
 handVars  == <<hpc, hmsg, misrouted, orphan, recvExited>>
 jumpVars  == <<jpc, jAns, jres>>
+loopVars  == <<lpc, syncReady, ahead, haveTip>>
 
 \* In English: "Is this Stop called from the sync's roll callback?"
 CallbackStop == StopFrom = "callback"
@@ -769,6 +805,124 @@ CtxExpire ==
     /\ UNCHANGED jumpVars
 
 -----------------------------------------------------------------------------
+(* The streaming sync loop [G3], and the wrappers that add the loop's      *)
+(* variables to the actions above.                                         *)
+
+\* In English: "The fix applies: a MsgRequestNext is unanswered and a reply
+\* has brought a tip, so GetCurrentTip answers from it."
+TipFromLast == TipFromReplies /\ outstanding > 0 /\ haveTip
+
+\* In English: "GetCurrentTip: with the fix and a sync in progress, it
+\* returns the last reply's tip without a worker or a message; otherwise it
+\* begins as before."
+TipBeginL ==
+    \/ /\ opc = "begin" /\ life = "running" /\ TipFromLast
+       /\ tres' = "last"
+       /\ opc' = "returned"
+       /\ UNCHANGED <<busy, life, ops, wpc, wAns, wres>>
+       /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
+                      stopVars, handVars, jumpVars, loopVars>>
+    \/ /\ ~(life = "running" /\ TipFromLast)
+       /\ TipBegin
+       /\ UNCHANGED loopVars
+
+\* In English: "The worker, holding busyMutex: with the fix it checks again
+\* and answers from the last reply if a MsgRequestNext is now unanswered;
+\* otherwise it sends as before."
+WorkerSendL ==
+    \/ /\ wpc = "check" /\ TipRechecks
+       /\ life = "running" /\ ~stopSig /\ TipFromLast
+       /\ wres' = "last"
+       /\ busy' = None
+       /\ wpc' = "exited"
+       /\ UNCHANGED <<life, ops, opc, wAns, tres>>
+       /\ UNCHANGED <<rangeVars, wantVars, ready, outstanding, wireVars,
+                      stopVars, handVars, jumpVars, loopVars>>
+    \/ /\ ~(TipRechecks /\ life = "running" /\ ~stopSig /\ TipFromLast)
+       /\ WorkerSend
+       /\ UNCHANGED loopVars
+
+\* In English: "Every reply carries the server's tip [R5]."
+HandleTakeL ==
+    /\ HandleTake
+    /\ haveTip' = TRUE
+    /\ UNCHANGED <<lpc, syncReady, ahead>>
+
+\* In English: "Delivering a sync roll leaves a ready signal for a running
+\* loop before the request is retired."
+HandleDeliverL ==
+    /\ HandleDeliver
+    /\ syncReady' = IF SyncStreams /\ hmsg = Msg("Roll", "sync")
+                       THEN syncReady + 1 ELSE syncReady
+    /\ UNCHANGED <<lpc, ahead, haveTip>>
+
+\* In English: "The oldest request is the sync's."
+SyncHead == inflight /= <<>> /\ Head(inflight) = Msg("RN", "sync")
+
+\* In English: "With a streaming sync, the server answers the sync's
+\* request only while it has a block for it."
+ServerReplyL ==
+    /\ ~(SyncStreams /\ SyncHead /\ ahead = 0)
+    /\ ServerReply
+    /\ ahead' = IF SyncStreams /\ SyncHead THEN ahead - 1 ELSE ahead
+    /\ UNCHANGED <<lpc, syncReady, haveTip>>
+
+\* In English: "ServerReplyL for anything but the sync's request at the
+\* tip, which may never come (used only for fairness)."
+ServerReplyPromptL ==
+    /\ ~(~SyncStreams /\ AtTip /\ SyncHead)
+    /\ ServerReplyL
+
+\* In English: "The loop takes a ready signal, or returns once the
+\* protocol stops."
+LoopTake ==
+    /\ lpc = "wait"
+    /\ \/ /\ syncReady > 0
+          /\ syncReady' = syncReady - 1
+          /\ lpc' = "lock"
+       \/ /\ stopSig \/ DoneClosed
+          /\ lpc' = "exited"
+          /\ UNCHANGED syncReady
+    /\ UNCHANGED <<busy, life, ops, tipVars, rangeVars, wantVars, ready,
+                   outstanding, wireVars, stopVars, handVars, jumpVars,
+                   ahead, haveTip>>
+
+\* In English: "The loop blocks on busyMutex until it is free."
+LoopLock ==
+    /\ lpc = "lock" /\ busy = None
+    /\ busy' = "loop"
+    /\ lpc' = "send"
+    /\ UNCHANGED <<life, ops, tipVars, rangeVars, wantVars, ready,
+                   outstanding, wireVars, stopVars, handVars, jumpVars,
+                   syncReady, ahead, haveTip>>
+
+\* In English: "Holding busyMutex, the loop returns if the client is no
+\* longer running; otherwise it queues the next MsgRequestNext and
+\* releases busyMutex."
+LoopSend ==
+    /\ lpc = "send"
+    /\ busy' = None
+    /\ IF life /= "running" \/ stopSig
+          THEN /\ lpc' = "exited"
+               /\ UNCHANGED <<outstanding, sendQ>>
+          ELSE /\ outstanding' = outstanding + 1
+               /\ sendQ' = Append(sendQ, Msg("RN", "sync"))
+               /\ lpc' = "wait"
+    /\ UNCHANGED <<life, ops, tipVars, rangeVars, wantVars, ready, inflight,
+                   toClient, stopVars, handVars, jumpVars, syncReady, ahead,
+                   haveTip>>
+
+\* In English: "The initial state, with the loop running if the sync
+\* streams; a sync that is outstanding found its intersection first, whose
+\* answer carried a tip."
+InitL ==
+    /\ Init
+    /\ lpc = IF SyncStreams THEN "wait" ELSE "off"
+    /\ syncReady = 0
+    /\ ahead = Ahead
+    /\ haveTip = SyncOutstanding
+
+-----------------------------------------------------------------------------
 
 \* In English: "Every call has returned and the handler is idle."
 AllDone ==
@@ -776,27 +930,35 @@ AllDone ==
     /\ gpc \in {"off", "returned"} /\ spc \in {"off", "returned"}
     /\ jpc \in {"off", "returned"}
     /\ hpc = "idle"
+    /\ lpc \in {"off", "exited"} \/ (lpc = "wait" /\ syncReady = 0)
 
 \* In English: "Once everything has returned, the system may stay as it is."
 Finished == AllDone /\ UNCHANGED vars
 
 \* In English: "The steps of the calls and the handler: the ones that run
 \* on their own goroutines and must not stall for ever."
-TipSteps     == TipBegin \/ TipWait \/ TipJoin
-WorkerSteps  == WorkerLock \/ WorkerLockGiveUp \/ WorkerSend \/ WorkerWait
-RangeSteps   == RangeLock \/ RangeBegin \/ RangeFind \/ RangeAfterFind
-                \/ RangeLoop \/ RangeRetire
-HandlerSteps == HandleTake \/ HandleSyncRoll \/ HandleCallbackDone
-                \/ HandleDeliver \/ HandleRetire \/ HandleIntersect
-                \/ HandleJumpFound \/ HandleJumpAnswer \/ HandleExit
-JumpSteps    == JumpLock \/ JumpBegin \/ JumpFind \/ JumpWait
-StopSteps    == StopBegin \/ StopSpin \/ StopFinish \/ StopReturn
-                \/ StopComplete
+TipSteps     == TipBeginL \/ ((TipWait \/ TipJoin) /\ UNCHANGED loopVars)
+WorkerSteps  == WorkerSendL
+                \/ ((WorkerLock \/ WorkerLockGiveUp \/ WorkerWait)
+                    /\ UNCHANGED loopVars)
+RangeSteps   == (RangeLock \/ RangeBegin \/ RangeFind \/ RangeAfterFind
+                 \/ RangeLoop \/ RangeRetire) /\ UNCHANGED loopVars
+HandlerSteps == HandleTakeL \/ HandleDeliverL
+                \/ ((HandleSyncRoll \/ HandleCallbackDone \/ HandleRetire
+                     \/ HandleIntersect \/ HandleJumpFound
+                     \/ HandleJumpAnswer \/ HandleExit)
+                    /\ UNCHANGED loopVars)
+JumpSteps    == (JumpLock \/ JumpBegin \/ JumpFind \/ JumpWait)
+                /\ UNCHANGED loopVars
+StopSteps    == (StopBegin \/ StopSpin \/ StopFinish \/ StopReturn
+                 \/ StopComplete) /\ UNCHANGED loopVars
+LoopSteps    == LoopTake \/ LoopLock \/ LoopSend
+EngineSendL  == EngineSend /\ UNCHANGED loopVars
 
 Next ==
     \/ TipSteps \/ WorkerSteps \/ RangeSteps \/ HandlerSteps \/ StopSteps
-    \/ JumpSteps
-    \/ EngineSend \/ ServerReply \/ CtxExpire
+    \/ JumpSteps \/ LoopSteps
+    \/ EngineSendL \/ ServerReplyL \/ (CtxExpire /\ UNCHANGED loopVars)
     \/ Finished
 
 \* In English: "Each goroutine keeps running while it can; the server
@@ -804,9 +966,10 @@ Next ==
 Fairness ==
     /\ WF_vars(TipSteps) /\ WF_vars(WorkerSteps) /\ WF_vars(RangeSteps)
     /\ WF_vars(HandlerSteps) /\ WF_vars(StopSteps) /\ WF_vars(JumpSteps)
-    /\ WF_vars(EngineSend) /\ WF_vars(ServerReplyPrompt)
+    /\ WF_vars(LoopSteps)
+    /\ WF_vars(EngineSendL) /\ WF_vars(ServerReplyPromptL)
 
-Spec == Init /\ [][Next]_vars /\ Fairness
+Spec == InitL /\ [][Next]_vars /\ Fairness
 
 -----------------------------------------------------------------------------
 (* Invariants. *)
@@ -817,7 +980,14 @@ BusyHeldInCriticalSection ==
     /\ wpc \in {"check", "wait"} => busy = "worker"
     /\ gpc \in {"begin", "idle", "fiwait", "rnwait", "retire"} => busy = "range"
     /\ jpc \in {"begin", "find", "wait"} => busy = "jump"
+    /\ lpc = "send" => busy = "loop"
 
+\* In English: "GetCurrentTip answers from the last reply only while a
+\* MsgRequestNext is unanswered, and a reply has then always brought a
+\* tip: every MsgRequestNext follows an intersect answer."
+TipFromLastOnlyDuringSync ==
+    /\ outstanding > 0 => haveTip
+    /\ (opc = "returned" /\ tres = "last") => haveTip
 \* In English: "GetCurrentTip has joined its worker when it returns."
 WorkerJoinedBeforeReturn ==
     opc = "returned" /\ wpc /= "off" => wpc = "exited"

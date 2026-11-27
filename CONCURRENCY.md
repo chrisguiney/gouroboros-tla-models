@@ -730,7 +730,19 @@ reaches through `resolve`, the watcher at :606, or `Stop` through `releaseCurren
      the `Jump` the callback blocks, and `GetCurrentTip` joins the worker; the worker
      must take the lock with `lockBusy` on `StopChan`.
      `ChainSyncTipWorkerJumpCallbackTipBug.cfg`.
-5. **Server: promoted methods race the restart.**
+5. **`GetCurrentTip` during a sync waits for the chain to grow.**
+   - Kind: other (wait on a reply the server sends only when its chain grows).
+   - Lines: protocol/chainsync/client.go `GetCurrentTip`, `syncLoop` (gOuroboros 7cd17437).
+   - Interleaving: G1's sync loop releases `busyMutex` between rolls. G2
+     `GetCurrentTip`'s worker takes it and queues `MsgFindIntersect`, which the
+     engine holds until the sync's outstanding `MsgRequestNext` is answered. At
+     the server's tip that answer comes only with a new block, so G2 and the
+     loop, blocked on `busyMutex`, wait for it; node-to-client has no timeout.
+     `ChainSyncTipWorkerStreamBug.cfg`. Fixed on local branch
+     `fix/chainsync-tip-during-sync`: the last reply's tip is returned while a
+     request is outstanding, checked again under `busyMutex`
+     (`ChainSyncTipWorkerStreamNoRecheckBug.cfg` without the second check).
+6. **Server: promoted methods race the restart.**
    - Kind: other (data race).
    - Lines: protocol/chainsync/server.go:125 writes `s.Protocol` under `protocolMu`; promoted
      methods called from consumer goroutines read it without the lock. Same interleaving as
@@ -1914,7 +1926,7 @@ runs only after `DoneChan`, which cannot close while a handler is running.
 | B5 | blockfetch server | `protocol/blockfetch/server.go:78` | race | | The recvLoop restart swaps `s.Protocol` under `protocolMu`; a consumer's `s.DoneChan()` reads it without. | blockfetch hazard 6 |
 | B6 | chainsync | `protocol/chainsync/client.go:625`, `:654` | lock/block | | G1 holds `busyMutex` across a peer wait; G2 `GetCurrentTip` has its answer but waits for its worker, which is blocked on G1's lock. | chainsync hazard 1 |
 | B7 | chainsync | `protocol/chainsync/client.go:1950` | unjoined | | The handler returns; the drain goroutine stays in a `Pipeline.WaitForDrain` that ignores its context. | chainsync hazard 2 |
-| B8 | chainsync server | `protocol/chainsync/server.go:125` | race | | As B5. | chainsync hazard 3 |
+| B8 | chainsync server | `protocol/chainsync/server.go:125` | race | | As B5. | chainsync hazard 6 |
 | B9 | txsubmission server | `protocol/txsubmission/server.go:106` | race | | As B5. | txsubmission hazard 1 |
 | B10 | peersharing server | `protocol/peersharing/server.go:71` | race | | As B5. | peersharing hazard 1 |
 | B11 | localtxsubmission | `protocol/localtxsubmission/client.go:120-126` vs `:101` | Stop/peer | | G1 `SubmitTx` holds `busyMutex` waiting for the node's answer; G2 `Stop` blocks until it comes or the 30 s timeout fires (unbounded with `WithTimeout(0)`). | localtxsubmission hazard 1 |
@@ -2027,9 +2039,10 @@ hazard: disposition, evidence, branch or PR. Branches are local and unpushed.
   answer; the call holds the operation lock and waits for its own
   `MsgIntersectFound`/`NotFound`. Waiting behind the current holder is by
   design: `MsgFindIntersect` needs `StIdle`, which only the holder's reply
-  restores.
+  restores. Waiting behind a sync's own `MsgRequestNext` is not: at the tip
+  that reply needs a new block (chainsync hazard 5).
 - **B6/B7: modelled** in `ChainSyncTipWorker.tla` (rank 9); the model found
-  chainsync hazards 3 and 4 above.
+  chainsync hazards 3, 4 and 5 above.
 - **B7: bounded.** The drain goroutine (`chainsync/client.go:1950`) calls the
   concrete `*pipeline.BlockPipeline.WaitForDrain`, which returns on `ctx`
   (`pipeline/pipeline.go:1072`, `lockSubmit` `:465`, `Fence` `:893`). The
@@ -2327,7 +2340,7 @@ failure is a hang or silent wrong behaviour rather than an error.
 | 6 | `LocalTxStopLock` | localtxsubmission, localtxmonitor | K1, B11, B12, B13 | The known review finding; small model, quick confirmation of the fix. |
 | 7 | `LeiosFetchRangeDelivery` | leiosfetch | C8 | A permanent goroutine leak holding queued replies, on an ordinary caller cancel. |
 | 8 | `MuxReceiverStop` | muxer | (none found; checks the `sync.Cond` by machine) | The muxer carries all traffic; the hand check of the `Cond` and the stop/metrics callback order deserves a machine check. |
-| 9 | `ChainSyncTipWorker` | chainsync | B6, B7 | `GetCurrentTip` latency coupled to an unrelated query; `Stop`'s `TryLock` deadline. **Written** (`specs/chainsync/ChainSyncTipWorker.tla`): B6 by design, B7 bounded; found that `Stop`'s lock wait ignores ctx and the callback marker, and that `GetCurrentTip` from a callback hangs `Stop`. |
+| 9 | `ChainSyncTipWorker` | chainsync | B6, B7 | `GetCurrentTip` latency coupled to an unrelated query; `Stop`'s `TryLock` deadline. **Written** (`specs/chainsync/ChainSyncTipWorker.tla`): B6 by design, B7 bounded; found that `Stop`'s lock wait ignores ctx and the callback marker, that `GetCurrentTip` from a callback hangs `Stop`, and (streaming sync added) that `GetCurrentTip` during a sync at the tip waits for the next block. |
 | 10 | `TxSubmissionServerLocks` | txsubmission | hazard 2 (found by the model) | Written: `specs/txsubmission/TxSubmissionServerLocks.tla`. Found a stateMu -> protocolMu inversion in `handleInit`/`handleDone` that deadlocks with `Stop` and a caller; the one-slot handoff and restart-vs-`Stop` hold. |
 | 11 | `PerasClientOpMu` | perasvotes | C13, C14, C15 | Reentrancy deadlock and an uncontained panic, in an experimental protocol. |
 | 12 | `KeepAliveClientTimer` | keepalive | A11 | **Done**: `specs/keepalive/KeepAliveClientTimer.tla`. Bounded (one extra fire), but `AfterFunc` callbacks are easy to get wrong when fixing it. |
