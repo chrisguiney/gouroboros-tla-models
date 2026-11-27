@@ -125,6 +125,7 @@ A sixth kind, state gOuroboros leaves to its caller, is listed at the end as con
 | [N68](#n68) | network | DMQ message-submission window (outbound's limit on unacknowledged ids) | dmq-node: 132 (4 * 33) for its requester and both outbounds; not negotiated | `7cd17437`: `DefaultMaxUnacknowledgedMessageIDs` 100, so a Client refuses dmq-node's fourth pipelined 33-id request | CIP-0137 silent | does not conform | Fixed on local branch `fix/messagesubmission-reference-window` `d52e5757`, no PR (model `txsubmission` `TxSubmissionPipelinedDmqWindowBug.cfg`) |
 | [N69](#n69) | network | DMQ V1 time limit on a blocking id request | `waitForever`; the V1 outbound answers only once it has an id | `7cd17437`: the Server times it at 30 s and drops a quiet peer | CIP-0137 silent | does not conform | Fixed on local branch `fix/messagesubmission-v1-blocking-untimed` `d88a7e9d`, no PR (model `dmq` `DmqBlockingDeadlineServerV1Bug.cfg`) |
 | [N70](#n70) | network | Tx-submission reply naming an id still unacknowledged | Sent after a mempool re-add (new index); the inbound keeps both entries | `7cd17437`: `reconcileTxIds` refuses it; the Client fails its own connection | Silent | does not conform | Fixed on local branch `fix/txsubmission-reannounced-txid` `3dbb4caa`, no PR (model `txsubmission` `TxSubmissionReannounceBug.cfg`) |
+| [N71](#n71) | network | Chain-sync window depth at the server's tip | `pipelineDecisionMax`: pipeline only while the client's tip block number plus the requests outstanding is below the server's, so one request at the tip | `7cd17437`: the window is refilled to `PipelineLimit` (75) after every reply, so 75 requests wait at the tip and `Reintersect` drains for 75 blocks | Silent | does not conform | Fixed on local branch `fix/chainsync-window-at-tip` `f98beb33`, no PR (model `chainsync` `ChainSyncTipWindowFullBug.cfg`) |
 | [C1](#c1) | consensus | Which VRF tie-break applies across eras | Taken from the newer tip's era | Taken from the caller's `ProtocolMajor` (restricted from 9) | Silent (the Praos papers do not define a VRF tie-break) | conforms (implementation choice) | Recorded (model `consensus`); same answer within one era |
 | [C2](#c2) | consensus | Adopting a fork deeper than k by density | Never rolls back more than k: Genesis is implemented with the Limit on Eagerness (LoE) and the density disconnection governor (GDD) | `IsDeepFork` routes a fork deeper than k to `CompareWithDensity`, which can prefer it; no LoE or GDD | The Genesis density rule imposes no maximum rollback | conforms | Documented design. Follows the paper's rule; differs from the reference, which keeps Praos' k bound. A caller that adopts the result whole can roll back more than k |
 | [C3](#c3) | consensus | A tip with no VRF output | Cannot happen | Ranks below any tip with one | Silent | conforms | Unreachable from a valid header |
@@ -978,6 +979,17 @@ The CIP is Proposed, not final, and dmq-node does not follow it. The PR chooses 
 - **gOuroboros.** gOuroboros `7cd17437` `protocol/txsubmission/validation.go` `reconcileTxIds`, `client.go` `handleRequestTxIds`
 - **Verdict.** does not conform
 - **Status.** Fixed on local branch `fix/txsubmission-reannounced-txid` `3dbb4caa`, no PR; `TestClientReannouncesUnacknowledgedTxId` fails without it. An id twice within one reply is still refused (N22)
+
+### N71
+
+**Chain-sync window depth at the server's tip** (kind 1: fixed on a local branch)
+
+- **What differs.** Reference: the pipelined client decides per step, and collects instead of pipelining once its tip block number plus the requests outstanding reaches the server's tip block number, so a client at the tip has one request outstanding. gOuroboros: `syncLoop` refilled the window to `PipelineLimit` after every consumed reply. Each request beyond the tip is answered only by a new block, and `Reintersect` and `StopAfterDrain` wait for every outstanding request, so at the tip they waited `PipelineLimit` blocks.
+- **Spec.** spec silent (pipelining depth is the client's choice, `miniprotocols.tex` 2180-2208)
+- **Reference.** ouroboros-network `5f356486ab3e` `.../ChainSync/PipelineDecision.hs` 84-136 `pipelineDecisionMax`
+- **gOuroboros.** gOuroboros `7cd17437` `protocol/chainsync/client.go` `syncLoop`, `quiesceSync`
+- **Verdict.** does not conform
+- **Status.** Fixed on local branch `fix/chainsync-window-at-tip` `f98beb33`, no PR; `TestClientWindowAtServerTip` fails without it. After a `MsgRollBackward`, whose point has no block number, the fix keeps one request outstanding until the next roll forward; Byron deliveries keep the full window
 
 ## Consensus
 

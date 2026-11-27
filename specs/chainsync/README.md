@@ -588,6 +588,66 @@ Several concurrent `GetCurrentTip` callers, a sync loop that keeps sending,
 `Reintersect` and `StopAfterDrain` holding the lock (slices 1 and 2), and a
 second roll back during `GetAvailableBlockRange`.
 
+## Slice 7: the window at the server's tip (`ChainSyncTipWindow.tla`)
+
+### What the code does
+
+`syncLoop` refills the window to `PipelineLimit` (75 by default) after every
+consumed reply. A request the server receives at its tip is answered with
+`MsgAwaitReply` and then only when its chain grows by a block. `Reintersect`
+and `StopAfterDrain` must wait for every outstanding request before
+`MsgFindIntersect` or `MsgDone` [C1][R2].
+
+The reference client instead pipelines another request only while its own tip
+block number plus the requests outstanding is below the server's tip block
+number, and otherwise collects (`pipelineDecisionMax` [R4]).
+
+### The question
+
+Can a request be outstanding more than one block beyond the server's tip, so
+that `Reintersect`'s drain needs more than one new block? Does a window that
+follows [R4] still fill while behind, and still reach the tip?
+
+### The answer
+
+The model abstracts slice 1's goroutines and locks: a reply is consumed and
+the window topped up in one step; it keeps block numbers only.
+
+| Config | Window | Expected | Result |
+| --- | --- | --- | --- |
+| `ChainSyncTipWindow.cfg` | [R4] | pass | `WithinOneOfTip`, `DrainNeedsAtMostOneBlock`, `WindowBound`, `Accounting`, `ReachesTip` hold |
+| `ChainSyncTipWindowFullBug.cfg` | refilled to `Limit` | fail | `WithinOneOfTip` violated: three requests wait at the tip |
+| `ChainSyncTipWindowDrainBug.cfg` | refilled to `Limit` | fail | `DrainNeedsAtMostOneBlock` violated |
+| `ChainSyncTipWindowFillsBug.cfg` | [R4] | fail (probe) | `ProbeNeverFull` violated: the window does fill while behind |
+| `ChainSyncTipWindowDrainsBug.cfg` | [R4] | fail (probe) | `ProbeNeverDrained` violated: the drain does finish |
+
+gOuroboros `7cd17437` keeps the full window, so at the tip `Reintersect` waits
+`PipelineLimit` blocks. Measured on a pipe at 7cd17437 with a block every
+20 ms: limit 10 took 10 block intervals, limit 75 took 74. A node that
+re-intersects a peer it follows at the tip waits minutes (DRIFT N71).
+
+### The same in Go
+
+`TestClientWindowAtServerTip` (`protocol/chainsync/client_tip_window_test.go`)
+syncs to a server's tip and requires one request outstanding, then a
+`Reintersect` that completes after one new block; it fails at `7cd17437`.
+`TestClientWindowFillsWhileBehind` requires the full window while behind.
+The fix is on local branch `fix/chainsync-window-at-tip`.
+
+### Sources
+
+| Ref | Where | What it says |
+| --- | --- | --- |
+| R4 | [`ChainSync/PipelineDecision.hs` lines 84-136](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/protocols/lib/Ouroboros/Network/Protocol/ChainSync/PipelineDecision.hs#L84-L136) | `pipelineDecisionMax`: `Collect` when the client's tip block number plus `n` reaches the server's, or `n` reaches the limit. |
+
+C1, R2 and G1 are slice 1's.
+
+### Not in this slice
+
+Rollbacks (the server only extends its chain; the Go fix keeps one request
+outstanding after `MsgRollBackward`, whose point has no block number), the
+locks and signals of slice 1, Stop.
+
 ## Running it
 
 ```sh
