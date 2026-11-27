@@ -126,6 +126,11 @@ chainsync: ## Check the chain-sync client: window, Reintersect, stop and restart
 	$(CHAINSYNC) -config ChainSyncProtocolFindBug.cfg ChainSyncProtocol.tla || true
 	$(CHAINSYNC) -config ChainSyncProtocolDoneBug.cfg ChainSyncProtocol.tla || true
 	$(CHAINSYNC) -config ChainSyncProtocolAwaitBug.cfg ChainSyncProtocol.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWindow.cfg ChainSyncTipWindow.tla
+	$(CHAINSYNC) -config ChainSyncTipWindowFullBug.cfg ChainSyncTipWindow.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWindowDrainBug.cfg ChainSyncTipWindow.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWindowFillsBug.cfg ChainSyncTipWindow.tla || true
+	$(CHAINSYNC) -config ChainSyncTipWindowDrainsBug.cfg ChainSyncTipWindow.tla || true
 	$(CHAINSYNC) -config ChainSyncTipWorker.cfg ChainSyncTipWorker.tla
 	$(CHAINSYNC) -config ChainSyncTipWorkerRange.cfg ChainSyncTipWorker.tla
 	$(CHAINSYNC) -config ChainSyncTipWorkerFixed.cfg ChainSyncTipWorker.tla
