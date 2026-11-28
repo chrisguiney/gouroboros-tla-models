@@ -1675,6 +1675,8 @@ These pull requests fix races, leaks and deadlocks inside gOuroboros. The wire b
 | local `fix/leios-dmq-lifecycle` (no PR) | C18 across a restart; leios client `Sync` | `leios-peras` `LeiosNotifyServerRestartRetiredBug.cfg`, `LeiosVotesLifecycleRunLoopBug.cfg` | `LeiosNotifyServerRestart.cfg`, `LeiosVotesLifecycle.cfg` |
 | local `fix/dmq-verify-with-slot-counter` (no PR) | `VerifyMessageWithSlot` records the counter of a message it refuses | `dmq` `AuthOpCertCacheDirectBug.cfg` | `AuthOpCertCache.cfg` |
 | local `fix/protocol-send-drained-written` (no PR) | `WaitSendQueueDrained` answers drained before the bearer took the bytes | `engine` `EngineSendDrainedEarlyBug.cfg` | `EngineSendDrained.cfg` |
+| local `fix/leiosnotify-handler-stop` (no PR) | LeiosNotify handler blocks after a failing `NotificationFunc` | `leios-peras` `LeiosNotifyClientTeardownBug.cfg`, `LeiosNotifyClientTeardownLiveBug.cfg` | `LeiosNotifyClientTeardown.cfg`, `LeiosNotifyClientTeardownLive.cfg` |
+| local `fix/leiosvotes-handler-stop` (no PR) | LeiosVotes handler blocks after a failing `VoteFunc` | `leios-peras` `LeiosNotifyClientTeardownVotesBug.cfg` | `LeiosNotifyClientTeardown.cfg` |
 
 ## Library boundary: contracts, not drift
 

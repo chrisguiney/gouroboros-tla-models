@@ -2286,6 +2286,18 @@ unpushed; `fix/protocol-callback-context` is based on
   `fix/perasvotes-op-lock-and-await-panic` lands, minus the `go` in front of
   `RunLoop`. Model `EngineLifecycleCtxRunLoopUnjoinedBug.cfg`.
 
+### Added on `model/wakeups` (v0.222.0 `0c00b799`)
+
+| Kind | Site | Verdict | Config |
+| --- | --- | --- | --- |
+| Stop/peer | `protocol/leiosnotify/client.go` handlers vs `notificationLoop` error exit | defect: handler blocks for ever, `Stop` never joins | `leios-peras` `LeiosNotifyClientTeardownBug.cfg` |
+| Stop/peer | `protocol/leiosvotes/client.go` `handleVote` vs `voteLoop` error exit | defect, same shape | `LeiosNotifyClientTeardownVotesBug.cfg` |
+| lost wakeup | pipeline `completionChan`, `rawBytesFreed`; localmessagenotification `messageAdded`; leiosfetch `drainedCh` | hold; mutations fail | `wakeups` `BroadcastWakeup*.cfg` |
+| lost wakeup | blockfetch per-request `startChan`/`blockChan`/`doneChan` with `default:` | hold (capacity 1); unbuffered mutation fails | `blockfetch` `BlockFetchRequestChans*.cfg` |
+| lost wakeup | perasvotes reply slots | hold: a full slot is a protocol error, not a silent drop (`client.go` `messageHandler`); the reply cannot be stale since `SendMessageContext` fails only before enqueueing | none (code reading) |
+| send/close | result-channel closers in localtxsubmission, localstatequery, localmessagesubmission, leiosnotify | hold: each closes only after `DoneChan`, which follows the handler | `LeiosNotifyClientTeardownCloseOnStopBug.cfg` (mutation) |
+| unjoined | those closers; localtxmonitor server `awaitMempoolChange` watcher | bounded: each ends right after `DoneChan` or `cancel`, but `Stop` can return first | `LeiosNotifyClientTeardownCloserOutlivesStopBug.cfg` (probe) |
+
 ## 7. Model plan
 
 ### What the existing models already cover
