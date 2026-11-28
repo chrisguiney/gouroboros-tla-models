@@ -13,5 +13,7 @@ fi
 # TLC's heap defaults to a quarter of RAM and its fingerprint set lives off-heap;
 # two uncapped runs beside Go test binaries have OOM-killed the machine. The
 # command-line -Xmx wins over JAVA_TOOL_OPTIONS, so override with TLC_HEAP.
+# specs/common holds the modules shared across models (GoConcurrency, Engine);
+# putting it on the library path lets any spec EXTEND or INSTANCE them.
 exec "$JAVA" -XX:+UseParallelGC -Xmx"${TLC_HEAP:-6g}" \
-  -XX:MaxDirectMemorySize="${TLC_DIRECT_MEM:-2g}" -cp "$JAR" "$@"
+  -XX:MaxDirectMemorySize="${TLC_DIRECT_MEM:-2g}" -DTLA-Library="$ROOT/specs/common" -cp "$JAR" "$@"

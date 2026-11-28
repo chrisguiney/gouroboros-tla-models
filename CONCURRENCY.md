@@ -2298,6 +2298,20 @@ unpushed; `fix/protocol-callback-context` is based on
 | send/close | result-channel closers in localtxsubmission, localstatequery, localmessagesubmission, leiosnotify | hold: each closes only after `DoneChan`, which follows the handler | `LeiosNotifyClientTeardownCloseOnStopBug.cfg` (mutation) |
 | unjoined | those closers; localtxmonitor server `awaitMempoolChange` watcher | bounded: each ends right after `DoneChan` or `cancel`, but `Stop` can return first | `LeiosNotifyClientTeardownCloserOutlivesStopBug.cfg` (probe) |
 
+### Added on `model/conn-integration` (v0.222.0 `0c00b799`)
+
+Shared primitives in `specs/common/GoConcurrency.tla` (channels, signal
+channels, broadcast generations, Mutex, RWMutex, WaitGroup, Once, Timer) and
+the Engine interface `specs/common/Engine.tla`, which `EngineLifecycle` and
+each engine of `ConnectionEngines` refine.
+
+| Kind | Site | Verdict | Config |
+| --- | --- | --- | --- |
+| unjoined | `protocol/protocol.go:508-512` done watcher (row above: **UNJOINED**) | defect: `Stop(ctx)` and `Close` can return nil with `DoneChan` open and `IsDone` false, against `Stop`'s doc; fixed on `fix/protocol-done-watcher-joined` | `engine` `EngineLifecycleCtxDoneOpenBug.cfg`, `EngineLifecycleRefinementDoneAfterJoinBug.cfg`; `connection` `ConnectionEnginesDoneAfterCloseBug.cfg` |
+| unjoined | `protocol/keepalive/client.go:114-122` cleanup goroutine and the `time.AfterFunc` callback `sendKeepAlive` (:128-168) | defect: both outlive `Client.Stop` and `Close`; fixed on `fix/keepalive-goroutines-joined` (cleanup is a `RunLoop` loop that waits for a running callback, counted by a WaitGroup under `timerMutex`) | `connection` `ConnectionEnginesKaOutlivesCloseBug.cfg` |
+| send/close | engine `sendQueueChan`, muxer sender channel, `errorChan`, the muxer's error channel across a full teardown with several engines | hold: no send on a closed channel, no double close, at most one error | `connection` `ConnectionEnginesSmall.cfg`, `ConnectionEnginesFixed.cfg` |
+| liveness | `Close`, `setupConnection`, an application `SendMessage` with the peer not reading | hold | `ConnectionEnginesLive.cfg`, `ConnectionEnginesLiveFixed.cfg` |
+
 ## 7. Model plan
 
 ### What the existing models already cover

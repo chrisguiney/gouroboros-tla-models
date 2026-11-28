@@ -1677,6 +1677,8 @@ These pull requests fix races, leaks and deadlocks inside gOuroboros. The wire b
 | local `fix/protocol-send-drained-written` (no PR) | `WaitSendQueueDrained` answers drained before the bearer took the bytes | `engine` `EngineSendDrainedEarlyBug.cfg` | `EngineSendDrained.cfg` |
 | local `fix/leiosnotify-handler-stop` (no PR) | LeiosNotify handler blocks after a failing `NotificationFunc` | `leios-peras` `LeiosNotifyClientTeardownBug.cfg`, `LeiosNotifyClientTeardownLiveBug.cfg` | `LeiosNotifyClientTeardown.cfg`, `LeiosNotifyClientTeardownLive.cfg` |
 | local `fix/leiosvotes-handler-stop` (no PR) | LeiosVotes handler blocks after a failing `VoteFunc` | `leios-peras` `LeiosNotifyClientTeardownVotesBug.cfg` | `LeiosNotifyClientTeardown.cfg` |
+| local `fix/protocol-done-watcher-joined` (no PR) | protocol done watcher unjoined: `Stop`/`Close` return with `DoneChan` open | `engine` `EngineLifecycleCtxDoneOpenBug.cfg`, `EngineLifecycleRefinementDoneAfterJoinBug.cfg`; `connection` `ConnectionEnginesDoneAfterCloseBug.cfg` | `EngineLifecycleCtxWatcherJoined.cfg`, `EngineLifecycleRefinementWatcherJoined.cfg`, `ConnectionEnginesFixed.cfg` |
+| local `fix/keepalive-goroutines-joined` (no PR) | keep-alive cleanup goroutine and timer callback outlive `Stop`/`Close` (the reference waits on the mini-protocol's own thread, `KeepAlive.hs` `keepAliveClient`) | `connection` `ConnectionEnginesKaOutlivesCloseBug.cfg` | `ConnectionEnginesFixed.cfg` |
 
 ## Library boundary: contracts, not drift
 
