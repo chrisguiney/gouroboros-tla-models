@@ -408,6 +408,54 @@ and later calls saw "already running". `TestSyncOutcomeFollowsLifecycle`
 loops) are closed on `7cd17437`: the waits end on `DoneChan`, and `RunLoop`
 goroutines are in `Stop`'s join (`NoCallbackAfterStop` passes).
 
+## LeiosNotify and LeiosVotes client teardown (`LeiosNotifyClientTeardown.tla`)
+
+gOuroboros v0.222.0 `0c00b799`, `protocol/leiosnotify/client.go` and
+`protocol/leiosvotes/client.go`; the engine is `protocol/protocol.go`.
+
+### What the code does
+
+The receive loop's handler hands each notification (vote) to the client's
+own loop (`notificationLoop`, `voteLoop`, started through `RunLoop`) over an
+unbuffered channel, in a select whose only other case is `DoneChan`. The
+engine closes `DoneChan` only after `recvLoop` and `sendLoop` return, so that
+case can never fire while the handler runs. If the callback fails, the loop
+calls `SendError` and returns at once; with pipelining (LeiosNotify
+`PipelineLimit` > 1, or one LeiosVotes request for several votes) a later
+message may already be in the handler, and nothing will ever receive it.
+`recvLoop` never returns, `DoneChan` never closes, and `Stop` (and the
+connection's `Close`, which joins the same loops) waits for ever. The
+`ErrStopNotificationProcess` / `ErrStopVoteProcess` path drains the owed
+messages first and is safe.
+
+The reference clients run the callback on the mini-protocol's own thread and
+collect each pipelined reply there (typed-protocols pipelined peers), so a
+failing callback ends the whole thread and no reply is left half-handed.
+
+### The answers
+
+| Config | Expected | Distinct states |
+| --- | --- | --- |
+| `LeiosNotifyClientTeardownBug.cfg` | deadlock (v0.222.0) | 393 |
+| `LeiosNotifyClientTeardownVotesBug.cfg` | deadlock (LeiosVotes, same shape) | 393 |
+| `LeiosNotifyClientTeardownLiveBug.cfg` | `StopReturns` violated | 393 |
+| `LeiosNotifyClientTeardownToday.cfg` | pass: callbacks that succeed or stop cleanly | 360 |
+| `LeiosNotifyClientTeardown.cfg` | pass: the fix (handler also ends on `StopChan`) | 452 |
+| `LeiosNotifyClientTeardownLive.cfg` | pass: `StopReturns`, `AllGoroutinesExit` | 452 |
+| `LeiosNotifyClientTeardownCloseOnStopBug.cfg` | `NoSendOnClosed` violated (mutation: closer on `StopChan`) | 256 |
+| `LeiosNotifyClientTeardownCloserOutlivesStopBug.cfg` | `NothingOutlivesStop` violated (probe) | 354 |
+
+`NoSendOnClosed` holds today because the closer waits for `DoneChan`; the
+mutation shows that ordering is what keeps it. The probe records that `Stop`
+can return before the closer goroutine has run: it is unjoined but bounded
+(the liveness config shows it always ends), so it is reported, not fixed.
+
+Go: local branches `fix/leiosnotify-handler-stop`
+(`TestClientStopsAfterCallbackErrorWithPipelinedNotification`) and
+`fix/leiosvotes-handler-stop`
+(`TestClientStopsAfterVoteCallbackErrorWithVoteInFlight`); each fails on
+v0.222.0 with `Stop` hitting its 2 s deadline and passes with the fix.
+
 ## The three servers' promoted methods (C9, C12, C20)
 
 The leios-fetch, leios-votes and leios-notify servers embedded the

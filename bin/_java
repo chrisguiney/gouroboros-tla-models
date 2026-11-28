@@ -10,4 +10,8 @@ if [[ ! -f "$JAR" || -z "$JAVA" ]]; then
   echo "TLA+ is not installed yet. Run: make install" >&2
   exit 1
 fi
-exec "$JAVA" -XX:+UseParallelGC -cp "$JAR" "$@"
+# TLC's heap defaults to a quarter of RAM and its fingerprint set lives off-heap;
+# two uncapped runs beside Go test binaries have OOM-killed the machine. The
+# command-line -Xmx wins over JAVA_TOOL_OPTIONS, so override with TLC_HEAP.
+exec "$JAVA" -XX:+UseParallelGC -Xmx"${TLC_HEAP:-6g}" \
+  -XX:MaxDirectMemorySize="${TLC_DIRECT_MEM:-2g}" -cp "$JAR" "$@"

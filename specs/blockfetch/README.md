@@ -654,6 +654,24 @@ Sources: `miniprotocols.tex` 1235-1237 (`StBusy`, `StStreaming` 60 s);
 `BlockFetch/Codec.hs` 54 and `Protocol/Limits.hs` 116-117 (`longWait`).
 A caller's own option still overrides the default; that is not modelled.
 
+## Per-request result channels (`BlockFetchRequestChans.tla`)
+
+gOuroboros v0.222.0 `0c00b799`, `protocol/blockfetch/client.go`. Each
+request has `startChan`, `blockChan` and `doneChan` of capacity 1, and every
+send on them is non-blocking with `default:` (`handleStartBatch`,
+`handleBlock`, `resolve`). The model has the receive loop, the shutdown
+watcher and the `GetBlock` caller (`waitForBatchStart`, `awaitBlock`,
+`waitForBatchDone`, `completedBlockOrShutdown`), and asks whether a dropped
+send can lose the outcome (`Faithful`: the caller returns exactly the outcome
+reported before shutdown) or invent one (`NoFalseBlock`). With capacity 1 a
+drop only ever discards a redundant value; the unbuffered mutation loses
+outcomes. The reference hands results through STM, where nothing is dropped.
+
+| Config | Expected | Distinct states |
+| --- | --- | --- |
+| `BlockFetchRequestChans.cfg` | pass | 83 |
+| `BlockFetchRequestChansUnbufferedBug.cfg` | `Faithful` violated | 86 |
+
 ## Running it
 
 ```sh
