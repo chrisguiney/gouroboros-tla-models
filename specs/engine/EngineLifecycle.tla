@@ -95,13 +95,17 @@ CONSTANTS
                        \* suspends the role at once with the carry pending,
                        \* readLoop hands the carry over as it exits, and the
                        \* next instance's TakeCarriedIngress waits for it
-    Mutation           \* "none", or one deliberate break of the code:
+    Mutation,          \* "none", or one deliberate break of the code:
                        \* "watcherRecvOnly", "startIgnoresStopped",
                        \* "noOnces", "noWaitRead", "waitReadUnderLock",
                        \* "closeSkipsJoin", "noMarker" (a loop's Stop joins
                        \* too), "runLoopUnjoined" (Stop(ctx) leaves rl out),
                        \* "noCarryWait" (under "deferred", the next instance
                        \* starts without waiting for the carry)
+    WatcherJoined      \* TRUE: the done watcher is one of the goroutines
+                       \* Stop(ctx) and Close wait for (the fix on gOuroboros
+                       \* fix/protocol-done-watcher-joined); FALSE: it is
+                       \* not counted (gOuroboros 0c00b799, :508)
 
 ASSUME Role \in {"client", "server"}
 ASSUME RestartOn \in {"terminal", "anyMessage"}
@@ -169,12 +173,14 @@ Loops == {"rd", "rv", "sd", "st", "w"}
 
 \* In English: "The goroutines Stop(ctx) and Close(ctx) wait for: the four
 \* loops and the RunLoop goroutine (the runLoopUnjoined mutation leaves it
-\* out). The done watcher runs no callback and is not counted."
+\* out). The done watcher runs no callback; it is counted only under
+\* WatcherJoined."
 \* Literally: "Joined is defined as the set containing "rd", "rv", "sd" and
 \*   "st", together with (if Mutation equals "runLoopUnjoined" then the
 \*   empty set else the set containing "rl")."
 Joined == {"rd", "rv", "sd", "st"} \cup
-          (IF Mutation = "runLoopUnjoined" THEN {} ELSE {"rl"})
+          (IF Mutation = "runLoopUnjoined" THEN {} ELSE {"rl"}) \cup
+          (IF WatcherJoined THEN {"w"} ELSE {})
 
 \* In English: "Goroutine g is not running: it has exited or never started."
 \* Literally: "Over of g is defined as: pc of g is a member of the set
@@ -966,6 +972,13 @@ JoinedAfterClose ==
 \*   "st" and "rl", Over of g."
 JoinedAfterCtxStop ==
     pc["user"] = "returned" => \A g \in {"rd", "rv", "sd", "st", "rl"} : Over(g)
+
+\* In English: "Once the user's Stop(ctx) has returned without an error,
+\* DoneChan is closed: Stop's doc says it waits until every goroutine of
+\* the instance has returned, and the done watcher is one of them. A user
+\* that checks IsDone, or selects on DoneChan with a default, right after
+\* Stop must see the instance done."
+DoneClosedAfterCtxStop == pc["user"] = "returned" => doneChan
 
 \* In English: "Probe: the user's Stop never gives up on the join because
 \* its context ended."

@@ -420,6 +420,50 @@ Go: branch `fix/protocol-callback-context`, based on
 finds nothing. With `RunLoop` not counted, `Stop` returns nil while the
 callback runs and goleak lists the goroutine.
 
+### Slice 4, fourth pass: the done watcher and the Engine interface
+
+`Stop(ctx)`'s doc promises that it waits "until every goroutine of this
+instance has returned". At gOuroboros `0c00b799` the done watcher, which
+closes `DoneChan` after `recvLoop` and `sendLoop` exit
+(`protocol/protocol.go:508-512`), is started with a bare `go` and is not
+counted by `addLoop`. When the last counted loop exits, `loopsDoneChan`
+closes and the caller of `Stop` can run before the watcher does: `Stop`
+returns nil with `DoneChan` open and `IsDone` false. The constant
+`WatcherJoined` adds the watcher to `Joined`, and the invariant
+`DoneClosedAfterCtxStop` says a returned `Stop(ctx)` leaves `DoneChan`
+closed.
+
+| Config | Design | Result |
+| --- | --- | --- |
+| `EngineLifecycleCtxDoneOpenBug.cfg` | `0c00b799` | **fails** `DoneClosedAfterCtxStop` (20,530 states) |
+| `EngineLifecycleCtxWatcherJoined.cfg` | watcher joined (the fix) | passes every invariant of `EngineLifecycleCtx.cfg` and `DoneClosedAfterCtxStop` (108,196 states) |
+
+The same check, made once for every engine: `specs/common/Engine.tla` is the
+engine as the connection sees it, the objects a connection-level model may
+read or write (`started`, `stopChan`, the send queue, a running handler,
+`DoneChan`, the join, the muxer registration, the muxer's done) and one rule
+per object that every engine step obeys. Its constant `DoneAfterJoin` is the
+contract above: a completed join implies `DoneChan` is closed.
+`EngineLifecycleRefinement.tla` maps `EngineLifecycle`'s state onto those
+objects (a refinement mapping, docs/glossary.md) and checks `Abs!Spec` as a
+property, so every step of the detailed engine is a step the interface
+allows. The send queue is not in `EngineLifecycle`, so it maps to a channel
+that never changes; `ConnectionEngines.tla` checks that half
+([connection part 8](../connection/README.md)).
+
+| Config | Design | Result |
+| --- | --- | --- |
+| `EngineLifecycleRefinement.cfg` | `0c00b799`, `DoneAfterJoin = FALSE` | passes `RefinesEngine` (108,628 states) |
+| `EngineLifecycleRefinementDoneAfterJoinBug.cfg` | `0c00b799`, `DoneAfterJoin = TRUE` | **fails** `RefinesEngine` at the step where the last joined loop exits before the watcher (10,209 states) |
+| `EngineLifecycleRefinementWatcherJoined.cfg` | watcher joined, `DoneAfterJoin = TRUE` | passes `RefinesEngine` (108,196 states) |
+
+Go: branch `fix/protocol-done-watcher-joined` (`009a25c4`) starts the watcher
+through the same counted start as the four loops.
+`TestStopReturnsWithDoneChanClosed` (`protocol/stop_done_test.go`) runs 200
+start/stop rounds with `GOMAXPROCS(1)`, where the last loop to exit wakes the
+`Stop` caller ahead of the watcher; it fails at `0c00b799` (round 1: "Stop
+returned with DoneChan open") and passes with the fix (`-race -count=3`).
+
 ### Run it
 
 ```sh

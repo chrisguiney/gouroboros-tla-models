@@ -19,6 +19,7 @@ first.
 | 5 | `ConnectionTeardown.tla` | Can `Close` during `Dial` leak the muxer, or a late `waitGroup.Go` panic? |
 | 5 | `ConnectionCloseConcurrent.tla` | Can callbacks closing one connection at once wait for each other? |
 | 7 | `ConnectionLifecycle.tla` | One connection end to end: does each teardown source deliver at most its one error, and nothing arrive before the handshake? |
+| 8 | `ConnectionEngines.tla` | Several engines on one connection, goroutine by goroutine: does `Close` leave anything running, and does each engine keep the Engine interface's rules? |
 
 `make connection` runs all of them.
 
@@ -571,6 +572,79 @@ Go tests, each naming the invariant it binds to: `connection_lifecycle_test.go`
 ends checked; passes at `7cd17437` and after the fix) and
 `connection_error_once_internal_test.go` (fails at `7cd17437`, passes after).
 
+## Part 8: the engines on one connection (`ConnectionEngines.tla`)
+
+Part 7 folds every mini-protocol into one callback. This part gives each
+engine its own goroutines and channels, built from the shared primitives in
+`specs/common/GoConcurrency.tla` (channels with a capacity, blocking send and
+receive, close with its panics, mutex, WaitGroup, Once, timers), and checks
+every engine against the interface in `specs/common/Engine.tla` through a
+refinement mapping (`EnginesRefine`). The connection's own steps touch an
+engine only through the interface's objects.
+
+Goroutines, at gOuroboros `0c00b799`: setup, shutdown, both error
+forwarders, the user's `Close`, the muxer's read loop and cleanup, one muxer
+sender per engine, and for each engine (`ka`, the keep-alive client, and
+`cs`, a client with an application caller) its `recvLoop` with the handler,
+its `sendLoop` and its done watcher; the keep-alive client adds its cleanup
+goroutine and its timer's `AfterFunc` callback; an application goroutine
+calls `SendMessage` on `cs`. `sendQueueChan` has capacity `QCap` (80 in Go),
+the muxer sender channel `SegCap` (10), `recvQueueChan` 1. The peer can stop
+reading, so writes block until the muxer's cleanup closes the conn.
+
+| Invariant / property | Says |
+| --- | --- |
+| `NoPanic` | no send on a closed channel and no second close |
+| `AtMostOneError` | `ErrorChan` carries at most one error |
+| `LoopsJoinedAfterClose` | after `Close` returns, no engine loop, muxer goroutine or forwarder runs (what gOuroboros promises today) |
+| `DoneAfterClose` | after `Close` returns, every started engine's `DoneChan` is closed |
+| `NothingOutlivesClose` | after `Close` returns, nothing the connection started runs and no timer is armed to start something (`Close`'s doc) |
+| `EnginesRefine` | every engine refines `Engine.tla`, with `DoneAfterJoin` when the watcher is joined |
+| `CloseReturns`, `SetupReturns`, `AppReturns` | liveness under weak fairness of the code's steps |
+
+| Config | Design | Result |
+| --- | --- | --- |
+| `ConnectionEnginesSmall.cfg` | `0c00b799`; both engines, `Close`, the application sends one message | passes `NoPanic`, `AtMostOneError`, `LoopsJoinedAfterClose`, `EnginesRefine` (1,529,860 states) |
+| `ConnectionEnginesTeardown.cfg` | `0c00b799`; `cs` only, every teardown source, one peer message, writes may block | passes the same (552,770 states) |
+| `ConnectionEnginesDoneAfterCloseBug.cfg` | `0c00b799`; `cs`, `Close` | **fails** `DoneAfterClose`: the done watcher is not joined, so `Close` can return before it closes `DoneChan` (515 states) |
+| `ConnectionEnginesKaOutlivesCloseBug.cfg` | watcher joined; keep-alive as at `0c00b799` | **fails** `NothingOutlivesClose`: the keep-alive cleanup goroutine (`protocol/keepalive/client.go:114-122`) or a timer callback already running (`:128-168`) is still running when `Close` returns (16,988 states) |
+| `ConnectionEnginesFixed.cfg` | both fixes, at `Small`'s sizes | passes every invariant above and `EnginesRefine` with `DoneAfterJoin` (3,448,276 states) |
+| `ConnectionEnginesFixedTeardown.cfg` | both fixes, at `Teardown`'s sizes | passes the same (539,846 states) |
+| `ConnectionEnginesLive.cfg` | `0c00b799`; `cs`, three teardown sources, writes may block | passes `CloseReturns`, `SetupReturns`, `AppReturns` (552,728 states) |
+| `ConnectionEnginesLiveFixed.cfg` | both fixes; `ka` | passes `CloseReturns`, `SetupReturns`: the cleanup's wait for a running callback ends (172,371 states) |
+
+Run it: `make connection-engines` (runs the whole directory and shows these
+lines).
+
+Sizes: two engines with every source and a peer message did not finish
+within ten minutes (over 64 million states), so the two-engine configs
+use `Close` alone and the configs with every source use one engine. A
+first iteration config with both engines and every source took 713 million
+states and two hours; do not go back to it. Weak fairness is per action:
+on `Code` as a whole the keep-alive timer's steps starved setup.
+
+Three-way comparison:
+
+| Behaviour | Reference (Haskell `5f356486`) | Specification | gOuroboros `0c00b799` |
+| --- | --- | --- | --- |
+| What `stop` waits for | the mux runs each mini-protocol in a job pool and cancels and waits for every job before `run` returns ([Mux.hs:280-287](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/network-mux/src/Network/Mux.hs#L280-L287)); a mini-protocol's result is published when its thread ends | `mux.tex` describes the mux and its threads, not a join contract | the join counts the four loops and `RunLoop` goroutines, not the done watcher, so `DoneChan` can still be open when `Stop`/`Close` returns |
+| Keep-alive interval | waited for on the mini-protocol's own thread (`registerDelay` in [KeepAlive.hs:55-100](https://github.com/IntersectMBO/ouroboros-network/blob/5f356486ab3e6cc16ab15bddb04ed5068b9ed84c/ouroboros-network/lib/Ouroboros/Network/KeepAlive.hs#L55-L100)), so nothing of the client outlives its job | none | a `time.AfterFunc` callback on a goroutine of its own and a bare cleanup goroutine, neither joined |
+
+Go:
+
+- `fix/protocol-done-watcher-joined` (`009a25c4`): the done watcher is
+  started and counted with the loops; `TestStopReturnsWithDoneChanClosed`
+  (engine README, slice 4 fourth pass).
+- `fix/keepalive-goroutines-joined` (`1ee13d7e`): the keep-alive cleanup is
+  a `RunLoop` loop that, once the protocol stops or is done, stops the timer
+  and waits for a callback already running; a WaitGroup counts each armed
+  timer under `timerMutex` (released when `Stop` prevents it or when the
+  callback returns), and `startTimer` arms nothing once shutdown has begun,
+  so the `Wait` follows every `Add`. `TestStopWaitsForRunningTimerCallback`
+  (`protocol/keepalive/client_stop_join_test.go`) holds a timer callback in
+  `scheduleHook`: at `0c00b799` `Stop` returns nil while it runs; with the
+  fix `Stop` returns only after it is released.
+
 ## What model `connection` found
 
 - **Messages survive restarts.** Carrying the read buffer, admitting one
@@ -589,6 +663,9 @@ ends checked; passes at `7cd17437` and after the fix) and
   part 5 reaches: a forwarder started after shutdown's `Wait` sends a
   stopped protocol's queued error on the closed `errorChan`.
 - **A leaked muxer and conn** when `Close` runs during `Dial` (part 5).
+- **Goroutines that outlive `Close`** (part 8): the done watcher, so
+  `DoneChan` can be open when `Stop` or `Close` returns, and the keep-alive
+  client's cleanup and timer callback.
 - Negative results, also worth knowing: the connection budget cannot be hit
   by honest traffic (part 3), and `Close` always returns after shutdown
   (part 4).
@@ -610,5 +687,7 @@ affect the model.
 
 Byte sizes beyond "fits or not" and timeouts. The egress side of the muxer,
 its start gate and its receiver goroutines are in
-[the muxer](../muxer/README.md). Goroutines started with `RunLoop` and the keep-alive client's timer
-are not in the join.
+[the muxer](../muxer/README.md). Part 8 has the done watcher and the
+keep-alive client's goroutines; other mini-protocols' `RunLoop` goroutines
+are in the engine model (`EngineLifecycle.tla`, `rl`), not in a composed
+connection, and part 8 folds `readLoop` and `stateLoop` into other steps.
